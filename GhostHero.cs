@@ -115,6 +115,7 @@ namespace DeadCellsMultiplayerMod
         public void SetLabel(Entity entity, string? text)
         {
             if (entity == null) return;
+            if (text == null) text="Guest";
             _Assets _Assets = Assets.Class;
             dc.h2d.Text text_h2d = _Assets.makeText(text.AsHaxeString(), dc.ui.Text.Class.COLORS.get("ST".AsHaxeString()), true, entity.spr);
             text_h2d.y -= 80;
