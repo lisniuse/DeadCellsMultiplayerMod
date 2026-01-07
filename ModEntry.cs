@@ -1,37 +1,22 @@
-using Hashlink.Proxy.DynamicAccess;
-using System;
+
 using ModCore.Events.Interfaces.Game;
 using ModCore.Events.Interfaces.Game.Hero;
 using ModCore.Mods;
-using ModCore.Events.Interfaces.Game.Save;
-using Serilog;
 using System.Net;
-using System.Reflection;
-using System.Collections;
 using dc.en;
 using dc.pr;
-using dc.cine;
 using ModCore.Utitities;
-using ModCore.Events;
-
-using dc.en.inter;
 using dc.level;
 using dc.hl.types;
-using HaxeProxy.Runtime;
 using dc;
 using dc.shader;
 using dc.libs.heaps.slib;
 using dc.h3d.mat;
-using Serilog.Core;
 using dc.ui.hud;
-using dc.haxe.io;
 using dc.h2d;
 using Hashlink.Virtuals;
 using dc.tool;
-using dc.light;
-using System.ComponentModel;
-using dc.libs.heaps;
-using Math = System.Math;
+
 
 namespace DeadCellsMultiplayerMod
 {
@@ -121,15 +106,12 @@ namespace DeadCellsMultiplayerMod
             Logger.Debug("[NetMod] Hook_KingSkin.initGfx attached");
             Hook__LevelStruct.get += Hook__LevelStruct_get;
             Logger.Debug("[NetMod] Hook__LevelStruct.get attached");
-            Hook_HeroHead.customHeadFx += Hook_HeroHead_headfx;
-
+            MultiplayerUI uI = new MultiplayerUI(this);
+            uI.init();
         }
 
-        private void Hook_HeroHead_headfx(Hook_HeroHead.orig_customHeadFx orig, HeroHead self)
-        {
-            orig(self);
 
-        }
+
 
         private LevelStruct Hook__LevelStruct_get(Hook__LevelStruct.orig_get orig,
         User user,
@@ -147,6 +129,7 @@ namespace DeadCellsMultiplayerMod
 
         private void Hook_KingSkin_initgfx(Hook_KingSkin.orig_initGfx orig, KingSkin self)
         {
+
             if (remoteSkin == null) remoteSkin = "PrisonerDefault";
             orig(self);
             dc.String group = "idle".AsHaxeString();
@@ -158,9 +141,22 @@ namespace DeadCellsMultiplayerMod
             self.initColorMap(Cdb.Class.getSkinInfo(remoteSkin.AsHaxeString()));
 
             //glow
+
+            bool flg = false;
             ArrayObj glowData = CdbTypeConverter.Class.getGlowData(Cdb.Class.getSkinInfo(remoteSkin.AsHaxeString()));
-            GlowKey s2 = new GlowKey(glowData);
-            self.spr.addShader(s2);
+            if (glowData != null)
+            {
+                flg = true;
+            }
+            if (flg)
+            {
+                GlowKey s2 = new GlowKey(glowData);
+                if (s2 == null)
+                {
+                    return;
+                }
+                self.spr.addShader(s2);
+            }
 
 
             //Ambient light
@@ -170,10 +166,6 @@ namespace DeadCellsMultiplayerMod
             General = 0.9 + Math;
             var decayStart = 5.0 * General;
             self.createLight(1161471, radiusCase, decayStart, 0.35);
-
-            // Kinghead kinghead = new Kinghead(me);
-            // kinghead.kinghd(self);
-
         }
 
 
@@ -207,7 +199,7 @@ namespace DeadCellsMultiplayerMod
             orig(self, oldLevel);
             // Log.Debug($"Hero level room {me._level.map.getRoomAt(me.cy, me._level.uniqId)}");
             Logger.Debug($"game.user.meta: {game.data.blueprints}");
-            if (_ghost == null) _ghost = new GhostHero(game, me, Logger);
+            if (_ghost == null) _ghost = new GhostHero(game, me, Logger, this);
             _ghost.SetLabel(me, GameMenu.Username);
 
 
@@ -216,7 +208,7 @@ namespace DeadCellsMultiplayerMod
                 _companionKing = _ghost.CreateGhostKing(me._level);
                 if (levelId != remoteLevelId)
                 {
-                    _companionKing.destroy();
+                    // _companionKing.destroy();
                     // _companionKing.dispose();
                     // _companionKing.disposeGfx();
                 }
@@ -283,7 +275,7 @@ namespace DeadCellsMultiplayerMod
             if (string.IsNullOrWhiteSpace(remoteLevelId)) return;
             if (!string.Equals(levelId, remoteLevelId, StringComparison.Ordinal)) return;
             if (_companionKing == null || _ghost == null) return;
-            _companionKing = _ghost.reInitKing(hero._level);
+            // _companionKing = _ghost.reInitKing(hero._level);
             kingInitialized = true;
         }
 

@@ -1,15 +1,8 @@
 ﻿using dc.en;
 using dc.pr;
-using HaxeProxy.Runtime;
 using ModCore.Utitities;
 using Serilog;
-using dc.h3d.mat;
-using dc.libs.heaps.slib;
 using dc;
-using Hashlink.Virtuals;
-using dc.hl.types;
-using dc.en.inter.door;
-
 
 
 namespace DeadCellsMultiplayerMod
@@ -26,16 +19,16 @@ namespace DeadCellsMultiplayerMod
 
         private const double RestartFrameIndex = 0;
 
-        public KingSkin king;
+        public KingSkin king = null!;
+        private ModEntry modEntry = null!;
 
 
-
-
-        public GhostHero(dc.pr.Game game, Hero me, ILogger logger)
+        public GhostHero(dc.pr.Game game, Hero me, ILogger logger, ModEntry entry)
         {
             _game = game;
             _me = me;
             _log = logger;
+            modEntry = entry;
         }
 
 
@@ -44,28 +37,23 @@ namespace DeadCellsMultiplayerMod
 
             king = new KingSkin(level, (int)_me.spr.x, (int)_me.spr.y);
             king.init();
+            king.initGfx();
             king.set_level(level);
             king.set_team(_me._team);
             king.setPosCase(_me.cx, _me.cy, _me.xr, _me.yr);
             king.visible = true;
-            king.initGfx();
             var miniMap = ModEntry.miniMap;
             if (miniMap != null && _me._level.map == king._level.map)
             {
                 miniMap.track(king, 14888237, "minimapHero".AsHaxeString(), null, true, null, null, null);
             }
             SetLabel(king, GameMenu.RemoteUsername);
-
             return king;
         }
 
 
         public KingSkin reInitKing(Level level)
         {
-            if (king == null)
-            {
-                king.init();
-            }
             king.set_level(level);
             king.initGfx();
             king.visible = true;
@@ -77,7 +65,7 @@ namespace DeadCellsMultiplayerMod
             SetLabel(king, GameMenu.RemoteUsername);
             return king;
         }
-        
+
         public void TeleportByPixels(double x, double y)
         {
             king?.setPosPixel(x, y - 0.2d);
@@ -125,5 +113,6 @@ namespace DeadCellsMultiplayerMod
             text_h2d.scaleY = 0.6d;
             text_h2d.textColor = 0;
         }
+
     }
 }

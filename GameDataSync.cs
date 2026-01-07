@@ -1,13 +1,9 @@
-using System;
+
 using dc;
 using dc.hl.types;
 using Hashlink.Virtuals;
 using dc.level;
 using HaxeProxy.Runtime;
-using dc.tool;
-using dc.en;
-using dc.haxe;
-using ModCore.Utitities;
 
 
 namespace DeadCellsMultiplayerMod
@@ -26,12 +22,12 @@ namespace DeadCellsMultiplayerMod
 
 
 
-        public static void user_hook_new_game(Hook_User.orig_newGame orig, 
-        User self, 
-        int lvl, 
-        virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ isTwitch, 
-        bool isCustom, 
-        bool mode, 
+        public static void user_hook_new_game(Hook_User.orig_newGame orig,
+        User self,
+        int lvl,
+        virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ isTwitch,
+        bool isCustom,
+        bool mode,
         LaunchMode gdata)
         {
             isCustom = false;
@@ -43,15 +39,15 @@ namespace DeadCellsMultiplayerMod
                 Seed = GameMenu.ForceGenerateServerSeed("NewGame_hook");
                 try
                 {
-                var bossRune = self.mainGame.serverStats.bossRune;
-                var endKind = self.mainGame.serverStats.endKind;
-                var forge = self.mainGame.serverStats.forge;
-                var hasMods = self.mainGame.serverStats.hasMods;
-                var history = self.mainGame.serverStats.history;
-                var Custom = self.mainGame.serverStats.isCustom;
-                var meta = self.mainGame.serverStats.meta;
+                    var bossRune = self.mainGame.serverStats.bossRune;
+                    var endKind = self.mainGame.serverStats.endKind;
+                    var forge = self.mainGame.serverStats.forge;
+                    var hasMods = self.mainGame.serverStats.hasMods;
+                    var history = self.mainGame.serverStats.history;
+                    var Custom = self.mainGame.serverStats.isCustom;
+                    var meta = self.mainGame.serverStats.meta;
                 }
-                catch{}
+                catch { }
                 net.SendSeed(Seed);
             }
             else if (net != null)
@@ -62,16 +58,16 @@ namespace DeadCellsMultiplayerMod
                 }
             }
             lvl = Seed;
-
+            self.pickDeathItem();
             SendHeroSkin(self, net);
             orig(self, lvl, isTwitch, isCustom, mode, gdata);
         }
 
-        public static ArrayObj hook_generate(Hook_LevelGen.orig_generate orig, 
-        LevelGen self, 
-        User seed, 
-        int ldat, 
-        virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ resetCount, 
+        public static ArrayObj hook_generate(Hook_LevelGen.orig_generate orig,
+        LevelGen self,
+        User seed,
+        int ldat,
+        virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ resetCount,
         Ref<bool> resetCount2)
         {
             ldat = Seed;
