@@ -45,7 +45,6 @@ public sealed class NetNode : IDisposable
         (_role == NetRole.Client && _client   != null);
     public bool IsHost => _role == NetRole.Host;
 
-    // Новое свойство для реального адреса хоста
     public IPEndPoint? ListenerEndpoint =>
         _listener != null ? (IPEndPoint?)_listener.LocalEndpoint : null;
 
@@ -84,7 +83,6 @@ public sealed class NetNode : IDisposable
 
             var lep = (IPEndPoint)_listener.LocalEndpoint;
 
-            // ВАЖНО: логируем реальный адрес слушателя
             _log.Information("[NetNode] Host started OK. Bound to {0}:{1}", lep.Address, lep.Port);
 
             _acceptTask = Task.Run(() => AcceptLoop(_cts.Token));

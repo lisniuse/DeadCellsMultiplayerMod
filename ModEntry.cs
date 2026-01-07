@@ -45,8 +45,6 @@ namespace DeadCellsMultiplayerMod
         private int? _lastAnimQueueSent;
         private bool? _lastAnimGSent;
         private double _animResendElapsed;
-        private const double AnimResendInterval = 0.4;
-        private double _currentAnimDuration = AnimResendInterval;
         private double? _lastAnimPlayRatio;
         private const double AnimLoopThreshold = 0.995;
         private const double RatioDropThreshold = 0.5;
@@ -140,7 +138,7 @@ namespace DeadCellsMultiplayerMod
             self.initSprite(heroLib, group, 0.5, 0.5, dp_ROOM_MAIN_HERO, true, null, normalMapFromGroup);
             self.initColorMap(Cdb.Class.getSkinInfo(remoteSkin.AsHaxeString()));
 
-            //glow
+            // glow
 
             bool flg = false;
             ArrayObj glowData = CdbTypeConverter.Class.getGlowData(Cdb.Class.getSkinInfo(remoteSkin.AsHaxeString()));
@@ -159,8 +157,8 @@ namespace DeadCellsMultiplayerMod
             }
 
 
-            //Ambient light
-            var General = 2.0;
+            // Ambient light
+            var General = 1.0;
             var radiusCase = 1.2 * General;
             var Math = dc.Math.Class.random() * 0.20000000000000007;
             General = 0.9 + Math;
@@ -254,6 +252,8 @@ namespace DeadCellsMultiplayerMod
         void IOnHeroUpdate.OnHeroUpdate(double dt)
         {
             if (_companionKing == null || me == null || _ghost == null) return;
+            // Kinghead kinghead = new Kinghead(me);
+            // kinghead.kinghd(_companionKing);
             SendHeroCoords();
             ReceiveGhostCoords();
             _ghost?.HandleRemoteAnim(_net);
@@ -363,7 +363,6 @@ namespace DeadCellsMultiplayerMod
             _lastAnimGSent = g;
             _animResendElapsed = 0;
             _lastAnimPlayRatio = null;
-            _currentAnimDuration = CalculateAnimDurationSeconds(animManager);
         }
 
         private void ResendCurrentAnim(double dt)
@@ -376,16 +375,13 @@ namespace DeadCellsMultiplayerMod
 
             _animResendElapsed += dt;
 
-            var duration = _currentAnimDuration > 0 ? _currentAnimDuration : AnimResendInterval;
-            var timerElapsed = _animResendElapsed >= duration;
 
             bool looped = DidLoop(animManager);
 
-            if (!looped && !timerElapsed) return;
+            if (!looped) return;
 
             net.SendAnim(_lastAnimSent, _lastAnimQueueSent, _lastAnimGSent);
             _animResendElapsed = 0;
-            _currentAnimDuration = CalculateAnimDurationSeconds(animManager);
         }
 
         private bool DidLoop(AnimManager animManager)
@@ -417,32 +413,6 @@ namespace DeadCellsMultiplayerMod
             return looped;
         }
 
-        private double CalculateAnimDurationSeconds(AnimManager? animManager)
-        {
-            if (animManager == null)
-                return AnimResendInterval;
-
-            try
-            {
-                var durationSeconds = animManager.getDurationS(DefaultAnimFps);
-                if (durationSeconds > 0)
-                    return ClampDuration(durationSeconds);
-            }
-            catch { }
-
-            try
-            {
-                var frames = animManager.getDurationF();
-                if (frames > 0)
-                    return ClampDuration(frames / DefaultAnimFps);
-            }
-            catch { }
-
-            return AnimResendInterval;
-        }
-
-        private static double ClampDuration(double value) =>
-            System.Math.Max(MinAnimDuration, System.Math.Min(MaxAnimDuration, value));
 
         private bool TryGetPlayRatio(AnimManager animManager, out double ratio)
         {
