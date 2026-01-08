@@ -17,7 +17,7 @@ namespace DeadCellsMultiplayerMod;
 
 public class MultiplayerUI
 {
-    public ModEntry mod { get; set; }
+    private ModEntry mod { get; set; }
     public dc.ui.hud.LifeBar kingLife { get; set; } = null!;
     public dc.h2d.Flow toplib { get; set; } = null!;
     private static NetNode? _net;
@@ -26,10 +26,10 @@ public class MultiplayerUI
     private int lastMaxLife = 0;
 
     public FlowBox box { get; set; } = null!;
+    public Hero hero = ModCore.Modules.Game.Instance.HeroInstance!;
     public MultiplayerUI(ModEntry Entry)
     {
         mod = Entry;
-
     }
 
     public void init()
@@ -54,15 +54,15 @@ public class MultiplayerUI
         if (king == null) return;
         _net = ModEntry._net;
         var net = _net;
-        if(net == null) return;
-        
-        if (lastLife != self.life || lastMaxLife != self.maxLife) 
+        if (net == null) return;
+
+        if (lastLife != self.life || lastMaxLife != self.maxLife)
         {
             net.SendHP(self.life, self.maxLife, self.life, self.bonusLife, self.radius);
             lastLife = self.life;
             lastMaxLife = self.maxLife;
         }
-        if(!net.TryGetRemoteHP(out int life, out int maxLife, out int lif, out int bonusLife, out int recover))
+        if (!net.TryGetRemoteHP(out int life, out int maxLife, out int lif, out int bonusLife, out int recover))
             return;
         kingLifeUpdate(king, life, maxLife, lif, bonusLife, recover);
     }
@@ -85,6 +85,7 @@ public class MultiplayerUI
 
         dc.String remoteUsername = GameMenu.RemoteUsername.AsHaxeString();
         dc.h2d.Text text_h2d = Assets.Class.makeText(remoteUsername, dc.ui.Text.Class.COLORS.get("ST".AsHaxeString()), false, this.box);
+        text_h2d.textColor = 16766720;
         self.topRightFlowT.addChild(this.box);
 
         this.toplib.set_verticalAlign(new FlowAlign.Top());
@@ -99,8 +100,8 @@ public class MultiplayerUI
         int topMargin = (int)(5 * pixelScale);
 
 
-        int w = (int)(400 * pixelScale);
-        int h = (int)(15 * pixelScale);
+        int w = (int)(300 * pixelScale);
+        int h = (int)(10 * pixelScale);
 
         int targetX = getw - w - rightMargin;
         int targetY = topMargin;
