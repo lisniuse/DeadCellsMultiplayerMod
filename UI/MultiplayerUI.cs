@@ -38,7 +38,6 @@ public class MultiplayerUI
     public MultiplayerUI(ModEntry Entry)
     {
         mod = Entry;
-        init();
     }
 
     public void init()
