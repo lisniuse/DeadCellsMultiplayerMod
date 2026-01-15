@@ -15,6 +15,7 @@ using Serilog;
 using ModCore.Utitities;
 using Microsoft.Win32;
 
+
 namespace DeadCellsMultiplayerMod
 {
     internal static partial class GameMenu
