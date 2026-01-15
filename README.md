@@ -1,4 +1,5 @@
-# DeadCellsMultiplayerMod
+
+<h1>Dead Cells Multiplayer Mod</h1>
 
 **DeadCellsMultiplayerMod** is a mod for **Dead Cells**, created using **Dead Cells Core Modding API (DCCM)**.  
 It adds **multiplayer support** via a local or virtual network: one player hosts a server, another connects — and you can explore levels together.
