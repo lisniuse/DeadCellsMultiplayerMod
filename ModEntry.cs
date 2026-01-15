@@ -23,6 +23,7 @@ using HaxeProxy.Runtime;
 using dc.en.mob;
 using dc.haxe;
 using dc.cine;
+using CineHookInitialize;
 
 
 namespace DeadCellsMultiplayerMod
@@ -137,6 +138,7 @@ namespace DeadCellsMultiplayerMod
             this.UI = new MultiplayerUI(this, 0);
             
             this.UI.init();
+            CineHooks cine = new CineHooks();
             MobsSynchronization.MobsSynchronization mobs = new MobsSynchronization.MobsSynchronization(this);
             GameMenu.Initialize(Logger);
             Hook_Game.init += Hook_gameinit;
