@@ -14,6 +14,7 @@ using Hashlink.Virtuals;
 using Serilog;
 using ModCore.Utitities;
 using Microsoft.Win32;
+using Serilog.Core;
 
 
 namespace DeadCellsMultiplayerMod
@@ -204,9 +205,8 @@ namespace DeadCellsMultiplayerMod
                 }
 
                 _log?.Information("[NetMod] Client restarting run for new seed {Seed}", seed);
-                // ForceExitToMainMenu();
-                // game.disposeImmediately();
-                
+                game.destroy();
+                game.disposeImmediately();
                 game.user.newGame(seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
             });
         }
@@ -728,7 +728,7 @@ namespace DeadCellsMultiplayerMod
             {
                 GetTitleScreen()?.mainMenu();
             }
-            catch { }
+            catch { _log.Debug("Cant mainMenu"); }
         }
 
         private static void ShowHostStatusMenu(TitleScreen screen)
