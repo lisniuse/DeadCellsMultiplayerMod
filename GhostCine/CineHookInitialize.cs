@@ -23,11 +23,11 @@ namespace CineHookInitialize
         public static InventItem? item;
         public void DeadBasehooks()
         {
-            Hook__HeroDeath.__constructor__ += Hook__HeroDeath_init;
-            Hook__HeroDeathBase.__constructor__ += Hook_HeroDeathBase_base;
-            Hook__HeroDeathRespawn.__constructor__ += Hook__HeroDeathRespawn__constructor__;
-            Hook__HeroDeathContinue.__constructor__ += Hook__HeroDeathContinue__constructor__;
-            Hook_Hero.tryToApplyYoloPerk += Hook_Hero_tryToApplyYoloPerk;
+            // Hook__HeroDeath.__constructor__ += Hook__HeroDeath_init;
+            // Hook__HeroDeathBase.__constructor__ += Hook_HeroDeathBase_base;
+            // Hook__HeroDeathRespawn.__constructor__ += Hook__HeroDeathRespawn__constructor__;
+            // Hook__HeroDeathContinue.__constructor__ += Hook__HeroDeathContinue__constructor__;
+            // Hook_Hero.tryToApplyYoloPerk += Hook_Hero_tryToApplyYoloPerk;
         }
 
         private bool Hook_Hero_tryToApplyYoloPerk(Hook_Hero.orig_tryToApplyYoloPerk orig, Hero self)

@@ -157,9 +157,22 @@ namespace DeadCellsMultiplayerMod
             Hook__LevelStruct.get += Hook__LevelStruct_get;
             Hook_Boot.update += hook_boot_update;
             Hook_Game.pause += Hook_Game_pause;
+            Hook_Hero.onHeroDie += Hook_Hero_onHeroDie;
 
 
         }
+
+
+        private void Hook_Hero_onHeroDie(Hook_Hero.orig_onHeroDie orig, Hero self)
+        {
+            Logger.Error("Hero died!");
+            if(_netRole == NetRole.Client)
+            {
+                // sending that client died
+            }
+            orig(self);
+        }
+
 
         private void Hook_Game_pause(Hook_Game.orig_pause orig, dc.pr.Game self)
         {
