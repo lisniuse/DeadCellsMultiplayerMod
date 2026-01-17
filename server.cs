@@ -45,6 +45,7 @@ public sealed class NetNode : IDisposable
         public int Id { get; }
         public double X;
         public double Y;
+        public int Dir = 1;
         public bool HasRemote;
         public string? LevelId;
         public string? Anim;
@@ -70,17 +71,19 @@ public sealed class NetNode : IDisposable
         public readonly int Id;
         public readonly double X;
         public readonly double Y;
+        public readonly int Dir;
         public readonly string? Anim;
         public readonly int? AnimQueue;
         public readonly bool? AnimG;
         public readonly bool HasAnim;
         public readonly string? Username;
 
-        public RemoteSnapshot(int id, double x, double y, string? anim, int? animQueue, bool? animG, bool hasAnim, string? username)
+        public RemoteSnapshot(int id, double x, double y, int dir, string? anim, int? animQueue, bool? animG, bool hasAnim, string? username)
         {
             Id = id;
             X = x;
             Y = y;
+            Dir = dir;
             Anim = anim;
             AnimQueue = animQueue;
             AnimG = animG;
@@ -643,22 +646,34 @@ public sealed class NetNode : IDisposable
             return false;
         }
 
-        if (TryParsePositionLine(line, senderId, out var remoteId, out var cx, out var cy))
+        if (TryParsePositionLine(line, senderId, out var remoteId, out var cx, out var cy, out var dir, out var hasDir))
         {
             if (forceSenderId && senderId.HasValue)
                 remoteId = senderId.Value;
+            int forwardDir = dir;
             lock (_sync)
             {
                 var state = GetOrCreateRemoteLocked(remoteId);
+                var prevX = state.X;
+                var hadRemote = state.HasRemote;
                 state.X = cx;
                 state.Y = cy;
+                if (hasDir)
+                {
+                    state.Dir = dir;
+                }
+                else if (hadRemote && cx != prevX)
+                {
+                    state.Dir = cx < prevX ? -1 : 1;
+                }
                 state.HasRemote = true;
                 _hasRemote = true;
                 if (_primaryRemoteId == 0)
                     _primaryRemoteId = remoteId;
+                forwardDir = state.Dir;
             }
             if (_role == NetRole.Host && senderId.HasValue)
-                forwardLine = BuildPosLine(remoteId, cx, cy);
+                forwardLine = BuildPosLine(remoteId, cx, cy, forwardDir);
         }
 
         return true;
@@ -828,13 +843,29 @@ public sealed class NetNode : IDisposable
             recover = parsedRecover;
     }
 
-    private static bool TryParsePositionLine(string line, int? senderId, out int remoteId, out double rx, out double ry)
+    private static bool TryParsePositionLine(string line, int? senderId, out int remoteId, out double rx, out double ry, out int dir, out bool hasDir)
     {
         remoteId = 0;
         rx = 0;
         ry = 0;
+        dir = 0;
+        hasDir = false;
 
         var parts = line.Split('|');
+        if (parts.Length >= 4 &&
+            int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedRemoteIdWithDir) &&
+            double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var cxWithDir) &&
+            double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var cyWithDir) &&
+            int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDir))
+        {
+            remoteId = parsedRemoteIdWithDir;
+            rx = cxWithDir;
+            ry = cyWithDir;
+            dir = parsedDir < 0 ? -1 : parsedDir > 0 ? 1 : 0;
+            hasDir = true;
+            return true;
+        }
+
         if (parts.Length >= 3 &&
             int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedRemoteId) &&
             double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var cx) &&
@@ -877,11 +908,11 @@ public sealed class NetNode : IDisposable
         return $"HP|{id}|{life}|{maxLife}|{lif}|{bonusLife}|{recover}\n";
     }
 
-    private static string BuildPosLine(int id, double cx, double cy)
+    private static string BuildPosLine(int id, double cx, double cy, int dir)
     {
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{id}|{cx}|{cy}\n");
+            $"{id}|{cx}|{cy}|{dir}\n");
     }
 
     private void CloseClientConnection()
@@ -970,11 +1001,11 @@ public sealed class NetNode : IDisposable
         }
     }
 
-    public void TickSend(double cx, double cy)
+    public void TickSend(double cx, double cy, int dir)
     {
         if (!HasAnyConnection()) return;
         if (ID <= 0) return;
-        var line = BuildPosLine(ID, cx, cy);
+        var line = BuildPosLine(ID, cx, cy, dir);
         _ = SendLineSafe(line);
     }
 
@@ -1161,7 +1192,7 @@ public sealed class NetNode : IDisposable
                 var animQueue = hasAnim ? state.AnimQueue : null;
                 var animG = hasAnim ? state.AnimG : null;
 
-                snapshot.Add(new RemoteSnapshot(state.Id, state.X, state.Y, anim, animQueue, animG, hasAnim, state.Username));
+                snapshot.Add(new RemoteSnapshot(state.Id, state.X, state.Y, state.Dir, anim, animQueue, animG, hasAnim, state.Username));
 
                 if (hasAnim)
                     state.HasAnim = false;

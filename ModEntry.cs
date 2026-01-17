@@ -219,7 +219,6 @@ namespace DeadCellsMultiplayerMod
         dc.libs.Rand rng)
         {
             levelId = l.id.ToString();
-
             SendLevel(levelId);
             return orig(user, l, rng);
         }
@@ -341,7 +340,7 @@ namespace DeadCellsMultiplayerMod
         private HashSet<string> _loopAnimations = new HashSet<string>
         {
             "idle", "run", "jumpUp", "jumpDown", "crouch", "land",
-            "rollStart", "rolling", "rollEnd"
+            "rollStart", "rolling", "rollEnd",  "blockHoldShield", "blockEndHoldShield", "runB"
         };
         void IOnHeroUpdate.OnHeroUpdate(double dt)
         {
@@ -370,21 +369,19 @@ namespace DeadCellsMultiplayerMod
 
 
         double last_x, last_y;
+        int lastDir;
 
         private void SendHeroCoords()
         {
             if (_netRole == NetRole.None) return;
-            float dx = (float)(me.spr.x - last_x);
-            float dy = (float)(me.spr.y - last_y);
-            float distSq = dx * dx + dy * dy;
-
-            if (distSq < 4.0f) return;
             if (_net == null || me == null) return;
-            if (me.spr.x == last_x && me.spr.y == last_y) return;
+            int dir = me.dir;
+            if (me.spr.x == last_x && me.spr.y == last_y && lastDir == dir) return;
 
-            _net.TickSend(me.spr.x, me.spr.y);
+            _net.TickSend(me.spr.x, me.spr.y, dir);
             last_x = me.spr.x;
             last_y = me.spr.y;
+            lastDir = dir;
         }
 
         public static double[] rLastX = new double[NetNode.MaxClientSlots];
@@ -420,24 +417,21 @@ namespace DeadCellsMultiplayerMod
                     continue;
 
                 var client = clients[index];
-                if (client == null)
-                {
-                    var label = BuildRemoteLabel(remote.Id, remote.Username);
-                    clients[index] = ghost.CreateGhostKing(me._level, label);
-                    client = clients[index];
-                    clientLabels[index] = label;
-                    clientIds[index] = remote.Id;
-                }
-                if (client == null)
-                    continue;
+                // if (client == null)
+                // {
+                //     var label = BuildRemoteLabel(remote.Id, remote.Username);
+                //     clients[index] = ghost.CreateGhostKing(me._level, label);
+                //     client = clients[index];
+                //     clientLabels[index] = label;
+                //     clientIds[index] = remote.Id;
+                // }
+                // if (client == null)
+                //     continue;
 
                 remotePlayerId = remote.Id;
                 clientIds[index] = remote.Id;
                 client.setPosPixel(remote.X, remote.Y - 0.2d);
-                if (remote.X < rLastX[index])
-                    client.dir = -1;
-                if (remote.X > rLastX[index])
-                    client.dir = 1;
+                client.dir = remote.Dir;
                 rLastX[index] = remote.X;
                 rLastY[index] = remote.Y;
 
@@ -471,7 +465,6 @@ namespace DeadCellsMultiplayerMod
         {
             if (_netRole == NetRole.None) return;
             var net = _net;
-            var animManager = me?.spr?._animManager;
             if (net == null || string.IsNullOrWhiteSpace(anim)) return;
             if (!force &&
                 string.Equals(_lastAnimSent, anim, StringComparison.Ordinal) &&
