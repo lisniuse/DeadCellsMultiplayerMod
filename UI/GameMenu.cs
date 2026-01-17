@@ -14,6 +14,7 @@ using Hashlink.Virtuals;
 using Serilog;
 using ModCore.Utitities;
 using Microsoft.Win32;
+using Serilog.Core;
 
 
 namespace DeadCellsMultiplayerMod
@@ -36,10 +37,15 @@ namespace DeadCellsMultiplayerMod
         private static int _mpPort = 1234;
         private static NetRole _menuSelection = NetRole.None;
         private static bool _waitingForHost;
+        internal const int ClientConnectMaxAttempts = 3;
+        private static int _clientConnectAttempt;
+        private static bool _clientConnecting;
         private static bool _pendingAutoStart;
         private static bool _levelDescArrived;
         private static bool _autoStartTriggered;
         private static DateTime _autoStartRetryAt = DateTime.MinValue;
+        private const int DeathRestartCooldownMs = 1000;
+        private static DateTime _deathRestartCooldownUntil = DateTime.MinValue;
         private const string AutoStartMutexName = "DeadCellsMultiplayerMod.AutoStart";
         private static bool _mainMenuButtonAdded;
         private static bool _suppressAutoButton;
@@ -90,6 +96,9 @@ namespace DeadCellsMultiplayerMod
                 _autoStartTriggered = false;
                 _genArrived = false;
                 _seedArrived = false;
+                _clientConnectAttempt = 0;
+                _clientConnecting = false;
+                _deathRestartCooldownUntil = DateTime.MinValue;
                 _cachedLevelDescSync = null;
                 _latestResolvedRunParams = null;
             }
@@ -199,8 +208,37 @@ namespace DeadCellsMultiplayerMod
                 }
 
                 _log?.Information("[NetMod] Client restarting run for new seed {Seed}", seed);
-                ForceExitToMainMenu();
+                game.destroy();
+                game.disposeImmediately();
                 game.user.newGame(seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
+            });
+        }
+
+        internal static void QueueHostRestartFromDeath(string reason)
+        {
+            var now = DateTime.UtcNow;
+            lock (Sync)
+            {
+                if (_role != NetRole.Host)
+                    return;
+                if (now < _deathRestartCooldownUntil)
+                    return;
+                _deathRestartCooldownUntil = now.AddMilliseconds(DeathRestartCooldownMs);
+            }
+
+            EnqueueMainThread(() =>
+            {
+                var game = ModEntry.Instance?.game;
+                if (game?.user == null)
+                {
+                    _log?.Warning("[NetMod] Skipping host restart ({Reason}): game not ready", reason);
+                    return;
+                }
+
+                _log?.Information("[NetMod] Host restarting run ({Reason})", reason);
+                game.destroy();
+                game.disposeImmediately();
+                game.user.newGame(GameDataSync.Seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
             });
         }
 
@@ -614,8 +652,10 @@ namespace DeadCellsMultiplayerMod
                         _pendingAutoStart = false;
                         _autoStartTriggered = false;
                         _seedArrived = false;
+                        _clientConnectAttempt = 0;
+                        _clientConnecting = true;
+                        _waitingForHost = true;
                     }
-                    _waitingForHost = true;
                 }
             }
             catch (Exception ex)
@@ -699,6 +739,7 @@ namespace DeadCellsMultiplayerMod
             SetRole(NetRole.None);
             NetRef = null;
             _waitingForHost = false;
+            ResetClientConnectState();
             _menuSelection = NetRole.None;
 
             if (roleBefore == NetRole.Client)
@@ -718,7 +759,7 @@ namespace DeadCellsMultiplayerMod
             {
                 GetTitleScreen()?.mainMenu();
             }
-            catch { }
+            catch { _log.Debug("Cant mainMenu"); }
         }
 
         private static void ShowHostStatusMenu(TitleScreen screen)
@@ -770,7 +811,9 @@ namespace DeadCellsMultiplayerMod
                 SetIsMainMenu(screen, false);
                 screen.clearMenu();
 
-                AddInfoLine(screen, "Waiting for the host", infoColor: 0xA0C0FF);
+                AddInfoLine(screen, $"Status: {BuildStatus(NetRole.Client)}", infoColor: 0xA0C0FF);
+                AddInfoLine(screen, "Players:", infoColor: 0xA0C0FF);
+                AddPlayerLines(screen, NetRole.Client, infoColor: 0xA0C0FF);
                 AddMenuButton(screen, "Disconnect", () => DisconnectFromMenu(screen), "Disconnect and return to main menu");
 
                 RemoveMenuItems(screen, "About Core Modding", "Play multiplayer");
@@ -789,10 +832,40 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        private static void ShowLobbyNotFoundPopup(TitleScreen screen)
+        {
+            var prevSuppress = _suppressAutoButton;
+            _suppressAutoButton = true;
+            var prevIsMain = GetIsMainMenu(screen);
+            try
+            {
+                SetIsMainMenu(screen, false);
+                screen.clearMenu();
+
+                AddInfoLine(screen, "Lobby didn't find", infoColor: 0xFF9090);
+                AddMenuButton(screen, "OK", () => ShowConnectionMenu(screen, NetRole.Client), "Return to join menu");
+
+                RemoveMenuItems(screen, "About Core Modding", "Play multiplayer");
+                RemoveDuplicatesKeepFirst(screen, "OK");
+                _inClientWaitingMenu = false;
+                _inHostStatusMenu = false;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warning("[NetMod] Failed to open lobby not found popup: {Message}", ex.Message);
+            }
+            finally
+            {
+                SetIsMainMenu(screen, prevIsMain);
+                _suppressAutoButton = prevSuppress;
+            }
+        }
+
         private static void DisconnectFromMenu(TitleScreen screen)
         {
             StopNetworkFromMenu();
             _waitingForHost = false;
+            ResetClientConnectState();
             _menuSelection = NetRole.None;
             _inHostStatusMenu = false;
             _inClientWaitingMenu = false;
@@ -839,12 +912,41 @@ namespace DeadCellsMultiplayerMod
             else if (role == NetRole.Client)
             {
                 _waitingForHost = false;
+                _clientConnecting = false;
+                _clientConnectAttempt = 0;
                 if (_menuSelection == NetRole.Client)
                 {
                     var ts = GetTitleScreen();
                     if (ts != null) ShowClientWaitingMenu(ts);
                 }
             }
+        }
+
+        internal static void NotifyClientConnectAttempt(int attempt)
+        {
+            lock (Sync)
+            {
+                _clientConnectAttempt = attempt;
+                _clientConnecting = true;
+                _waitingForHost = true;
+            }
+
+            if (_menuSelection == NetRole.Client)
+            {
+                var ts = GetTitleScreen();
+                if (ts != null) ShowClientWaitingMenu(ts);
+            }
+        }
+
+        internal static void NotifyClientConnectFailed()
+        {
+            StopNetworkFromMenu();
+            ResetClientConnectState();
+            _waitingForHost = false;
+            _menuSelection = NetRole.Client;
+
+            var ts = GetTitleScreen();
+            if (ts != null) ShowLobbyNotFoundPopup(ts);
         }
 
         public static void NotifyRemoteDisconnected(NetRole role)
@@ -1269,6 +1371,13 @@ namespace DeadCellsMultiplayerMod
         private static string BuildStatus(NetRole role)
         {
             var net = NetRef;
+            if (role == NetRole.Client && _clientConnecting)
+            {
+                if (_clientConnectAttempt > 0)
+                    return $"connecting ({_clientConnectAttempt}/{ClientConnectMaxAttempts})";
+                return "connecting";
+            }
+
             if (net != null && net.HasRemote)
                 return role == NetRole.Host ? "client connected" : "connected to host";
 
@@ -1303,6 +1412,15 @@ namespace DeadCellsMultiplayerMod
             foreach (var line in BuildPlayerLines(role))
             {
                 AddInfoLine(screen, $"- {line}", infoColor: infoColor);
+            }
+        }
+
+        private static void ResetClientConnectState()
+        {
+            lock (Sync)
+            {
+                _clientConnectAttempt = 0;
+                _clientConnecting = false;
             }
         }
 

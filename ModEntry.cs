@@ -24,6 +24,7 @@ using dc.en.mob;
 using dc.haxe;
 using dc.cine;
 using CineHookInitialize;
+using Serilog.Core;
 
 
 namespace DeadCellsMultiplayerMod
@@ -72,6 +73,10 @@ namespace DeadCellsMultiplayerMod
         public static int remotePlayerId = -1;
 
         private string remoteSkin;
+
+        int _layer;
+
+        HeroHead head;
 
         internal static void SetRemoteSkin(string? skin)
         {
@@ -151,11 +156,28 @@ namespace DeadCellsMultiplayerMod
             Hook_KingSkin.initGfx += Hook_KingSkin_initgfx;
             Hook__LevelStruct.get += Hook__LevelStruct_get;
             Hook_Boot.update += hook_boot_update;
+            Hook_Game.pause += Hook_Game_pause;
+            Hook_Hero.onHeroDie += Hook_Hero_onHeroDie;
 
 
         }
 
-        
+
+        private void Hook_Hero_onHeroDie(Hook_Hero.orig_onHeroDie orig, Hero self)
+        {
+            var net = _net;
+            if (_netRole == NetRole.Client)
+                net?.SendHeroDeath();
+            else if (_netRole == NetRole.Host)
+                GameMenu.QueueHostRestartFromDeath("host died");
+            orig(self);
+        }
+
+
+        private void Hook_Game_pause(Hook_Game.orig_pause orig, dc.pr.Game self)
+        {
+            return;
+        }
 
 
         private void Hook_MobsGen_addElites(Hook_MobsGen.orig_addElites orig, MobsGen self, ArrayObj mobsPerRooms)
@@ -197,7 +219,6 @@ namespace DeadCellsMultiplayerMod
         dc.libs.Rand rng)
         {
             levelId = l.id.ToString();
-
             SendLevel(levelId);
             return orig(user, l, rng);
         }
@@ -270,7 +291,7 @@ namespace DeadCellsMultiplayerMod
             if (_ghost == null)
                 _ghost = new GhostHero(localId, game!, me, Logger, this);
             _ghost.SetLabel(me, GameMenu.Username);
-            Logger.Debug($"clients.Length: {clients.Length}");
+
             for (int i = 0; i < clients.Length; i++)
             {
                 var client = clients[i];
@@ -319,7 +340,7 @@ namespace DeadCellsMultiplayerMod
         private HashSet<string> _loopAnimations = new HashSet<string>
         {
             "idle", "run", "jumpUp", "jumpDown", "crouch", "land",
-            "rollStart", "rolling", "rollEnd"
+            "rollStart", "rolling", "rollEnd",  "blockHoldShield", "blockEndHoldShield", "runB"
         };
         void IOnHeroUpdate.OnHeroUpdate(double dt)
         {
@@ -348,21 +369,19 @@ namespace DeadCellsMultiplayerMod
 
 
         double last_x, last_y;
+        int lastDir;
 
         private void SendHeroCoords()
         {
             if (_netRole == NetRole.None) return;
-            float dx = (float)(me.spr.x - last_x);
-            float dy = (float)(me.spr.y - last_y);
-            float distSq = dx * dx + dy * dy;
-
-            if (distSq < 4.0f) return;
             if (_net == null || me == null) return;
-            if (me.spr.x == last_x && me.spr.y == last_y) return;
+            int dir = me.dir;
+            if (me.spr.x == last_x && me.spr.y == last_y && lastDir == dir) return;
 
-            _net.TickSend(me.spr.x, me.spr.y);
+            _net.TickSend(me.spr.x, me.spr.y, dir);
             last_x = me.spr.x;
             last_y = me.spr.y;
+            lastDir = dir;
         }
 
         public static double[] rLastX = new double[NetNode.MaxClientSlots];
@@ -398,24 +417,21 @@ namespace DeadCellsMultiplayerMod
                     continue;
 
                 var client = clients[index];
-                if (client == null)
-                {
-                    var label = BuildRemoteLabel(remote.Id, remote.Username);
-                    clients[index] = ghost.CreateGhostKing(me._level, label);
-                    client = clients[index];
-                    clientLabels[index] = label;
-                    clientIds[index] = remote.Id;
-                }
-                if (client == null)
-                    continue;
+                // if (client == null)
+                // {
+                //     var label = BuildRemoteLabel(remote.Id, remote.Username);
+                //     clients[index] = ghost.CreateGhostKing(me._level, label);
+                //     client = clients[index];
+                //     clientLabels[index] = label;
+                //     clientIds[index] = remote.Id;
+                // }
+                // if (client == null)
+                //     continue;
 
                 remotePlayerId = remote.Id;
                 clientIds[index] = remote.Id;
                 client.setPosPixel(remote.X, remote.Y - 0.2d);
-                if (remote.X < rLastX[index])
-                    client.dir = -1;
-                if (remote.X > rLastX[index])
-                    client.dir = 1;
+                client.dir = remote.Dir;
                 rLastX[index] = remote.X;
                 rLastY[index] = remote.Y;
 
@@ -449,7 +465,6 @@ namespace DeadCellsMultiplayerMod
         {
             if (_netRole == NetRole.None) return;
             var net = _net;
-            var animManager = me?.spr?._animManager;
             if (net == null || string.IsNullOrWhiteSpace(anim)) return;
             if (!force &&
                 string.Equals(_lastAnimSent, anim, StringComparison.Ordinal) &&

@@ -21,7 +21,7 @@ namespace CooldownHelper
             public const int HERO_LIFE_0 = 99;
             public const int KING_Create = 31;
             public const int DELET_YOLO = 1087;
-            public const int SPECIAL_240 = 240;
+            public const int KING_ANIM_stun = 240;
         }
     }
 }

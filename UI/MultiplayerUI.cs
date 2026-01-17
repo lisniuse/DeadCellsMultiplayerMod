@@ -7,6 +7,7 @@ using dc.cine;
 using dc.en;
 using dc.en.mob;
 using dc.h2d;
+using dc.haxe.io;
 using dc.hl.types;
 using dc.hxd;
 using dc.level.@struct;
@@ -17,6 +18,7 @@ using dc.tool;
 using dc.tool.log;
 using dc.ui;
 using dc.ui.hud;
+using DeadCellsMultiplayerMod.Minimap;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Utitities;
@@ -67,9 +69,10 @@ public class MultiplayerUI
     public void init()
     {
         Hook_HUD.initHero += Hook_HUD_initking;
-
         Hook_Hero.updateLifeBar += Hook_Hero_kinglifupdate;
+        Minimapreveal minimapreveal = new Minimapreveal();
     }
+
 
     private void Hook_HUD_initking(Hook_HUD.orig_initHero orig, HUD self)
     {

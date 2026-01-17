@@ -45,6 +45,7 @@ public sealed class NetNode : IDisposable
         public int Id { get; }
         public double X;
         public double Y;
+        public int Dir = 1;
         public bool HasRemote;
         public string? LevelId;
         public string? Anim;
@@ -70,17 +71,19 @@ public sealed class NetNode : IDisposable
         public readonly int Id;
         public readonly double X;
         public readonly double Y;
+        public readonly int Dir;
         public readonly string? Anim;
         public readonly int? AnimQueue;
         public readonly bool? AnimG;
         public readonly bool HasAnim;
         public readonly string? Username;
 
-        public RemoteSnapshot(int id, double x, double y, string? anim, int? animQueue, bool? animG, bool hasAnim, string? username)
+        public RemoteSnapshot(int id, double x, double y, int dir, string? anim, int? animQueue, bool? animG, bool hasAnim, string? username)
         {
             Id = id;
             X = x;
             Y = y;
+            Dir = dir;
             Anim = anim;
             AnimQueue = animQueue;
             AnimG = animG;
@@ -114,6 +117,7 @@ public sealed class NetNode : IDisposable
     private TcpListener? _listener;   // host
     private TcpClient? _client;     // client
     private NetworkStream? _stream;
+    private static int _connectedClientCount;
 
     private int ID;
 
@@ -121,20 +125,7 @@ public sealed class NetNode : IDisposable
 
     private static readonly int[] ClientIds = { 2, 3, 4 };
     public static int MaxClientSlots => ClientIds.Length;
-    public int ConnectedClientCount
-    {
-        get
-        {
-            if (_role == NetRole.Host)
-            {
-                lock (_clientsLock)
-                    return _clients.Count;
-            }
-            if (_role == NetRole.Client)
-                return HasRemote ? 1 : 0;
-            return 0;
-        }
-    }
+    public static int ConnectedClientCount => _connectedClientCount;
 
     private static readonly HashSet<int> UsedClientIds = new();
 
@@ -252,6 +243,7 @@ public sealed class NetNode : IDisposable
                 lock (_clientsLock)
                 {
                     _clients[assignedId] = connection;
+                    _connectedClientCount = _clients.Count;
                 }
                 lock (_sync)
                 {
@@ -297,8 +289,13 @@ public sealed class NetNode : IDisposable
 
     private async Task ConnectWithRetryAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        var maxAttempts = GameMenu.ClientConnectMaxAttempts;
+        var attempt = 0;
+
+        while (!ct.IsCancellationRequested && attempt < maxAttempts)
         {
+            attempt++;
+            GameMenu.EnqueueMainThread(() => GameMenu.NotifyClientConnectAttempt(attempt));
             try
             {
                 _log.Information("[NetNode] Client connecting to {dest}", _destEp);
@@ -320,6 +317,7 @@ public sealed class NetNode : IDisposable
                 lock (_sync)
                 {
                     _hasRemote = true;
+                    _connectedClientCount = 1;
                     if (_primaryRemoteId == 0)
                         _primaryRemoteId = 1;
                 }
@@ -336,7 +334,13 @@ public sealed class NetNode : IDisposable
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
+                CloseClientConnection();
                 _log.Warning("[NetNode] Client connect error: {msg}", ex.Message);
+                if (attempt >= maxAttempts)
+                {
+                    GameMenu.EnqueueMainThread(GameMenu.NotifyClientConnectFailed);
+                    break;
+                }
                 await Task.Delay(3000, ct).ConfigureAwait(false);
             }
         }
@@ -625,27 +629,51 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
+        if (line.StartsWith("DIED", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_role == NetRole.Host)
+            {
+                var _remoteId = senderId ?? 0;
+                _log.Information("[NetNode] Remote hero died (id {Id})", _remoteId);
+                var reason = _remoteId > 0 ? $"client {_remoteId} died" : "client died";
+                GameMenu.QueueHostRestartFromDeath(reason);
+            }
+            return true;
+        }
+
         if (line.StartsWith("KICK"))
         {
             return false;
         }
 
-        if (TryParsePositionLine(line, senderId, out var remoteId, out var cx, out var cy))
+        if (TryParsePositionLine(line, senderId, out var remoteId, out var cx, out var cy, out var dir, out var hasDir))
         {
             if (forceSenderId && senderId.HasValue)
                 remoteId = senderId.Value;
+            int forwardDir = dir;
             lock (_sync)
             {
                 var state = GetOrCreateRemoteLocked(remoteId);
+                var prevX = state.X;
+                var hadRemote = state.HasRemote;
                 state.X = cx;
                 state.Y = cy;
+                if (hasDir)
+                {
+                    state.Dir = dir;
+                }
+                else if (hadRemote && cx != prevX)
+                {
+                    state.Dir = cx < prevX ? -1 : 1;
+                }
                 state.HasRemote = true;
                 _hasRemote = true;
                 if (_primaryRemoteId == 0)
                     _primaryRemoteId = remoteId;
+                forwardDir = state.Dir;
             }
             if (_role == NetRole.Host && senderId.HasValue)
-                forwardLine = BuildPosLine(remoteId, cx, cy);
+                forwardLine = BuildPosLine(remoteId, cx, cy, forwardDir);
         }
 
         return true;
@@ -671,7 +699,8 @@ public sealed class NetNode : IDisposable
         lock (_clientsLock)
         {
             _clients.Remove(sender.AssignedId);
-            hasClients = _clients.Count > 0;
+            _connectedClientCount = _clients.Count;
+            hasClients = _connectedClientCount > 0;
         }
 
         sender.Dispose();
@@ -707,6 +736,7 @@ public sealed class NetNode : IDisposable
         lock (_sync)
         {
             _hasRemote = false;
+            _connectedClientCount = 0;
             _remotes.Clear();
             _primaryRemoteId = 0;
         }
@@ -813,13 +843,29 @@ public sealed class NetNode : IDisposable
             recover = parsedRecover;
     }
 
-    private static bool TryParsePositionLine(string line, int? senderId, out int remoteId, out double rx, out double ry)
+    private static bool TryParsePositionLine(string line, int? senderId, out int remoteId, out double rx, out double ry, out int dir, out bool hasDir)
     {
         remoteId = 0;
         rx = 0;
         ry = 0;
+        dir = 0;
+        hasDir = false;
 
         var parts = line.Split('|');
+        if (parts.Length >= 4 &&
+            int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedRemoteIdWithDir) &&
+            double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var cxWithDir) &&
+            double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var cyWithDir) &&
+            int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDir))
+        {
+            remoteId = parsedRemoteIdWithDir;
+            rx = cxWithDir;
+            ry = cyWithDir;
+            dir = parsedDir < 0 ? -1 : parsedDir > 0 ? 1 : 0;
+            hasDir = true;
+            return true;
+        }
+
         if (parts.Length >= 3 &&
             int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedRemoteId) &&
             double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var cx) &&
@@ -862,11 +908,11 @@ public sealed class NetNode : IDisposable
         return $"HP|{id}|{life}|{maxLife}|{lif}|{bonusLife}|{recover}\n";
     }
 
-    private static string BuildPosLine(int id, double cx, double cy)
+    private static string BuildPosLine(int id, double cx, double cy, int dir)
     {
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{id}|{cx}|{cy}\n");
+            $"{id}|{cx}|{cy}|{dir}\n");
     }
 
     private void CloseClientConnection()
@@ -955,11 +1001,11 @@ public sealed class NetNode : IDisposable
         }
     }
 
-    public void TickSend(double cx, double cy)
+    public void TickSend(double cx, double cy, int dir)
     {
         if (!HasAnyConnection()) return;
         if (ID <= 0) return;
-        var line = BuildPosLine(ID, cx, cy);
+        var line = BuildPosLine(ID, cx, cy, dir);
         _ = SendLineSafe(line);
     }
 
@@ -1089,6 +1135,18 @@ public sealed class NetNode : IDisposable
         _log.Information("[NetNode] Sent hero skin {Skin}", safe);
     }
 
+    public void SendHeroDeath()
+    {
+        if (!HasAnyConnection())
+        {
+            _log.Information("[NetNode] Skip sending death: no connected client");
+            return;
+        }
+
+        SendRaw("DIED");
+        _log.Information("[NetNode] Sent hero death");
+    }
+
     private void SendRaw(string payload)
     {
         var line = payload.EndsWith('\n') ? payload : payload + "\n";
@@ -1134,7 +1192,7 @@ public sealed class NetNode : IDisposable
                 var animQueue = hasAnim ? state.AnimQueue : null;
                 var animG = hasAnim ? state.AnimG : null;
 
-                snapshot.Add(new RemoteSnapshot(state.Id, state.X, state.Y, anim, animQueue, animG, hasAnim, state.Username));
+                snapshot.Add(new RemoteSnapshot(state.Id, state.X, state.Y, state.Dir, anim, animQueue, animG, hasAnim, state.Username));
 
                 if (hasAnim)
                     state.HasAnim = false;
@@ -1255,6 +1313,7 @@ public sealed class NetNode : IDisposable
         {
             clients = _clients.Values.ToList();
             _clients.Clear();
+            _connectedClientCount = 0;
         }
         foreach (var client in clients)
         {
@@ -1276,6 +1335,7 @@ public sealed class NetNode : IDisposable
             _remotes.Clear();
             _primaryRemoteId = 0;
             _hasRemote = false;
+            _connectedClientCount = 0;
         }
         _stream = null; _client = null; _listener = null;
         try { _sendLock.Dispose(); } catch { }
