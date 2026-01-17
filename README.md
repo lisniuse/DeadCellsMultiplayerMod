@@ -105,6 +105,8 @@ If you find this project interesting:
 
 Every bit of feedback helps improve multiplayer support for **Dead Cells**.
 
+google-site-verification: googled03e71320635046c.html
+
 <!--
 Keywords: Dead Cells multiplayer mod, Dead Cells co-op mod, Dead Cells online, DCCM mod, Dead Cells TCP multiplayer
 -->
