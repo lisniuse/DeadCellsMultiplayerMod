@@ -14,6 +14,7 @@ using dc.ui;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using DeadCellsMultiplayerMod.MultiplayerModUI;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
+using dc.tool;
 
 
 namespace DeadCellsMultiplayerMod
@@ -167,6 +168,7 @@ namespace DeadCellsMultiplayerMod
             if (string.IsNullOrWhiteSpace(anim)) return;
             if (stopanim == true) return;
             var animManager = king.spr._animManager;
+            
 
             try
             {

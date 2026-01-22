@@ -255,6 +255,10 @@ public sealed class NetNode : IDisposable
                 _log.Information("[NetNode] Host accepted {ep}", connection.RemoteEndPoint);
 
                 await SendLineToClientSafe(connection, "WELCOME\n").ConfigureAwait(false);
+                if (_role == NetRole.Host && GameDataSync.TryGetHostBossRune(out var hostBossRune))
+                {
+                    await SendLineToClientSafe(connection, $"BOSSRUNE|{hostBossRune}\n").ConfigureAwait(false);
+                }
                 if (_role == NetRole.Host && GameMenu.TryGetHostRunSeed(out var hostSeed))
                 {
                     await SendLineToClientSafe(connection, $"SEED|{hostSeed}\n").ConfigureAwait(false);
@@ -446,11 +450,11 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
-        if (line.StartsWith("RUNPARAMS|"))
+        if (line.StartsWith("BOSSRUNE|"))
         {
-            var payload = line["RUNPARAMS|".Length..];
+            var payload = line["BOSSRUNE|".Length..];
             lock (_sync) _hasRemote = true;
-            GameMenu.ReceiveRunParams(payload);
+            GameDataSync.ReceiveBossRune(payload);
             return true;
         }
 
@@ -1039,16 +1043,17 @@ public sealed class NetNode : IDisposable
         _log.Information("[NetNode] Sent username {Username}", safe);
     }
 
-    public void SendRunParams(string json)
+    public void SendBossRune(int bossRune)
     {
         if (!HasAnyConnection())
         {
-            _log.Information("[NetNode] Skip sending run params: no connected client");
+            _log.Information("[NetNode] Skip sending boss rune: no connected client");
             return;
         }
 
-        SendRaw("RUNPARAMS|" + json);
-        _log.Information("[NetNode] Sent run params payload");
+        var payload = bossRune.ToString(CultureInfo.InvariantCulture);
+        SendRaw("BOSSRUNE|" + payload);
+        _log.Information("[NetNode] Sent boss rune {BossRune}", bossRune);
     }
 
     public void SendLevelDesc(string json)

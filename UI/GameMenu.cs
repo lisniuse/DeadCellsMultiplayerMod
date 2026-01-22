@@ -133,7 +133,6 @@ namespace DeadCellsMultiplayerMod
                 _clientConnecting = false;
                 _deathRestartCooldownUntil = DateTime.MinValue;
                 _cachedLevelDescSync = null;
-                _latestResolvedRunParams = null;
             }
 
             InitializeMenuUiHooks();
@@ -291,22 +290,6 @@ namespace DeadCellsMultiplayerMod
             return false;
         }
 
-        public static void ReceiveRunParams(string json)
-        {
-            try
-            {
-                var rp = JsonConvert.DeserializeObject<RunParams>(json);
-                if (rp == null) return;
-
-                UpdateResolvedRunParams(rp, fromNetwork: true);
-                _log?.Information("[NetMod] Client received run params");
-            }
-            catch (Exception ex)
-            {
-                _log?.Warning("[NetMod] Failed to parse run params: {Message}", ex.Message);
-            }
-        }
-
         public static void ReceiveLevelDesc(string json)
         {
             try
@@ -340,20 +323,17 @@ namespace DeadCellsMultiplayerMod
             if (net == null) return;
 
             LevelDescSync? levelDesc;
-            RunParams? runParams;
             lock (Sync)
             {
                 levelDesc = _cachedLevelDescSync;
-                runParams = _latestResolvedRunParams?.Data;
             }
 
-            if (levelDesc == null && runParams == null)
+            if (levelDesc == null)
                 return;
 
             var payload = new
             {
                 levelDesc = levelDesc ?? new LevelDescSync(),
-                runParams = runParams ?? new RunParams(),
                 rawDesc = string.Empty
             };
             var json = JsonConvert.SerializeObject(payload);
@@ -373,23 +353,6 @@ namespace DeadCellsMultiplayerMod
             lock (Sync)
             {
                 return _cachedLevelDescSync;
-            }
-        }
-
-        private static void UpdateResolvedRunParams(RunParams rp, bool fromNetwork)
-        {
-            lock (Sync)
-            {
-                _latestResolvedRunParams = new RunParamsResolved { Data = rp };
-            }
-        }
-
-        private static bool TryGetResolvedRunParams(out RunParamsResolved? rp)
-        {
-            lock (Sync)
-            {
-                rp = _latestResolvedRunParams;
-                return rp != null;
             }
         }
 
@@ -1041,17 +1004,6 @@ namespace DeadCellsMultiplayerMod
             {
                 _log?.Warning("[NetMod] Failed to re-send LevelDesc: {Message}", ex.Message);
             }
-
-            try
-            {
-                if (TryGetResolvedRunParams(out var rp) && rp != null)
-                    net.SendRunParams(JsonConvert.SerializeObject(rp.Data));
-            }
-            catch (Exception ex)
-            {
-                _log?.Warning("[NetMod] Failed to re-send run params: {Message}", ex.Message);
-            }
-
         }
 
         private static bool AllPlayersReady()
@@ -1064,7 +1016,6 @@ namespace DeadCellsMultiplayerMod
         private static void ClearNetworkCaches()
         {
             CacheLevelDescSync(null);
-            _latestResolvedRunParams = null;
             _genArrived = false;
             _seedArrived = false;
         }
@@ -1076,7 +1027,6 @@ namespace DeadCellsMultiplayerMod
                 var payload = JsonConvert.DeserializeAnonymousType(json, new
                 {
                     levelDesc = new LevelDescSync(),
-                    runParams = new RunParams(),
                     rawDesc = string.Empty
                 });
                 if (payload == null) return;
@@ -1085,12 +1035,6 @@ namespace DeadCellsMultiplayerMod
                 {
                     CacheLevelDescSync(payload.levelDesc);
                     _log?.Information("[NetMod] Client cached LevelDescSync from generate payload");
-                }
-
-                if (payload.runParams != null)
-                {
-                    UpdateResolvedRunParams(payload.runParams, fromNetwork: true);
-                    _log?.Information("[NetMod] Client cached RunParams from generate payload");
                 }
 
                 if (!string.IsNullOrWhiteSpace(payload.rawDesc))
@@ -1117,35 +1061,6 @@ namespace DeadCellsMultiplayerMod
         {
             if (string.IsNullOrWhiteSpace(levelId)) return false;
             return levelId.IndexOf("challenge", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private sealed class RunParams
-        {
-            public int lvl;
-            public bool isCustom;
-            public bool mode;
-            public int bossRune;
-            public List<double>? forge;
-            public List<HistoryEntry>? history;
-            public List<string>? meta;
-            public int? runNum;
-            public string? endKind;
-            public bool? hasMods;
-        }
-
-        private sealed class RunParamsResolved
-        {
-            public RunParams Data = null!;
-        }
-
-        private sealed class HistoryEntry
-        {
-            public int brut;
-            public int cellsEarned;
-            public string? level;
-            public int surv;
-            public int tact;
-            public double time;
         }
 
         private sealed class LevelDescSync

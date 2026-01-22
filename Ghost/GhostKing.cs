@@ -27,7 +27,11 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         KingData IHxbitSerializable<KingData>.GetData()
         {
-            this.kingData.king = this;
+            if (this!=null)
+            {
+                this.kingData.king = this;
+            }
+            
             return kingData;
         }
 
@@ -55,14 +59,26 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             this.initColorMap(Cdb.Class.getSkinInfo(remoteSkin.AsHaxeString()));
 
             // glow
+            // ArrayObj glowData = CdbTypeConverter.Class.getGlowData(Cdb.Class.getSkinInfo(remoteSkin.AsHaxeString()));
+            // if (glowData != null)
+            // {
+            //     GlowKey s2 = new GlowKey(glowData);
+            //     if (s2 != null)
+            //     {
+            //         this.spr.addShader(s2);
+            //     }
+            // }
+
             ArrayObj glowData = CdbTypeConverter.Class.getGlowData(Cdb.Class.getSkinInfo(remoteSkin.AsHaxeString()));
-            if (glowData != null)
+            if (glowData != null && glowData.length > 0)
             {
-                GlowKey s2 = new GlowKey(glowData);
-                if (s2 != null)
+                GlowKey glowKey = (GlowKey)this.spr.getShader(GlowKey.Class);
+                if (glowKey == null)
                 {
-                    this.spr.addShader(s2);
+                    glowKey = new GlowKey(null);
+                    this.spr.addShader(glowKey);
                 }
+                glowKey.setGlowDatas(glowData);
             }
 
 

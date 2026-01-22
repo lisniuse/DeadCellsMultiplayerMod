@@ -32,7 +32,7 @@ using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.MultiplayerModUI;
 using DeadCellsMultiplayerMod.MultiplayerModUI.Minimap;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
-using DeadCellsMultiplayerMod.MultiplayerModUI.ConnectionUI;
+using DeadCellsMultiplayerMod.MultiplayerModUI.Connection;
 
 
 namespace DeadCellsMultiplayerMod
@@ -153,7 +153,7 @@ namespace DeadCellsMultiplayerMod
             MultiplayerUI MultiplayerUI = new MultiplayerUI(this, 0);
             MobsSynchronization mobs = new MobsSynchronization(this);
             Minimapreveal minimapreveal = new Minimapreveal();
-            ConnectionUI connection = new ConnectionUI(this);
+            // ConnectionUI.Initialize(this);
             GameMenu.Initialize(Logger);
             EventSystem.BroadcastEvent<IOnAdvancedModuleInitializing, ModEntry>(this);
         }
@@ -172,6 +172,7 @@ namespace DeadCellsMultiplayerMod
             Hook_Boot.update += hook_boot_update;
             Hook_Game.pause += Hook_Game_pause;
             Hook_Hero.onHeroDie += Hook_Hero_onHeroDie;
+
         }
 
 
@@ -262,6 +263,7 @@ namespace DeadCellsMultiplayerMod
             me = self;
             SendLevel(levelId);
             orig(self, oldLevel);
+            if (_netRole == NetRole.None) return;
             var net = _net;
             var localId = net?.id ?? 0;
             if (_ghost == null)

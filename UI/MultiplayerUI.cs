@@ -25,13 +25,16 @@ using ModCore.Events;
 using ModCore.Utitities;
 using Serilog;
 using Cooldown = CooldownHelper.Cooldown;
+using DeadCellsMultiplayerMod.MultiplayerModUI.Connection;
+using ModCore.Events.Interfaces.Game.Hero;
 
 namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
 {
 
     public class MultiplayerUI :
         IEventReceiver,
-        IOnAdvancedModuleInitializing
+        IOnAdvancedModuleInitializing,
+        IOnHeroUpdate
     {
         private sealed class LifeSlot
         {
@@ -91,15 +94,21 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
         }
         public bool CanUseJumpHit()
         {
+            try
+            {
             int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
             return !ModEntry.me.cd.fastCheck.exists(key);
+            }
+            catch {return false;}
         }
         public void Debugkeys()
         {
 
             if (Key.Class.isPressed(97))//num1
             {
-                LevelTransition.Class.@goto("Custom".AsHaxeString());
+                //LevelTransition.Class.@goto("Custom".AsHaxeString());
+                Log.Debug("KeyPress");
+                ConnectionUI connectionUI = new ConnectionUI(HUD.Class.ME);
 
             }
             if (Key.Class.isPressed(98))//num2
@@ -137,7 +146,6 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
             }
             if (!CanUseJumpHit())
             {
-                Log.Debug("跳跃命中冷却中");
                 return;
             }
 
@@ -368,6 +376,9 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
 
         }
 
-
+        void IOnHeroUpdate.OnHeroUpdate(double dt)
+        {
+            Debugkeys();
+        }
     }
 }

@@ -5,7 +5,7 @@ using Hashlink.Virtuals;
 using dc.level;
 using HaxeProxy.Runtime;
 using dc.tool;
-using System.Data.SqlTypes;
+using System.Globalization;
 
 
 namespace DeadCellsMultiplayerMod
@@ -22,6 +22,9 @@ namespace DeadCellsMultiplayerMod
         static public bool _mode;
 
         static public LaunchMode _launch;
+        private static readonly object _bossRuneLock = new();
+        private static int? _remoteBossRune;
+        private static int? _hostBossRune;
         public GameDataSync(Serilog.ILogger log)
         {
             _log = log;
@@ -47,21 +50,11 @@ namespace DeadCellsMultiplayerMod
             ModEntry.kingInitialized = false;
             ModEntry._ghost = null;
             var net = GameMenu.NetRef;
+            
             if (net != null && net.IsHost)
             {
                 Seed = GameMenu.ForceGenerateServerSeed("NewGame_hook");
-                try
-                {
-                    var bossRune = self.mainGame.serverStats.bossRune;
-                    var endKind = self.mainGame.serverStats.endKind;
-                    var forge = self.mainGame.serverStats.forge;
-                    var hasMods = self.mainGame.serverStats.hasMods;
-                    var history = self.mainGame.serverStats.history;
-                    var Custom = self.mainGame.serverStats.isCustom;
-                    var meta = self.mainGame.serverStats.meta;
-                }
-                catch { }
-
+                SendBossRune(self, net);
                 net.SendSeed(Seed);
             }
             else if (net != null)
@@ -69,6 +62,14 @@ namespace DeadCellsMultiplayerMod
                 if (GameMenu.TryGetRemoteSeed(out var remoteSeed))
                 {
                     Seed = remoteSeed;
+                }
+                if (TryGetRemoteBossRune(out var bossRune))
+                {
+                    self.bossRuneActivated = bossRune;
+                }
+                else
+                {
+                    _log?.Warning("[NetMod] Remote boss rune not received yet");
                 }
             }
             lvl = Seed;
@@ -94,6 +95,72 @@ namespace DeadCellsMultiplayerMod
 
             // SendHeroSkin(seed, net);
             return orig(self, seed, ldat, resetCount, resetCount2);
+        }
+
+        public static void SendBossRune(User self, NetNode? net)
+        {
+            if (self == null)
+                return;
+
+            var bossRune = ToInt(self.bossRuneActivated);
+            lock (_bossRuneLock)
+            {
+                _hostBossRune = bossRune;
+            }
+
+            if (net == null || !net.IsAlive)
+                return;
+
+            net.SendBossRune(bossRune);
+        }
+
+        public static void ReceiveBossRune(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload))
+                return;
+
+            if (!int.TryParse(payload, NumberStyles.Integer, CultureInfo.InvariantCulture, out var bossRune))
+            {
+                _log?.Warning("[NetMod] Failed to parse boss rune payload: {Payload}", payload);
+                return;
+            }
+
+            lock (_bossRuneLock)
+            {
+                _remoteBossRune = bossRune;
+            }
+
+            _log?.Information("[NetMod] Received boss rune {BossRune}", bossRune);
+        }
+
+        public static bool TryGetHostBossRune(out int bossRune)
+        {
+            lock (_bossRuneLock)
+            {
+                if (_hostBossRune.HasValue)
+                {
+                    bossRune = _hostBossRune.Value;
+                    return true;
+                }
+            }
+
+            bossRune = 0;
+            return false;
+        }
+
+        public static bool TryGetRemoteBossRune(out int bossRune)
+        {
+            lock (_bossRuneLock)
+            {
+                if (_remoteBossRune.HasValue)
+                {
+                    bossRune = _remoteBossRune.Value;
+                    return true;
+                }
+            }
+
+            bossRune = 0;
+            return false;
         }
 
         public static void ReceiveHeroSkin(string skin)
@@ -138,5 +205,29 @@ namespace DeadCellsMultiplayerMod
 
             return skin.Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
         }
+
+        private static int ToInt(object? value)
+        {
+            if (value == null)
+                return 0;
+
+            if (value is int i)
+                return i;
+
+            if (value is bool b)
+                return b ? 1 : 0;
+
+            if (value is IConvertible conv)
+            {
+                try
+                {
+                    return conv.ToInt32(CultureInfo.InvariantCulture);
+                }
+                catch { }
+            }
+
+            return 0;
+        }
+
     }
 }
