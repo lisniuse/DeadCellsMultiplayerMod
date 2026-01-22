@@ -21,6 +21,9 @@ using ModCore.Events.Interfaces.Game.Hero;
 using ModCore.Utitities;
 using Serilog;
 using DeadCellsMultiplayerMod.Tools;
+using dc.h3d.pass;
+using dc.h3d.shader;
+using dc.en;
 
 namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 {
@@ -30,7 +33,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
     {
         private Flow? rootFlow;
         private UIBox? bg;
-        private Interactive? inter;
+        private dc.h2d.Interactive? inter;
         private Flow? spritesflow;
         private Flow? MainTitleflow;
         private readonly List<HSprite> sprites = new();
@@ -92,7 +95,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 
             int ptr = 0;
 
-
+            dc.String idle ="idle".AsHaxeString();
             SpriteLib g = Assets.Class.getHeroLib(Cdb.Class.getSkinInfo("PrisonerDefault".AsHaxeString()));
 
             this.spriteui = new HSprite(g, "idle".AsHaxeString(), new Ref<int>(ref ptr), null);
@@ -106,22 +109,31 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
                 loColor = MultiColor.ColorFromHex(loColorHex);
                 hiColor = MultiColor.ColorFromHex(hiColorHex);
             }
-            
 
+            // dc.shader.Base2d base2D1 = (dc.shader.Base2d)this.spriteui.getShader(dc.shader.Base2d.Class);
+            // if (base2D1 !=null)
+            // {
+            //     base2D1.killAlpha__ = true;
+            //     base2D1.pixelAlign__ = false;
+            //     base2D1.hasUVPos__ = true;
+            //     base2D1.isRelative__ = true;
+            //     this.spriteui.addShader(base2D1);
+            // }
+            // dc.h3d.mat.Texture innerTex5 = this.spriteui.rawTile.innerTex;
+            // int color = MultiColor.ColorFromHex("#4169E1");
+            // dc.shader.Outline outline =new dc.shader.Outline(innerTex5,new Ref<int>(ref color));
+            // this.spriteui.addShader(outline);
+
+
+            // dc.h3d.mat.Texture normalMapFromGroup = this.spriteui.lib.getNormalMapFromGroup(idle);
+            // dc.h3d.shader.NormalMap normal = new dc.h3d.shader.NormalMap(normalMapFromGroup);
+            // this.spriteui.addShader(normal);
+
+            // dc.shader.DirLighted dirLighted =new dc.shader.DirLighted();
+            // this.spriteui.addShader(dirLighted);
+
+            // initColorMap();
             GradientHiLo gradientHiLo = (GradientHiLo)this.spriteui.addShader(new GradientHiLo(loColor, hiColor, null));
-
-
-
-            Loader loader = Res.Class.get_loader();
-            _Image @class = Image.Class;
-
-            Texture normalMapTexture = ImageExtender.Class.toNormalMap(
-                (Image)loader.loadCache("atlas/heroSkins0_n.png".AsHaxeString(), @class)
-            );
-            normalMapTexture.set_filter(new Filter.Nearest());
-
-            NormalMap normalMap = new NormalMap(normalMapTexture);
-            this.spriteui.addShader(normalMap);
 
 
             SpritePivot pivot = this.spriteui.pivot;
@@ -150,14 +162,14 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             int fallbackIndex = fallbackRandom.Next(values.Count);
             return values[fallbackIndex];
         }
-        private Texture loadColorMapTexture(string skinId)
+        private dc.h3d.mat.Texture loadColorMapTexture(string skinId)
         {
             try
             {
                 Loader loader = Res.Class.get_loader();
                 _Image @class = Image.Class;
                 string path = $"atlas/{skinId}.png";
-                Texture normalMapTexture = ImageExtender.Class.toNormalMap(
+                dc.h3d.mat.Texture normalMapTexture = ImageExtender.Class.toNormalMap(
                     (Image)loader.loadCache(path.AsHaxeString(), @class)
                 );
                 return normalMapTexture;
@@ -191,6 +203,25 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             }
         }
 
+
+
+        public void initColorMap()
+        {
+            dc.shader.ColorMap shader = (dc.shader.ColorMap)this.spriteui!.getShader(dc.shader.ColorMap.Class);
+            if (shader != null)
+            {
+                this.spriteui.removeShader(shader);
+            }
+
+            dc.h3d.mat.Texture texture = Res.Class.load("atlas/beheaded_aladdin_s.png".AsHaxeString()).toTexture();
+            dc.h3d.mat.Filter filter = new dc.h3d.mat.Filter.Nearest();
+            filter = texture.set_filter(filter);
+
+            virtual_colorMap_consoleCmdId_glowData_group_head_incompatibleHeads_item_model_onlyDefaultHead_scarfBlendMode_scarfs_ skinInfo = Cdb.Class.getSkinInfo("PrisonerDefault".AsHaxeString());
+            dc.h3d.mat.Texture heroColorMap = Assets.Class.getHeroColorMap(skinInfo);
+            dc.shader.ColorMap colorMap = (ColorMap)this.spriteui.addShader(new dc.shader.ColorMap(texture));
+
+        }
 
 
         private void clean()
@@ -250,7 +281,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 
 
             this.inter?.remove();
-            this.inter = new Interactive(screenWidth, screenHeight, this.bg, null);
+            this.inter = new dc.h2d.Interactive(screenWidth, screenHeight, this.bg, null);
             this.inter.onClick = new HlAction<Event>(this.OnClick);
 
             BGtext();
