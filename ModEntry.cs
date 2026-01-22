@@ -222,6 +222,7 @@ namespace DeadCellsMultiplayerMod
 
             orig(self, dt);
             GameMenu.ProcessMainThreadQueue();
+            GameMenu.HandleTextInputClipboardShortcuts();
         }
 
 
