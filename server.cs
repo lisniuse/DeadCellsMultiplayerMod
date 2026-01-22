@@ -255,9 +255,9 @@ public sealed class NetNode : IDisposable
                 _log.Information("[NetNode] Host accepted {ep}", connection.RemoteEndPoint);
 
                 await SendLineToClientSafe(connection, "WELCOME\n").ConfigureAwait(false);
-                if (_role == NetRole.Host && GameDataSync.TryGetHostGameData(out var gameDataJson))
+                if (_role == NetRole.Host && GameDataSync.TryGetHostBossRune(out var hostBossRune))
                 {
-                    await SendLineToClientSafe(connection, $"GAMEDATA|{gameDataJson}\n").ConfigureAwait(false);
+                    await SendLineToClientSafe(connection, $"BOSSRUNE|{hostBossRune}\n").ConfigureAwait(false);
                 }
                 if (_role == NetRole.Host && GameMenu.TryGetHostRunSeed(out var hostSeed))
                 {
@@ -450,11 +450,11 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
-        if (line.StartsWith("GAMEDATA|"))
+        if (line.StartsWith("BOSSRUNE|"))
         {
-            var payload = line["GAMEDATA|".Length..];
+            var payload = line["BOSSRUNE|".Length..];
             lock (_sync) _hasRemote = true;
-            GameDataSync.ReceiveGameData(payload);
+            GameDataSync.ReceiveBossRune(payload);
             return true;
         }
 
@@ -1043,16 +1043,17 @@ public sealed class NetNode : IDisposable
         _log.Information("[NetNode] Sent username {Username}", safe);
     }
 
-    public void SendGameData(string json)
+    public void SendBossRune(int bossRune)
     {
         if (!HasAnyConnection())
         {
-            _log.Information("[NetNode] Skip sending game data: no connected client");
+            _log.Information("[NetNode] Skip sending boss rune: no connected client");
             return;
         }
 
-        SendRaw("GAMEDATA|" + json);
-        _log.Information("[NetNode] Sent game data payload");
+        var payload = bossRune.ToString(CultureInfo.InvariantCulture);
+        SendRaw("BOSSRUNE|" + payload);
+        _log.Information("[NetNode] Sent boss rune {BossRune}", bossRune);
     }
 
     public void SendLevelDesc(string json)

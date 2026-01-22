@@ -153,7 +153,7 @@ namespace DeadCellsMultiplayerMod
             MultiplayerUI MultiplayerUI = new MultiplayerUI(this, 0);
             MobsSynchronization mobs = new MobsSynchronization(this);
             Minimapreveal minimapreveal = new Minimapreveal();
-            ConnectionUI.Initialize(this);
+            // ConnectionUI.Initialize(this);
             GameMenu.Initialize(Logger);
             EventSystem.BroadcastEvent<IOnAdvancedModuleInitializing, ModEntry>(this);
         }
