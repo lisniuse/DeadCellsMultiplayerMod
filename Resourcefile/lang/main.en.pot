@@ -13,10 +13,183 @@ msgstr ""
 "X-Poedit-Basepath: ../../../ModCore\n"
 "X-Poedit-SearchPath-0: .\n"
 
-#: Modules/Game.cs:87
+#: ConnectionUI.cs:87
 msgid "DeadCellsMultiplayerMod"
 msgstr ""
 
 #: ConnectionUI.cs 278
 msgid "Lobby menu"
+msgstr ""
+
+#: ConnectionUI.cs:278
+msgid "Lobby menu"
+msgstr ""
+
+#: ConnectionUI.cs:301
+msgid "Players' list"
+msgstr ""
+
+#: ConnectionUI.cs:342
+msgid "connecting"
+msgstr ""
+
+#: ConnectionUI.cs:344
+msgid "- "
+msgstr ""
+
+
+#: GameMenu.cs:472
+msgid "Play multiplayer"
+msgstr ""
+
+#: GameMenu.cs:472
+msgid "Host or join a multiplayer session"
+msgstr ""
+
+#: GameMenu.cs:485
+msgid "Host game"
+msgstr ""
+
+#: GameMenu.cs:485
+msgid "Join game"
+msgstr ""
+
+#: GameMenu.cs:485
+msgid "Back"
+msgstr ""
+
+#: GameMenu.cs:485
+msgid "Return to main menu"
+msgstr ""
+
+#: GameMenu.cs:485
+msgid "Create a multiplayer session"
+msgstr ""
+
+#: GameMenu.cs:485
+msgid "Connect to an existing host"
+msgstr ""
+
+#: GameMenu.cs:526
+msgid "Edit display name"
+msgstr ""
+
+#: GameMenu.cs:526
+msgid "Username: "
+msgstr ""
+
+#: GameMenu.cs:531
+msgid "Edit IP"
+msgstr ""
+
+#: GameMenu.cs:531
+msgid "IP: "
+msgstr ""
+
+#: GameMenu.cs:531
+msgid "Edit IP address"
+msgstr ""
+
+#: GameMenu.cs:541
+msgid "Edit port"
+msgstr ""
+
+#: GameMenu.cs:541
+msgid "Port: "
+msgstr ""
+
+#: GameMenu.cs:541
+msgid "Edit port"
+msgstr ""
+
+#: GameMenu.cs:554
+msgid "Host"
+msgstr ""
+
+#: GameMenu.cs:554
+msgid "Start hosting"
+msgstr ""
+
+#: GameMenu.cs:554
+msgid "Join"
+msgstr ""
+
+#: GameMenu.cs:554
+msgid "Connect to host"
+msgstr ""
+
+#: GameMenu.cs:637
+msgid "Play"
+msgstr ""
+
+#: GameMenu.cs:637
+msgid "Launch game"
+msgstr ""
+
+#: GameMenu.cs:637
+msgid "Back to host setup"
+msgstr ""
+
+#: GameMenu.cs:666
+msgid "Disconnect"
+msgstr ""
+
+#: GameMenu.cs:666
+msgid "Disconnect and return to main menu"
+msgstr ""
+
+#: GameMenu.cs:680
+msgid "Can't find lobby"
+msgstr ""
+
+#: GameMenu.cs:680
+msgid "OK"
+msgstr ""
+
+#: GameMenu.cs:680
+msgid "Return to join menu"
+msgstr ""
+
+#: GameMenu.cs:1069
+msgid "Username"
+msgstr ""
+
+#: GameMenu.cs:1070
+msgid "IP address"
+msgstr ""
+
+#: GameMenu.cs:1077
+msgid "Port"
+msgstr ""
+
+#: GameMenu.cs:1111
+msgid "connecting"
+msgstr ""
+
+#: GameMenu.cs:1115
+msgid "waiting for the host"
+msgstr ""
+
+#: GameMenu.cs:1117
+msgid "not connected"
+msgstr ""
+
+#: GameMenu.cs:1119
+msgid "waiting for client"
+msgstr ""
+
+#: GameMenu.cs:1121
+msgid "client connected"
+msgstr ""
+
+#: GameMenu.cs:1123
+msgid "connected to host"
+msgstr ""
+
+#: GameMenu.cs:1344
+msgid "OK"
+msgstr ""
+
+#: GameMenu.cs:1344
+msgid "Cancel"
 msgstr ""
