@@ -510,7 +510,7 @@ namespace DeadCellsMultiplayerMod
 
         private static void ShowMultiplayerMenu(TitleScreen screen)
         {
-            screen.ShouldAutoHideConnectionUI(true);
+            
 
 
             var prevSuppress = _suppressAutoButton;
@@ -588,6 +588,7 @@ namespace DeadCellsMultiplayerMod
                     {
                         StartHostServerOnly();
                         ShowHostStatusMenu(screen);
+                        screen.ShouldAutoHideConnectionUI(true);
                     }, "Start hosting");
                 }
                 else
@@ -596,10 +597,11 @@ namespace DeadCellsMultiplayerMod
                     {
                         StartNetwork(role, screen);
                         ShowClientWaitingMenu(screen);
+                        screen.ShouldAutoHideConnectionUI(true);
                     }, "Connect to host");
                 }
 
-                AddMenuButton(screen, "Back", () => ShowMultiplayerMenu(screen), "Back to multiplayer menu");
+                AddMenuButton(screen, "Back", () => {ShowMultiplayerMenu(screen); screen.ShouldAutoHideConnectionUI(false);}, "Back to multiplayer menu");
                 RemoveMenuItems(screen, "About Core Modding", "Play multiplayer");
                 RemoveDuplicatesKeepFirst(screen, "Host game", "Join game", "About Core Modding");
                 _inHostStatusMenu = false;
@@ -783,6 +785,7 @@ namespace DeadCellsMultiplayerMod
                     SetRole(NetRole.None);
                     _menuSelection = NetRole.None;
                     ShowMultiplayerMenu(screen);
+                    screen.ShouldAutoHideConnectionUI(false);
                 }, "Back to host setup");
 
                 RemoveMenuItems(screen, "About Core Modding", "Play multiplayer");
@@ -842,7 +845,7 @@ namespace DeadCellsMultiplayerMod
                 SetIsMainMenu(screen, false);
                 screen.clearMenu();
 
-                AddInfoLine(screen, "Lobby didn't find", infoColor: 0xFF9090);
+                AddInfoLine(screen, "Can't find lobby", infoColor: 0xFF9090);
                 AddMenuButton(screen, "OK", () => ShowConnectionMenu(screen, NetRole.Client), "Return to join menu");
 
                 RemoveMenuItems(screen, "About Core Modding", "Play multiplayer");

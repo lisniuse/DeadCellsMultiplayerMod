@@ -52,8 +52,6 @@ namespace DeadCellsMultiplayerMod
 
         public dc.pr.Game? game;
 
-
-
         public static GhostKing[] clients = new GhostKing[NetNode.MaxClientSlots];
         public static string?[] clientLabels = new string?[NetNode.MaxClientSlots];
         public static int[] clientIds = new int[NetNode.MaxClientSlots];
@@ -67,9 +65,6 @@ namespace DeadCellsMultiplayerMod
         private bool? _lastAnimGSent;
         private double _animResendElapsed;
         private double? _lastAnimPlayRatio;
-        private const double AnimLoopThreshold = 0.995;
-        private const double RatioDropThreshold = 0.5;
-        private const double LoopDetectionCooldown = 0.08;
 
         public static MiniMap miniMap;
 
@@ -77,14 +72,11 @@ namespace DeadCellsMultiplayerMod
 
         public string levelId;
 
-        public static string remoteLevelId;
         public static int remotePlayerId = -1;
 
         public string remoteSkin;
 
-        int _layer;
 
-        HeroHead head;
 
         internal static void SetRemoteSkin(string? skin)
         {
@@ -332,10 +324,6 @@ namespace DeadCellsMultiplayerMod
             if (me == null) return;
             SendHeroCoords();
             ReceiveGhostCoords();
-            if (_lastAnimSent != null && _loopAnimations.Contains(_lastAnimSent))
-            {
-                ResendCurrentAnim(dt);
-            }
         }
 
 
@@ -402,16 +390,6 @@ namespace DeadCellsMultiplayerMod
                     continue;
 
                 var client = clients[index];
-                // if (client == null)
-                // {
-                //     var label = BuildRemoteLabel(remote.Id, remote.Username);
-                //     clients[index] = ghost.CreateGhostKing(me._level, label);
-                //     client = clients[index];
-                //     clientLabels[index] = label;
-                //     clientIds[index] = remote.Id;
-                // }
-                // if (client == null)
-                //     continue;
 
                 remotePlayerId = remote.Id;
                 clientIds[index] = remote.Id;
@@ -437,13 +415,7 @@ namespace DeadCellsMultiplayerMod
             if (client?.spr?._animManager == null) return;
             if (string.IsNullOrWhiteSpace(anim)) return;
             var animManager = client.spr._animManager;
-            try
-            {
-                animManager.stopWithoutStateAnims(anim.AsHaxeString(), queueAnim);
-                animManager.setFrame(0);
-            }
-            catch { }
-            animManager.play(anim.AsHaxeString(), queueAnim, g);
+            animManager.play(anim.AsHaxeString(), queueAnim, g).loop(null);
         }
 
         private void SendHeroAnim(string anim, int? queueAnim, bool? g, bool force = false)
@@ -464,73 +436,6 @@ namespace DeadCellsMultiplayerMod
             _animResendElapsed = 0;
             _lastAnimPlayRatio = null;
         }
-
-        private void ResendCurrentAnim(double dt)
-        {
-            if (_netRole == NetRole.None) return;
-            var net = _net;
-            var animManager = me?.spr?._animManager;
-            if (net == null || animManager == null) return;
-            if (string.IsNullOrWhiteSpace(_lastAnimSent)) return;
-            _animResendElapsed += dt;
-            if (_animResendElapsed < 0.033f) return;
-
-            bool looped = DidLoop(animManager);
-
-            if (!looped) return;
-            if (_animResendElapsed >= 0.2)
-            {
-                net.SendAnim(_lastAnimSent, _lastAnimQueueSent, _lastAnimGSent);
-                _animResendElapsed = 0;
-            }
-        }
-
-        private bool DidLoop(AnimManager animManager)
-        {
-            double currentRatio = 0;
-            if (!TryGetPlayRatio(animManager, out currentRatio))
-            {
-                _lastAnimPlayRatio = null;
-                return false;
-            }
-
-            bool looped = false;
-            if (_lastAnimPlayRatio.HasValue)
-            {
-                var prev = _lastAnimPlayRatio.Value;
-                var enoughTime = _animResendElapsed >= LoopDetectionCooldown;
-
-                if (enoughTime && prev >= RatioDropThreshold && currentRatio < prev)
-                {
-                    looped = true;
-                }
-                else if (enoughTime && currentRatio >= AnimLoopThreshold && prev < AnimLoopThreshold)
-                {
-                    looped = true;
-                }
-            }
-
-            _lastAnimPlayRatio = currentRatio;
-            return looped;
-        }
-
-
-        private bool TryGetPlayRatio(AnimManager animManager, out double ratio)
-        {
-            try
-            {
-                ratio = animManager.getPlayRatio();
-                return true;
-            }
-            catch
-            {
-                ratio = 0;
-                return false;
-            }
-        }
-
-
-
 
         private IPEndPoint BuildEndpoint(string ipText, int port)
         {

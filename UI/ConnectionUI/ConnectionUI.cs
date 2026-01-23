@@ -246,7 +246,6 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             this.inter?.remove();
             this.inter = new dc.h2d.Interactive(screenWidth, screenHeight, this.bg, null);
             this.inter.onClick = new HlAction<Event>(this.OnClick);
-
             BGtext();
         }
 
@@ -264,7 +263,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 
             dc.ui.Text title = Assets.Class.makeText(
                 "Lobby menu".AsHaxeString(),
-                Tools.MultiColor.ColorFromHex("#D2D936"),
+                Tools.MultiColor.ColorFromHex("#1D9310"),
                 true,
                 null
             );
