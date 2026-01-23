@@ -87,7 +87,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
         private List<double> sprx = new List<double> { 0.4, -1.0, -0.2, -0.6 };
         private List<string> animlist = new List<string>
         {
-           "atkScytheB1", "runDance","wineSpit","wineRetreat"
+           "idle", "idle","idle","idle"
         };
         private List<string> sprmodu = new List<string>
         {
@@ -259,19 +259,29 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             this.MainTitleflow.isVertical = true;
             this.MainTitleflow.set_verticalAlign(new FlowAlign.Middle());
             this.MainTitleflow.set_horizontalAlign(new FlowAlign.Middle());
-            this.MainTitleflow.x = 15;
+            this.MainTitleflow.x = 12;
             this.bg!.addChild(this.MainTitleflow);
 
 
             dc.ui.Text title = Assets.Class.makeText(
                 "Lobby menu".AsHaxeString(),
-                Tools.MultiColor.ColorFromHex("#1D9310"),
+                Tools.MultiColor.ColorFromHex("#919191"),
                 true,
                 null
             );
-            title.scaleX = 0.5;
-            title.scaleY = 0.5;
+            title.scaleX = 0.4;
+            title.scaleY = 0.4;
             this.MainTitleflow.addChild(title);
+
+            dc.ui.Text subtitle = Assets.Class.makeText(
+                "Players' list".AsHaxeString(),
+                Tools.MultiColor.ColorFromHex("#919191"),
+                false,
+                null
+            );
+            subtitle.scaleX = 0.35;
+            subtitle.scaleY = 0.35;
+            this.MainTitleflow.addChild(subtitle);
 
             updateConnections();
 
@@ -301,16 +311,16 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             this.connectionLabels.Clear();
 
             List<string> allname = names ?? _ConnectionUI.GetAllPlayerNames();
-            foreach (var item in allname)
+            foreach (var name in allname)
             {
                 dc.ui.Text player2 = Assets.Class.makeText(
-                item.AsHaxeString(),
-                Tools.MultiColor.ColorFromHex("#3DD02F"),
+                ("- " + name).AsHaxeString(),
+                Tools.MultiColor.ColorFromHex("#919191"),
                 false,
                 null
             );
-                player2.scaleX = 0.6;
-                player2.scaleY = 0.6;
+                player2.scaleX = 0.35;
+                player2.scaleY = 0.35;
                 this.MainTitleflow.addChild(player2);
                 this.connectionLabels.Add(player2);
             }

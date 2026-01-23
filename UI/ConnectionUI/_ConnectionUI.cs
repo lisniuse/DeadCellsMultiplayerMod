@@ -19,18 +19,50 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             var localName = GameMenu.Username;
             if (string.IsNullOrWhiteSpace(localName))
                 localName = "Guest";
-            playerNames.Add(localName);
 
             if (!net.TryGetRemoteUserSnapshots(out var snapshots))
-                return playerNames;
+                snapshots = new List<NetNode.RemoteUserSnapshot>();
 
             var localId = net.id;
+            const int hostId = 1;
 
-            foreach (var remote in snapshots)
+            string? hostName = null;
+            if (localId == hostId)
             {
+                hostName = localName;
+            }
+            else
+            {
+                for (int i = 0; i < snapshots.Count; i++)
+                {
+                    var remote = snapshots[i];
+                    if (remote.Id == hostId)
+                    {
+                        hostName = GetPlayerName(localId, remote.Id, remote.Username ?? string.Empty);
+                        break;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(hostName))
+            {
+                var hostSuffix = localId == hostId ? " (Host) (you)" : " (Host)";
+                playerNames.Add(hostName + hostSuffix);
+            }
+
+            if (localId != hostId)
+                playerNames.Add(localName + " (you)");
+
+            for (int i = 0; i < snapshots.Count; i++)
+            {
+                var remote = snapshots[i];
+                if (remote.Id == hostId || remote.Id == localId)
+                    continue;
+
                 string displayName = GetPlayerName(localId, remote.Id, remote.Username ?? string.Empty);
                 playerNames.Add(displayName);
             }
+
             return playerNames;
         }
 
