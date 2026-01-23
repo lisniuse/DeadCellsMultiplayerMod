@@ -248,51 +248,19 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             this.MainTitleflow.isVertical = true;
             this.MainTitleflow.set_verticalAlign(new FlowAlign.Middle());
             this.MainTitleflow.set_horizontalAlign(new FlowAlign.Middle());
-            this.MainTitleflow.x = 45;
+            this.MainTitleflow.x = 15;
             this.bg!.addChild(this.MainTitleflow);
 
 
             dc.ui.Text title = Assets.Class.makeText(
-                "DeadCells Multiplayer".AsHaxeString(),
-                Tools.MultiColor.ColorFromHex("#7effdf"),
+                "Lobby menu".AsHaxeString(),
+                Tools.MultiColor.ColorFromHex("#D2D936"),
                 true,
                 null
             );
-            title.scaleX = 0.7;
-            title.scaleY = 0.7;
+            title.scaleX = 0.5;
+            title.scaleY = 0.5;
             this.MainTitleflow.addChild(title);
-
-            dc.ui.Text subtitle = Assets.Class.makeText(
-                "Connection Lobby".AsHaxeString(),
-                Tools.MultiColor.ColorFromHex("#ffffff"),
-                false,
-                null
-            );
-            subtitle.scaleX = 0.45;
-            subtitle.scaleY = 0.45;
-            this.MainTitleflow.addChild(subtitle);
-
-
-            dc.ui.Text player1 = Assets.Class.makeText(
-                "Homeowner：未连接".AsHaxeString(),
-                Tools.MultiColor.ColorFromHex("#ff6b6b"),
-                false,
-                null
-            );
-            player1.scaleX = 0.4;
-            player1.scaleY = 0.4;
-            this.MainTitleflow.addChild(player1);
-
-
-            dc.ui.Text tip = Assets.Class.makeText(
-                "等待主机开启房间...".AsHaxeString(),
-                Tools.MultiColor.ColorFromHex("#bfbfbf"),
-                false,
-                null
-            );
-            tip.scaleX = 0.4;
-            tip.scaleY = 0.4;
-            this.MainTitleflow.addChild(tip);
 
             List<string> allname = _ConnectionUI.GetAllPlayerNames();
             foreach (var item in allname)
