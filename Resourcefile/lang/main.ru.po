@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "POT-Creation-Date: 2025-11-29 12:26+0800\n"
-"PO-Revision-Date: 2026-01-24 01:43+0700\n"
+"PO-Revision-Date: 2026-01-24 02:08+0700\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "Language: ru\n"
@@ -31,7 +31,7 @@ msgstr "подключение..."
 
 #: ConnectionUI.cs:344
 msgid "- "
-msgstr ""
+msgstr "- "
 
 #: GameMenu.cs:472
 msgid "Play multiplayer"
@@ -71,7 +71,7 @@ msgstr "Изменить никнейм"
 
 #: GameMenu.cs:526
 msgid "Username: "
-msgstr "Никнейм"
+msgstr "Никнейм: "
 
 #: GameMenu.cs:531
 msgid "Edit IP"
@@ -79,7 +79,7 @@ msgstr "Изменить IP"
 
 #: GameMenu.cs:531
 msgid "IP: "
-msgstr "Адрес"
+msgstr "Адрес: "
 
 #: GameMenu.cs:531
 msgid "Edit IP address"
@@ -91,7 +91,7 @@ msgstr "Изменить порт"
 
 #: GameMenu.cs:541
 msgid "Port: "
-msgstr "Порт"
+msgstr "Порт: "
 
 #: GameMenu.cs:554
 msgid "Host"
@@ -121,58 +121,62 @@ msgstr "Запустить игру"
 msgid "Back to host setup"
 msgstr "Вернуться к настройки лобби"
 
+#: GameMenu.cs:604
+msgid "Back to multiplayer menu"
+msgstr "Вернуться в меню мультиплеера"
+
 #: GameMenu.cs:666
 msgid "Disconnect"
-msgstr ""
+msgstr "Отключиться"
 
 #: GameMenu.cs:666
 msgid "Disconnect and return to main menu"
-msgstr ""
+msgstr "Отключиться и вернуться в главное меню"
 
 #: GameMenu.cs:680
 msgid "Can't find lobby"
-msgstr ""
+msgstr "Не удалось найти лобби"
 
 #: GameMenu.cs:680
 msgid "Return to join menu"
-msgstr ""
+msgstr "Вернуться в лобби подключения"
 
 #: GameMenu.cs:1069
 msgid "Username"
-msgstr ""
+msgstr "Никнейм"
 
 #: GameMenu.cs:1070
 msgid "IP address"
-msgstr ""
+msgstr "Адрес"
 
 #: GameMenu.cs:1077
 msgid "Port"
-msgstr ""
+msgstr "Порт"
 
 #: GameMenu.cs:1115
 msgid "waiting for the host"
-msgstr ""
+msgstr "ожидание хоста"
 
 #: GameMenu.cs:1117
 msgid "not connected"
-msgstr ""
+msgstr "не подключён"
 
 #: GameMenu.cs:1119
 msgid "waiting for client"
-msgstr ""
+msgstr "ожидание клиента"
 
 #: GameMenu.cs:1121
 msgid "client connected"
-msgstr ""
+msgstr "клиент подключён"
 
 #: GameMenu.cs:1123
 msgid "connected to host"
-msgstr ""
+msgstr "подключён к хосту"
 
 #: GameMenu.cs:1344
 msgid "OK"
-msgstr ""
+msgstr "Ок"
 
 #: GameMenu.cs:1344
 msgid "Cancel"
-msgstr ""
+msgstr "Назад"

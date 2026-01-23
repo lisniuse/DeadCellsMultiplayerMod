@@ -28,7 +28,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 
             if (!net.HasRemote && !net.IsHost)
             {
-                playerNames.Add("connecting");
+                playerNames.Add("connecting...");
                 return playerNames;
             }
 

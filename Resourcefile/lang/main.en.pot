@@ -30,7 +30,7 @@ msgid "Players' list"
 msgstr ""
 
 #: ConnectionUI.cs:342
-msgid "connecting"
+msgid "connecting..."
 msgstr ""
 
 #: ConnectionUI.cs:344
@@ -130,6 +130,10 @@ msgstr ""
 msgid "Back to host setup"
 msgstr ""
 
+#: GameMenu.cs:604
+msgid "Back to multiplayer menu"
+msgstr ""
+
 #: GameMenu.cs:666
 msgid "Disconnect"
 msgstr ""
@@ -163,7 +167,7 @@ msgid "Port"
 msgstr ""
 
 #: GameMenu.cs:1111
-msgid "connecting"
+msgid "connecting..."
 msgstr ""
 
 #: GameMenu.cs:1115

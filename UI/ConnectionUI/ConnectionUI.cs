@@ -287,7 +287,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             this.MainTitleflow.addChild(titleWrapper);
 
             dc.ui.Text subtitle = Assets.Class.makeText(
-                "Players' list".AsHaxeString(),
+                GetText.Instance.GetString("Players' list").AsHaxeString(),
                 Tools.MultiColor.ColorFromHex("#919191"),
                 false,
                 null
@@ -340,9 +340,14 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             List<string> allname = names ?? _ConnectionUI.GetAllPlayerNames();
             foreach (var name in allname)
             {
-                bool isConnecting = string.Equals(name, "connecting", StringComparison.OrdinalIgnoreCase);
+                bool isConnecting =
+                    string.Equals(name, "connecting", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, "connecting...", StringComparison.OrdinalIgnoreCase);
+                string displayName = isConnecting
+                    ? GetText.Instance.GetString("connecting...")
+                    : $"{GetText.Instance.GetString("- ")}{name}";
                 dc.ui.Text player2 = Assets.Class.makeText(
-                (isConnecting ? name : "- " + name).AsHaxeString(),
+                displayName.AsHaxeString(),
                 Tools.MultiColor.ColorFromHex("#c9c9c9"),
                 false,
                 null
