@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using DeadCellsMultiplayerMod;
 using dc.en;
+using dc.hl.types;
 using dc.pr;
 using dc.tool;
 using dc.tool.hero;
@@ -21,7 +22,6 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         public InventItem? equippedWeapon;
 
-        // Parameterless ctor for serializer fallback when older saves don't carry custom data.
         public KingActiveSkillsManager() : base(GetFallbackHero())
         {
             me = lastKnownHero;
@@ -34,6 +34,17 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             lvl = level;
             lastKnownHero = hero;
         }
+
+
+        public override void init()
+        {
+            if (this.activeSkills == null)
+                this.activeSkills = new ArrayObj();
+            if (this.passivePowers == null)
+                this.passivePowers = new ArrayObj();
+            base.init();
+        }
+
 
         object IHxbitSerializable<object>.GetData()
         {
