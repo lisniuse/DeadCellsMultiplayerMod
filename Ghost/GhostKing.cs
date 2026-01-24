@@ -16,10 +16,9 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 {
     public class GhostKing : KingSkin, IHxbitSerializable<object>
     {
-        // Fallback for deserialization when older saves don't carry custom data.
-        public GhostKing() : base(GetFallbackLevel(), -1000, -1000)
-        {
-        }
+        public KingActiveSkillsManager? activeSkillsManager;
+        public InventItem? activeWeapon;
+        public Weapon? activeWeaponImpl;
 
         public GhostKing(Level lvl, int x, int y) : base(lvl, x, y)
         {
