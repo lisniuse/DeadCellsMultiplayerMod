@@ -55,52 +55,6 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
         {
         }
 
-        public InventItem? GiveWeaponFromHero(int slot = 0)
-        {
-            var hero = me ?? lastKnownHero;
-            var inventory = hero?.inventory;
-            if (inventory == null)
-                return null;
-
-            var weapon = inventory.getEquippedWeaponOn(slot)
-                         ?? inventory.getEquippedWeaponOn(0)
-                         ?? inventory.getEquippedWeaponOn(1)
-                         ?? inventory.getBackpackWeapon();
-            if (weapon != null)
-            {
-                equippedWeapon = weapon;
-            }
-            return weapon;
-        }
-
-        public InventItem? GiveRandomWeaponFromHero()
-        {
-            var hero = me ?? lastKnownHero;
-            var inventory = hero?.inventory;
-            if (inventory == null)
-                return null;
-
-            var candidates = new List<InventItem>(3);
-            var weapon0 = inventory.getEquippedWeaponOn(0);
-            if (weapon0 != null)
-                candidates.Add(weapon0);
-
-            var weapon1 = inventory.getEquippedWeaponOn(1);
-            if (weapon1 != null)
-                candidates.Add(weapon1);
-
-            var backpack = inventory.getBackpackWeapon();
-            if (backpack != null)
-                candidates.Add(backpack);
-
-            if (candidates.Count == 0)
-                return null;
-
-            var weapon = candidates[rng.Next(candidates.Count)];
-            equippedWeapon = weapon;
-            return weapon;
-        }
-
         private static Hero GetFallbackHero()
         {
             var hero = ModEntry.me ?? dc.pr.Game.Class.ME?.hero;

@@ -346,7 +346,6 @@ namespace DeadCellsMultiplayerMod
             SendHeroCoords();
             ReceiveGhostCoords();
             UpdateGhostHeads();
-            UpdateGhostAttacks(dt);
 
         }
 
@@ -371,70 +370,7 @@ namespace DeadCellsMultiplayerMod
         private static readonly double[] ghostAttackCooldowns = new double[NetNode.MaxClientSlots];
         private const double GhostAttackInterval = 0.35;
 
-        private void UpdateGhostAttacks(double dt)
-        {
-            for (int i = 0; i < clients.Length; i++)
-            {
-                var ghost = clients[i];
-                if (ghost == null)
-                    continue;
-                if (clientIds[i] <= 0)
-                    continue;
-
-                ghostAttackCooldowns[i] -= dt;
-                if (ghostAttackCooldowns[i] > 0)
-                    continue;
-
-                var weapon = ghost.activeWeaponImpl;
-                if (weapon == null)
-                {
-                    var manager = ghost.activeSkillsManager;
-                    var item = manager?.GiveRandomWeaponFromHero();
-                    if (item != null)
-                    {
-                        ghost.activeWeapon = item;
-                        ghost.activeWeaponImpl = new Weapon(me, item);
-                        weapon = ghost.activeWeaponImpl;
-                    }
-                }
-
-                if (weapon != null)
-                {
-                    TryUseGhostWeapon(ghost, weapon);
-                }
-
-                ghostAttackCooldowns[i] = GhostAttackInterval;
-            }
-        }
-
-        private static void TryUseGhostWeapon(GhostKing ghost, Weapon weapon)
-        {
-            if (ghost == null || weapon == null)
-                return;
-
-            try
-            {
-                dynamic dynWeapon = weapon;
-                object? oldOwner = null;
-                bool hasOwner = false;
-                try
-                {
-                    oldOwner = dynWeapon.owner;
-                    hasOwner = true;
-                }
-                catch { }
-
-                if (hasOwner)
-                    dynWeapon.owner = ghost;
-
-                dynWeapon.tryToUse();
-
-                if (hasOwner)
-                    dynWeapon.owner = oldOwner;
-            }
-            catch { }
-        }
-
+        
 
 
 
