@@ -40,16 +40,34 @@ Every bit of feedback helps improve multiplayer support for **Dead Cells**.
 
 ## 📦 Installation
 
-### 1️⃣ Install Dead Cells Core Modding API (DCCM)
+## 1️⃣ Install Dead Cells Core Modding API (DCCM)
 
-Download the latest version of DCCM from the official repository:  
-https://github.com/dead-cells-core-modding/core
+### 🔹 Steam version
 
-Follow the installation instructions provided on the repository page.
-P.S. You can download the **non-MDK version** if you don’t plan to create mods yourself.
+If you are using the **Steam version** of the game, follow the official Workshop installation guide:
+
+👉 [https://dead-cells-core-modding.github.io/docs/docs/tutorial/install-workshop/](https://dead-cells-core-modding.github.io/docs/docs/tutorial/install-workshop/)
+
+This method will automatically install and keep DCCM up to date.
+
 ---
 
-### 2️⃣ Install DeadCellsMultiplayerMod
+### 🔹 Non-Steam version
+
+If you are using a **non-Steam version** of Dead Cells:
+
+1. Download the latest release of **DCCM** from the official repository:
+   👉 [https://github.com/dead-cells-core-modding/core](https://github.com/dead-cells-core-modding/core)
+
+2. Open your Dead Cells game directory.
+
+3. Create a folder named `coremod`.
+
+4. Extract the downloaded DCCM files into the `coremod` folder.
+
+---
+
+## 2️⃣ Install DeadCellsMultiplayerMod
 
 1. Navigate to your **DCCM directory**
 2. Create a folder named `mods` (if it doesn’t exist)
