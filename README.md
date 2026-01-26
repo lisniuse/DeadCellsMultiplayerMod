@@ -20,6 +20,16 @@ one player hosts a server, another connects — and both players can **play thro
 
 ---
 
+## ⭐ Support the Project
+
+If you find this project interesting:
+- ⭐ Star the repository  
+- 🍴 Fork the project and experiment  
+
+Every bit of feedback helps improve multiplayer support for **Dead Cells**.
+
+---
+
 ## 🧰 Requirements
 
 - **Dead Cells (PC)**
@@ -97,13 +107,6 @@ On the first launch, required configuration files will be generated automaticall
 
 ---
 
-## ⭐ Support the Project
-
-If you find this project interesting:
-- ⭐ Star the repository  
-- 🍴 Fork the project and experiment  
-
-Every bit of feedback helps improve multiplayer support for **Dead Cells**.
 
 
 <!--
