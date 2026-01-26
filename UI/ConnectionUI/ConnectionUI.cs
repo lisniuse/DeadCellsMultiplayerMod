@@ -76,11 +76,11 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             };
 
 
-            for (int i = 0; i < sprx.Count; i++)
-            {
+            // for (int i = 0; i < sprx.Count; i++)
+            // {
 
-                loadspr(sprx[i], sprmodu[i], i);
-            }
+            //     loadspr(sprx[i], sprmodu[i], i);
+            // }
 
         }
 

@@ -187,18 +187,6 @@ namespace DeadCellsMultiplayerMod
             animManager.play(anim.AsHaxeString(), queueAnim, g);
         }
 
-        public void HandleRemoteAnim(NetNode? net)
-        {
-            if (net == null || king == null || king.spr == null) return;
-
-            if (net.TryGetRemoteAnim(out var anim, out var queueAnim, out var g) && !string.IsNullOrWhiteSpace(anim))
-            {
-                _lastRemoteAnim = anim;
-                _lastRemoteAnimQueue = queueAnim;
-                _lastRemoteAnimG = g;
-                PlayAnimation(anim, queueAnim, g);
-            }
-        }
 
         public void SetLabel(Entity entity, string? text)
         {
