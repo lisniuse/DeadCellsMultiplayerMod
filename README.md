@@ -44,7 +44,7 @@ Every bit of feedback helps improve multiplayer support for **Dead Cells**.
 
 ### 🔹 Steam version
 
-If you are using the **Steam version** of the game, follow the official Workshop installation guide:
+If you are using the **Steam version** of the game, follow the official installation guide:
 
 👉 [https://dead-cells-core-modding.github.io/docs/docs/tutorial/install-workshop/](https://dead-cells-core-modding.github.io/docs/docs/tutorial/install-workshop/)
 
@@ -68,6 +68,18 @@ If you are using a **non-Steam version** of Dead Cells:
 ---
 
 ## 2️⃣ Install DeadCellsMultiplayerMod
+
+### 🔹 Steam version
+
+If you are using the **Steam version** of the game:
+1. Open https://steamcommunity.com/sharedfiles/filedetails/?id=3655044722
+2. Install the mod in one click.
+
+---
+
+### 🔹 Non-Steam version
+
+If you are using a **non-Steam version** of Dead Cells:
 
 1. Navigate to your **DCCM directory**
 2. Create a folder named `mods` (if it doesn’t exist)
