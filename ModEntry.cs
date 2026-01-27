@@ -44,6 +44,7 @@ namespace DeadCellsMultiplayerMod
         IOnHeroInit,
         IOnHeroUpdate,
         IOnFrameUpdate,
+        IOnAfterLoadingCDB,
         IOnAdvancedModuleInitializing
     {
         public static ModEntry? Instance { get; private set; }
@@ -78,7 +79,16 @@ namespace DeadCellsMultiplayerMod
         public static int remotePlayerId = -1;
 
         public string remoteSkin;
+        public string remoteHeadSkin;
 
+        public string lastHeadAnim;
+        public static ArrayDyn customHeads;
+
+
+        void IOnAfterLoadingCDB.OnAfterLoadingCDB(dc._Data_ cdb)
+        {
+            customHeads = cdb.customHead.all;   
+        }
 
 
         internal static void SetRemoteSkin(string? skin)
@@ -89,6 +99,17 @@ namespace DeadCellsMultiplayerMod
 
             instance.remoteSkin = string.IsNullOrWhiteSpace(skin)
                 ? "PrisonerDefault"
+                : skin.Replace("|", "/").Trim();
+        }
+
+        internal static void SetRemoteHeadSkin(string? skin)
+        {
+            var instance = Instance;
+            if (instance == null)
+                return;
+
+            instance.remoteHeadSkin = string.IsNullOrWhiteSpace(skin)
+                ? "BaseFlame"
                 : skin.Replace("|", "/").Trim();
         }
 
@@ -128,7 +149,6 @@ namespace DeadCellsMultiplayerMod
                 rLastX[i] = 0;
                 rLastY[i] = 0;
             }
-            System.Array.Clear(ghostAttackCooldowns, 0, ghostAttackCooldowns.Length);
         }
 
         private static string BuildRemoteLabel(int remoteId, string? username)
@@ -263,7 +283,10 @@ namespace DeadCellsMultiplayerMod
             {
                 SendHeroAnim(play, queueAnim, g, force: true);
             }
-
+            if(me != null && me.heroHead.customHeadSpr != null && ReferenceEquals(self, me.heroHead.customHeadSpr._animManager))
+            {
+                SendHeadAnim(play);
+            }
 
             return orig(self, plays, queueAnim, g);
         }
@@ -301,10 +324,10 @@ namespace DeadCellsMultiplayerMod
                 bool fromUI = false;
                 var newHead = new Kinghead(me, clients[i], me._level);
                 newHead.init(me._level, null, Ref<bool>.From(ref fromUI));
-                // newHead.eye.x    
-                clientHeads[i] = newHead;
 
-                // clients[i].spr._animManager.play("idle".AsHaxeString(), null, null).loop(null);
+                clientHeads[i] = newHead;
+                clients[i].head = newHead;
+
                 rLastX[i] = 0;
                 rLastY[i] = 0;
                 clientLabels[i] = null;
@@ -366,11 +389,6 @@ namespace DeadCellsMultiplayerMod
                 }
             }
         }
-
-        private static readonly double[] ghostAttackCooldowns = new double[NetNode.MaxClientSlots];
-        private const double GhostAttackInterval = 0.35;
-
-        
 
 
 
@@ -452,6 +470,8 @@ namespace DeadCellsMultiplayerMod
 
                 if (remote.HasAnim && !string.IsNullOrWhiteSpace(remote.Anim))
                     PlayGhostAnim(client, remote.Anim!, remote.AnimQueue, remote.AnimG);
+                if(remote.HasHeadAnim && !string.IsNullOrWhiteSpace(remote.HeadAnim))
+                    PlayGhostHeadAnim(client, remote.HeadAnim);
             }
         }
 
@@ -461,6 +481,15 @@ namespace DeadCellsMultiplayerMod
             if (string.IsNullOrWhiteSpace(anim)) return;
             var animManager = client.spr._animManager;
             animManager.play(anim.AsHaxeString(), queueAnim, g).loop(null);
+        }
+
+        private void PlayGhostHeadAnim(GhostKing client, string anim)
+        {
+            if (client.head == null || client.head.customHeadSpr._animManager == null) return;
+            if (string.IsNullOrWhiteSpace(anim)) return;
+            var animManager = client.head.customHeadSpr._animManager;
+            animManager.play(anim.AsHaxeString(), null, null).loop(null);
+            animManager.genSpeed = 0.4;
         }
 
         private void SendHeroAnim(string anim, int? queueAnim, bool? g, bool force = false)
@@ -481,6 +510,16 @@ namespace DeadCellsMultiplayerMod
             _animResendElapsed = 0;
             _lastAnimPlayRatio = null;
         }
+
+
+        private void SendHeadAnim(string anim)
+        {
+            if (_netRole == NetRole.None) return;
+            var net = _net;
+            if (net == null || string.IsNullOrWhiteSpace(anim)) return;
+            net.SendHeadAnim(anim);
+        }
+
 
         private IPEndPoint BuildEndpoint(string ipText, int port)
         {
@@ -506,27 +545,27 @@ namespace DeadCellsMultiplayerMod
 
         private void StartHostWithEndpoint(IPEndPoint ep)
         {
-            // try
-            // {
-            _net?.Dispose();
+            try
+            {
+                _net?.Dispose();
 
-            _net = NetNode.CreateHost(Logger, ep);
-            _netRole = NetRole.Host;
-            GameMenu.SetRole(_netRole);
-            GameMenu.NetRef = _net;
-            ConnectionUI.NotifyConnectionsChanged();
+                _net = NetNode.CreateHost(Logger, ep);
+                _netRole = NetRole.Host;
+                GameMenu.SetRole(_netRole);
+                GameMenu.NetRef = _net;
+                ConnectionUI.NotifyConnectionsChanged();
 
-            var lep = _net.ListenerEndpoint;
-            if (lep != null)
-                Logger.Information($"[NetMod] Host listening at {lep.Address}:{lep.Port}");
-            // }
-            // catch (Exception ex)
-            // {
-            //     Logger.Error($"[NetMod] Host start failed: {ex.Message}");
-            //     _netRole = NetRole.None;
-            //     _net = null;
-            //     GameMenu.SetRole(_netRole);
-            // }
+                var lep = _net.ListenerEndpoint;
+                if (lep != null)
+                    Logger.Information($"[NetMod] Host listening at {lep.Address}:{lep.Port}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"[NetMod] Host start failed: {ex.Message}");
+                    _netRole = NetRole.None;
+                    _net = null;
+                    GameMenu.SetRole(_netRole);
+            }
         }
 
         private void StartClientWithEndpoint(IPEndPoint ep)

@@ -14,6 +14,7 @@ using dc.tool;
 using Hashlink.Virtuals;
 using ModCore.Storage;
 using ModCore.Utitities;
+using dc.spine.support.utils;
 
 namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 {
@@ -24,8 +25,13 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
         public Weapon? activeWeaponImpl;
         public StringMap? animationTracks;
 
+        public HeroHead head;
+
         ScarfManager scarf;
 
+        public GhostKing() : base(null, 0, 0)
+        {
+        }
 
         public GhostKing(Level lvl, int x, int y) : base(lvl, x, y)
         {

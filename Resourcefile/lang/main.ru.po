@@ -180,3 +180,9 @@ msgstr "Ок"
 #: GameMenu.cs:1344
 msgid "Cancel"
 msgstr "Назад"
+
+msgid "(Host)"
+msgstr "(Хост)"
+
+msgid "(you)"
+msgstr "(ты)"

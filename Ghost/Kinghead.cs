@@ -1,6 +1,7 @@
 using System;
 using dc;
 using dc.en;
+using dc.haxe;
 using dc.haxe.ds;
 using dc.hl.types;
 using dc.hxd;
@@ -13,6 +14,7 @@ using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using HaxeProxy.Runtime;
 using ModCore.Storage;
 using ModCore.Utitities;
+using Serilog.Core;
 
 namespace DeadCellsMultiplayerMod.KingHead
 {
@@ -52,6 +54,33 @@ namespace DeadCellsMultiplayerMod.KingHead
         public override void init(Level parent, dc.h2d.Object fromUI, Ref<bool> fromUI1)
         {
             var headSprite = king?.spr;
+            var remoteHeadSkin = ModEntry.Instance!.remoteHeadSkin;
+            if (remoteHeadSkin == null) remoteHeadSkin = "BaseFlame";
+            for(int i=0; i < ModEntry.customHeads.array.length; i++)
+            {
+                var cHead = ModEntry.customHeads.getDyn(i);
+                if(cHead.item.ToString() == remoteHeadSkin)
+                {
+                    var atlas = new Hashlink.Virtuals.virtual_atlas_glowData_item_particleEffects_properties_();
+                    try
+                    {
+                        this.customHead = true;
+                        atlas.atlas = cHead.atlas;
+                        atlas.glowData = cHead.glowData;
+                        atlas.item = cHead.item;
+                        atlas.particleEffects = cHead.particleEffects;
+                        atlas.properties = cHead.properties; 
+                        this.forcedCustomHead = atlas;
+                    }
+                    catch
+                    {
+                        atlas.glowData = cHead.glowData.arrayObj;
+                        atlas.particleEffects = cHead.particleEffects.arrayObj;
+                        atlas.properties = cHead.properties.arrayObj;
+                        this.forcedCustomHead = atlas;
+                    }
+                }
+            }
             if (headSprite != null)
             {
                 headMaterial = headSprite.frameData?.tile;
@@ -74,7 +103,6 @@ namespace DeadCellsMultiplayerMod.KingHead
                 this.alwaysShowEye = true;
                 return;
             }
-
             base.init(parent, fromUI, fromUI1);
             this.heroHasHead = true;
             this.alwaysShowHead = true;
@@ -253,8 +281,7 @@ namespace DeadCellsMultiplayerMod.KingHead
             return useLocalSpace.Value;
         }
 
-
-        }
+    }
 
 
 

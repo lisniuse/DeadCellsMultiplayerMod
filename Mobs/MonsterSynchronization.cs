@@ -66,7 +66,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                                 $"|Walking: {isWalking}" +
                                 $"{lifePercent}|" + scorelist;
 
-
                     if (aTarget != null)
                     {
                         string targetType = aTarget.GetType().ToString();

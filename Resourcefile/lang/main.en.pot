@@ -197,3 +197,9 @@ msgstr ""
 #: GameMenu.cs:1344
 msgid "Cancel"
 msgstr ""
+
+msgid "(Host)"
+msgstr ""
+
+msgid "(you)"
+msgstr ""

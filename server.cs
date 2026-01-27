@@ -9,6 +9,7 @@ using DeadCellsMultiplayerMod;
 using HaxeProxy.Runtime;
 using Serilog;
 using dc;
+using Serilog.Core;
 
 public enum NetRole { None, Host, Client }
 
@@ -59,6 +60,10 @@ public sealed class NetNode : IDisposable
         public int Recover;
         public string? Username;
         public string? Skin;
+        public string? Head;
+
+        public string HeadAnim;
+        public bool HasHeadAnim;
 
         public RemoteState(int id)
         {
@@ -77,8 +82,10 @@ public sealed class NetNode : IDisposable
         public readonly bool? AnimG;
         public readonly bool HasAnim;
         public readonly string? Username;
+        public readonly string? HeadAnim;
+        public readonly bool HasHeadAnim;
 
-        public RemoteSnapshot(int id, double x, double y, int dir, string? anim, int? animQueue, bool? animG, bool hasAnim, string? username)
+        public RemoteSnapshot(int id, double x, double y, int dir, string? anim, int? animQueue, bool? animG, bool hasAnim, string? username, string? headAnim, bool hasHeadAnim)
         {
             Id = id;
             X = x;
@@ -89,6 +96,8 @@ public sealed class NetNode : IDisposable
             AnimG = animG;
             HasAnim = hasAnim;
             Username = username;
+            HeadAnim = headAnim;
+            HasHeadAnim = hasHeadAnim;
         }
     }
 
@@ -545,6 +554,45 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
+        if (line.StartsWith("HEAD|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["HEAD|".Length..];
+            var effectiveId = ResolvePayloadId(payload, senderId, out var skinHead);
+            _log.Debug($"{skinHead}");
+            if (forceSenderId)
+                effectiveId = senderId;
+            if (effectiveId.HasValue)
+            {
+                int primaryId;
+                lock (_sync)
+                {
+                    var state = GetOrCreateRemoteLocked(effectiveId.Value);
+                    state.Head = skinHead;
+                    state.HasRemote = true;
+                    _hasRemote = true;
+                    if (_primaryRemoteId == 0)
+                        _primaryRemoteId = effectiveId.Value;
+                    primaryId = _primaryRemoteId;
+                }
+
+                if (effectiveId.Value == primaryId)
+                {
+                    try
+                    {
+                        GameDataSync.ReceiveHeroHeadSkin(skinHead);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warning("[NetNode] Failed to handle hero skin: {msg}", ex.Message);
+                    }
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildTaggedLine("HEAD", effectiveId.Value, skinHead);
+            }
+            return true;
+        }
+
         if (line.StartsWith("GEN|"))
         {
             var payload = line["GEN|".Length..];
@@ -612,6 +660,33 @@ public sealed class NetNode : IDisposable
 
                 if (_role == NetRole.Host && senderId.HasValue)
                     forwardLine = BuildAnimLine(effectiveId.Value, animName, q, gFlag);
+            }
+            return true;
+        }
+
+
+        if (line.StartsWith("HEADANIM|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line[(line.IndexOf('|') + 1)..];
+            ParseHeadAnimPayload(payload, out var parsedId, out var animName);
+            var effectiveId = parsedId ?? senderId;
+            if (forceSenderId)
+                effectiveId = senderId;
+            if (effectiveId.HasValue)
+            {
+                lock (_sync)
+                {
+                    var state = GetOrCreateRemoteLocked(effectiveId.Value);
+                    state.HeadAnim = animName;
+                    state.HasHeadAnim = true;
+                    state.HasRemote = true;
+                    _hasRemote = true;
+                    if (_primaryRemoteId == 0)
+                        _primaryRemoteId = effectiveId.Value;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildHeadAnimLine(effectiveId.Value, animName);
             }
             return true;
         }
@@ -824,6 +899,25 @@ public sealed class NetNode : IDisposable
             gFlag = parsedBool;
     }
 
+
+    private static void ParseHeadAnimPayload(string payload, out int? parsedId, out string animName)
+    {
+        parsedId = null;
+        animName = string.Empty;
+
+        var parts = payload.Split('|');
+        var startIndex = 0;
+        if (parts.Length >= 2 &&
+            int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var idValue))
+        {
+            parsedId = idValue;
+            startIndex = 1;
+        }
+
+        if (parts.Length > startIndex)
+            animName = parts[startIndex];
+    }
+
     private static void ParseHpPayload(string payload, out int? parsedId, out int life, out int maxLife, out int lif, out int bonusLife, out int recover)
     {
         parsedId = null;
@@ -917,6 +1011,11 @@ public sealed class NetNode : IDisposable
         var queuePart = queue.HasValue ? queue.Value.ToString(CultureInfo.InvariantCulture) : string.Empty;
         var gPart = gFlag.HasValue ? (gFlag.Value ? "1" : "0") : string.Empty;
         return $"ANIM|{id}|{animName}|{queuePart}|{gPart}\n";
+    }
+
+    private static string BuildHeadAnimLine(int id, string animName)
+    {
+        return $"HEADANIM|{id}|{animName}\n";
     }
 
     private static string BuildHpLine(int id, int life, int maxLife, int lif, int bonusLife, int recover)
@@ -1120,11 +1219,25 @@ public sealed class NetNode : IDisposable
         SendRaw("KICK");
     }
 
+
+    public void SendHeadAnim(string anim)
+    {
+        if (!HasAnyConnection())
+        {
+            return;
+        }
+
+        var safe = (anim ?? string.Empty).Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
+        var idPart = ID > 0 ? $"{ID}|" : string.Empty;
+        SendRaw($"HEADANIM|{idPart}{safe}");
+    }
+
     public void SendAnim(string anim, int? queueAnim = null, bool? g = null)
     {
         if (!HasAnyConnection())
         {
             return;
+            
         }
 
         var safe = (anim ?? string.Empty).Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
@@ -1149,6 +1262,23 @@ public sealed class NetNode : IDisposable
 
         var idPart = ID > 0 ? $"{ID}|" : string.Empty;
         SendRaw("SKIN|" + idPart + safe);
+        _log.Information("[NetNode] Sent hero skin {Skin}", safe);
+    }
+
+    public void SendHeroHeadSkin(string skin)
+    {
+        if (!HasAnyConnection())
+        {
+            _log.Information("[NetNode] Skip sending hero skin: no connected client");
+            return;
+        }
+
+        var safe = (skin ?? "PrisonerDefault").Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
+        if (string.IsNullOrWhiteSpace(safe))
+            safe = "BaseFlame";
+
+        var idPart = ID > 0 ? $"{ID}|" : string.Empty;
+        SendRaw("HEAD|" + idPart + safe);
         _log.Information("[NetNode] Sent hero skin {Skin}", safe);
     }
 
@@ -1205,14 +1335,18 @@ public sealed class NetNode : IDisposable
                     continue;
 
                 var hasAnim = state.HasAnim;
+                var hasHeadAnim = state.HasHeadAnim;
                 var anim = hasAnim ? state.Anim : null;
                 var animQueue = hasAnim ? state.AnimQueue : null;
                 var animG = hasAnim ? state.AnimG : null;
+                var headAnim = hasHeadAnim? state.HeadAnim : null;
 
-                snapshot.Add(new RemoteSnapshot(state.Id, state.X, state.Y, state.Dir, anim, animQueue, animG, hasAnim, state.Username));
+                snapshot.Add(new RemoteSnapshot(state.Id, state.X, state.Y, state.Dir, anim, animQueue, animG, hasAnim, state.Username, headAnim, hasHeadAnim));
 
                 if (hasAnim)
                     state.HasAnim = false;
+                if (hasHeadAnim)
+                    state.HasHeadAnim = false;
             }
 
             return snapshot.Count > 0;

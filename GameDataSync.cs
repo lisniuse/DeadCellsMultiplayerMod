@@ -6,15 +6,14 @@ using dc.level;
 using HaxeProxy.Runtime;
 using dc.tool;
 using System.Globalization;
-
+using Serilog.Core;
+// using Newtonsoft.Json;
 
 namespace DeadCellsMultiplayerMod
 {
     internal class GameDataSync
     {
         static Serilog.ILogger _log;
-
-
         static public int Seed;
 
         static public virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ _isTwitch;
@@ -79,6 +78,7 @@ namespace DeadCellsMultiplayerMod
             _launch = gdata;
             self.pickDeathItem();
             SendHeroSkin(self, net);
+            SendHeroHeadSkin(self, net);
             orig(self, lvl, isTwitch, isCustom, mode, gdata);
         }
 
@@ -92,6 +92,61 @@ namespace DeadCellsMultiplayerMod
             // ldat = Seed;
             ModEntry.ResetClientSlots();
             // var net = GameMenu.NetRef;
+            // var baseLootLevel = resetCount.baseLootLevel;
+            // var biome = resetCount.biome.ToString();
+            // var cellBonus = resetCount.cellBonus;
+            // var doubleUps = resetCount.doubleUps;
+            // var eliteRoomChance = resetCount.eliteRoomChance;
+            // var eliteWanderChance = resetCount.eliteWanderChance;
+            // var flagsProps = resetCount.flagsProps;
+            // var group = resetCount.group;
+            // var index = resetCount.index;
+            // var loreDescriptions = resetCount.loreDescriptions;
+            // var mapDepth = resetCount.mapDepth;
+            // var minGold = resetCount.minGold;
+            // var mobDensity = resetCount.mobDensity;
+            // var mobs = resetCount.mobs;
+            // var name = resetCount.name.ToString();
+            // var nextLevels = resetCount.nextLevels;
+            // var parallax = resetCount.parallax;
+            // var props = resetCount.props;
+            // var quarterUpsBC3 = resetCount.quarterUpsBC3;
+            // var quarterUpsBC4 = resetCount.quarterUpsBC4;
+            // var specificLoots = resetCount.specificLoots;
+            // var specificSubBiome = resetCount.specificSubBiome;
+            // var tripleUps = resetCount.tripleUps;
+            // var worldDepth = resetCount.worldDepth;
+            // var json = JsonConvert.SerializeObject(
+            //     new
+            //     {
+            //         baseLootLevel,
+            //         biome,
+            //         cellBonus,
+            //         doubleUps,
+            //         eliteRoomChance,
+            //         eliteWanderChance,
+            //         flagsProps,
+            //         group,
+            //         index,
+            //         loreDescriptions,
+            //         mapDepth,
+            //         minGold,
+            //         mobDensity,
+            //         mobs,
+            //         name,
+            //         nextLevels,
+            //         parallax,
+            //         props,
+            //         quarterUpsBC3,
+            //         quarterUpsBC4,
+            //         specificLoots,
+            //         specificSubBiome,
+            //         tripleUps,
+            //         worldDepth,
+            //     });
+
+            // _log.Debug(json);
+            
 
             // SendHeroSkin(seed, net);
             return orig(self, seed, ldat, resetCount, resetCount2);
@@ -179,6 +234,23 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+
+        public static void ReceiveHeroHeadSkin(string skin)
+        {
+            try
+            {
+                var cleaned = CleanSkin(skin);
+                if (string.IsNullOrWhiteSpace(cleaned))
+                    cleaned = "BaseFlame";
+
+                ModEntry.SetRemoteHeadSkin(cleaned);
+            }
+            catch (Exception ex)
+            {
+                _log?.Warning("[NetMod] Failed to receive hero skin: {Message}", ex.Message);
+            }
+        }
+
         private static void SendHeroSkin(User user, NetNode? net)
         {
             if (net == null || !net.IsAlive)
@@ -191,6 +263,26 @@ namespace DeadCellsMultiplayerMod
                     skin = "PrisonerDefault";
 
                 net.SendHeroSkin(skin);
+            }
+            catch (Exception ex)
+            {
+                _log?.Warning("[NetMod] Failed to send hero skin: {Message}", ex.Message);
+            }
+        }
+
+
+        private static void SendHeroHeadSkin(User user, NetNode? net)
+        {
+            if (net == null || !net.IsAlive)
+                return;
+
+            try
+            {
+                var skin = CleanSkin(user?.heroHeadSkin?.ToString());
+                if (string.IsNullOrWhiteSpace(skin))
+                    skin = "BaseFlame";
+
+                net.SendHeroHeadSkin(skin);
             }
             catch (Exception ex)
             {

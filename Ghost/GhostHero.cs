@@ -84,7 +84,6 @@ namespace DeadCellsMultiplayerMod
 
             bool sics = false;
             king.enableAllPhysics(Ref<bool>.From(ref sics));
-            // king.setPosCase(Game.Class.ME.hero.cx, Game.Class.ME.hero.cy, Game.Class.ME.hero.xr, Game.Class.ME.hero.yr);
             king.visible = true;
             var miniMap = ModEntry.miniMap;
             if (miniMap != null && _me._level == king._level)
@@ -167,24 +166,6 @@ namespace DeadCellsMultiplayerMod
         public void TeleportByPixels(double x, double y)
         {
             king?.setPosPixel(x, y - 0.2d);
-        }
-
-        public void PlayAnimation(string anim, int? queueAnim = null, bool? g = null)
-        {
-            if (king == null || king.spr == null || king.spr._animManager == null) return;
-            if (string.IsNullOrWhiteSpace(anim)) return;
-            if (stopanim == true) return;
-            var animManager = king.spr._animManager;
-            
-
-            try
-            {
-                animManager.stopWithoutStateAnims(anim.AsHaxeString(), queueAnim);
-                animManager.setFrame((int)RestartFrameIndex);
-            }
-            catch { }
-
-            animManager.play(anim.AsHaxeString(), queueAnim, g);
         }
 
 
