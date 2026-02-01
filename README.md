@@ -72,7 +72,7 @@ If you are using a **non-Steam version** of Dead Cells:
 ### 🔹 Steam version
 
 If you are using the **Steam version** of the game:
-1. Open https://steamcommunity.com/sharedfiles/filedetails/?id=3655044722
+1. Open [https://steamcommunity.com/sharedfiles/filedetails/?id=3655044722](https://steamcommunity.com/sharedfiles/filedetails/?id=3657857836)
 2. Install the mod in one click.
 
 ---
