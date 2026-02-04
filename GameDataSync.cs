@@ -1,17 +1,14 @@
 
 using dc;
-using dc.hl.types;
-using Hashlink.Virtuals;
-using dc.level;
-using HaxeProxy.Runtime;
-using dc.tool;
-using dc.libs;
+using dc.haxe.ds;
 using dc.pr;
+using dc.tool;
+using Hashlink.Virtuals;
+using HaxeProxy.Runtime;
+using ModCore.Utitities;
+using System;
 using System.Globalization;
-using Serilog.Core;
-using System.Collections.Generic;
-using System.Threading;
-// using Newtonsoft.Json;
+using System.Text;
 
 namespace DeadCellsMultiplayerMod
 {
@@ -29,12 +26,8 @@ namespace DeadCellsMultiplayerMod
         private static int? _remoteBossRune;
         private static int? _hostBossRune;
 
-        private static readonly object _roomGenLock = new();
-        private static bool? _remoteDisableLoreRooms;
-        private static int? _remoteFixedSeed;
-        private static readonly Dictionary<string, bool> _remoteLoreByLevel = new(StringComparer.Ordinal);
-        private const int RoomGenWaitMs = 250;
-        private const int RoomGenWaitStepMs = 25;
+        private static string? _remoteCountersPayload;
+        public static string? HostCountersPayload;
         public GameDataSync(Serilog.ILogger log)
         {
             _log = log;
@@ -61,22 +54,17 @@ namespace DeadCellsMultiplayerMod
             ModEntry._ghost = null;
             var net = GameMenu.NetRef;
 
-            lock (_roomGenLock)
-            {
-                _remoteDisableLoreRooms = null;
-                _remoteFixedSeed = null;
-                _remoteLoreByLevel.Clear();
-            }
-            
             if (net != null && net.IsHost)
             {
+                SendCounters(self, net);
                 Seed = GameMenu.ForceGenerateServerSeed("NewGame_hook");
                 SendBossRune(self, net);
                 net.SendSeed(Seed);
-                SendRoomGenConfig(net);
             }
             else if (net != null)
             {
+                if (!string.IsNullOrEmpty(_remoteCountersPayload))
+                    ReceiveCounters(_remoteCountersPayload, self);
                 if (GameMenu.TryGetRemoteSeed(out var remoteSeed))
                 {
                     Seed = remoteSeed;
@@ -101,189 +89,138 @@ namespace DeadCellsMultiplayerMod
             orig(self, lvl, isTwitch, isCustom, mode, gdata);
         }
 
-        public static ArrayObj hook_generate(Hook_LevelGen.orig_generate orig,
-        LevelGen self,
-        User seed,
-        int ldat,
-        virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ resetCount,
-        Ref<bool> resetCount2)
+        public static void ReceiveCounters(string payload, User? target = null)
         {
-            // ldat = Seed;
-            ModEntry.ResetClientSlots();
-            
-            
+            _remoteCountersPayload = payload;
+            if (string.IsNullOrEmpty(payload))
+                return;
 
-            // SendHeroSkin(seed, net);
-            return orig(self, seed, ldat, resetCount, resetCount2);
-        }
-
-        public static RoomNode hook_generateGraph(Hook_LevelGen.orig_generateGraph orig,
-        LevelGen self,
-        User ldat,
-        virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ rng,
-        Rand @struct)
-        {
-            var net = GameMenu.NetRef;
-            if (net == null || !net.IsAlive || net.IsHost)
-                return orig(self, ldat, rng, @struct);
-
-            bool? oldDisableLore = null;
-            int? oldFixedSeed = null;
-            if (TryWaitForRoomGenConfig(out var disableLoreRooms, out var fixedSeed))
+            void apply(User user)
             {
-                _log?.Information("[NetMod] RoomGen sync applied: disableLoreRooms={DisableLore} fixedSeed={FixedSeed}", disableLoreRooms, fixedSeed);
-                var main = Main.Class.ME;
-                if (main != null && main.options != null)
+                var story = user.story ?? new StoryManager();
+                var map = new StringMap();
+                var key = new StringBuilder();
+                var value = new StringBuilder();
+                var inKey = true;
+                var escaped = false;
+
+                for (var i = 0; i < payload.Length; i++)
                 {
-                    oldDisableLore = main.options.disableLoreRooms;
-                    main.options.disableLoreRooms = disableLoreRooms;
-                }
-
-                var game = Game.Class.ME;
-                if (game != null && game.data != null && game.data.cgData != null)
-                {
-                    oldFixedSeed = game.data.cgData.fixedSeed;
-                    game.data.cgData.fixedSeed = fixedSeed;
-                }
-            }
-
-            var root = orig(self, ldat, rng, @struct);
-
-            if (oldDisableLore.HasValue && Main.Class.ME?.options != null)
-                Main.Class.ME.options.disableLoreRooms = oldDisableLore.Value;
-            if (oldFixedSeed.HasValue && Game.Class.ME?.data?.cgData != null)
-                Game.Class.ME.data.cgData.fixedSeed = oldFixedSeed.Value;
-
-            return root;
-        }
-
-        public static bool hook_levelRequiresLoreRoom(Hook_StoryManager.orig_levelRequiresLoreRoom orig,
-            StoryManager self,
-            virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ d)
-        {
-            var net = GameMenu.NetRef;
-            var levelId = d != null && d.id != null ? d.id.ToString() : null;
-            if (net != null && net.IsHost)
-            {
-                var result = orig(self, d);
-                if (!string.IsNullOrWhiteSpace(levelId))
-                    net.SendLoreRequirement(levelId, result);
-                return result;
-            }
-
-            if (net != null && !net.IsHost && !string.IsNullOrWhiteSpace(levelId))
-            {
-                if (TryWaitForLoreRequirement(levelId, out var value))
-                    return value;
-            }
-
-            return orig(self, d);
-        }
-
-        public static void ReceiveRoomGenConfig(string payload)
-        {
-            if (string.IsNullOrWhiteSpace(payload))
-                return;
-
-            var parts = payload.Split('|');
-            if (parts.Length < 2)
-                return;
-
-            var disableLore = parts[0] == "1";
-            if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var fixedSeed))
-                fixedSeed = -1;
-
-            lock (_roomGenLock)
-            {
-                _remoteDisableLoreRooms = disableLore;
-                _remoteFixedSeed = fixedSeed;
-            }
-
-            _log?.Information("[NetMod] RoomGen config received: disableLoreRooms={DisableLore} fixedSeed={FixedSeed}", disableLore, fixedSeed);
-        }
-
-        public static void ReceiveLoreRequirement(string payload)
-        {
-            if (string.IsNullOrWhiteSpace(payload))
-                return;
-
-            var parts = payload.Split('|', 2);
-            if (parts.Length != 2)
-                return;
-
-            var levelId = parts[0];
-            var required = parts[1] == "1";
-            if (string.IsNullOrWhiteSpace(levelId))
-                return;
-
-            lock (_roomGenLock)
-            {
-                _remoteLoreByLevel[levelId] = required;
-            }
-
-            _log?.Information("[NetMod] Lore requirement received: levelId={LevelId} required={Required}", levelId, required);
-        }
-
-        private static bool TryWaitForRoomGenConfig(out bool disableLoreRooms, out int fixedSeed)
-        {
-            disableLoreRooms = false;
-            fixedSeed = -1;
-
-            var elapsed = 0;
-            while (elapsed <= RoomGenWaitMs)
-            {
-                lock (_roomGenLock)
-                {
-                    if (_remoteDisableLoreRooms.HasValue && _remoteFixedSeed.HasValue)
+                    var c = payload[i];
+                    if (escaped)
                     {
-                        disableLoreRooms = _remoteDisableLoreRooms.Value;
-                        fixedSeed = _remoteFixedSeed.Value;
-                        return true;
+                        if (inKey)
+                            key.Append(c);
+                        else
+                            value.Append(c);
+                        escaped = false;
+                        continue;
                     }
+
+                    if (c == '\\')
+                    {
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (inKey && c == '=')
+                    {
+                        inKey = false;
+                        continue;
+                    }
+
+                    if (!inKey && c == '|')
+                    {
+                        if (key.Length > 0)
+                        {
+                            var keyText = key.ToString();
+                            var valueText = value.ToString();
+                            if (!int.TryParse(valueText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                                parsed = 0;
+                            map.set(keyText.AsHaxeString(), parsed);
+                        }
+                        key.Clear();
+                        value.Clear();
+                        inKey = true;
+                        continue;
+                    }
+
+                    if (inKey)
+                        key.Append(c);
+                    else
+                        value.Append(c);
                 }
 
-                Thread.Sleep(RoomGenWaitStepMs);
-                elapsed += RoomGenWaitStepMs;
-            }
-
-            return false;
-        }
-
-        private static bool TryWaitForLoreRequirement(string levelId, out bool value)
-        {
-            value = false;
-            if (string.IsNullOrWhiteSpace(levelId))
-                return false;
-
-            var elapsed = 0;
-            while (elapsed <= RoomGenWaitMs)
-            {
-                lock (_roomGenLock)
+                if (key.Length > 0)
                 {
-                    if (_remoteLoreByLevel.TryGetValue(levelId, out value))
-                        return true;
+                    var keyText = key.ToString();
+                    var valueText = value.ToString();
+                    if (!int.TryParse(valueText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                        parsed = 0;
+                    map.set(keyText.AsHaxeString(), parsed);
                 }
 
-                Thread.Sleep(RoomGenWaitStepMs);
-                elapsed += RoomGenWaitStepMs;
+                story.counters = map;
+                user.story = story;
             }
 
-            return false;
+            if (target != null)
+            {
+                apply(target);
+                return;
+            }
+
+            GameMenu.EnqueueMainThread(() =>
+            {
+                try
+                {
+                    var main = dc.Main.Class.ME;
+                    if (main?.user != null)
+                        apply(main.user);
+                }
+                catch
+                {
+                }
+            });
         }
 
-        private static void SendRoomGenConfig(NetNode net)
+        private static void SendCounters(User user, NetNode? net)
         {
-            var disableLore = false;
-            var fixedSeed = -1;
-            var main = Main.Class.ME;
-            if (main != null && main.options != null)
-                disableLore = main.options.disableLoreRooms;
-            var game = Game.Class.ME;
-            if (game != null && game.data != null && game.data.cgData != null)
-                fixedSeed = game.data.cgData.fixedSeed;
+            if (user == null)
+                return;
 
-            net.SendRoomGenConfig(disableLore, fixedSeed);
+            var map = user.story?.counters;
+            var builder = new StringBuilder();
+            if (map != null)
+            {
+                var keys = map.keys();
+                var first = true;
+                while (keys.hasNext.Invoke())
+                {
+                    var key = keys.next.Invoke();
+                    if (key == null)
+                        continue;
+                    var keyText = key.ToString();
+                    if (string.IsNullOrWhiteSpace(keyText))
+                        continue;
+                    var value = ToInt(map.get(key));
+                    if (!first)
+                        builder.Append('|');
+                    builder.Append(keyText.Replace("\\", "\\\\").Replace("|", "\\|").Replace("=", "\\="));
+                    builder.Append('=');
+                    builder.Append(value.ToString(CultureInfo.InvariantCulture));
+                    first = false;
+                }
+            }
+
+            var payload = builder.ToString();
+            HostCountersPayload = payload;
+            if (net != null && net.IsAlive)
+                net.SendCounters(payload);
         }
+
+
+
 
         public static void SendBossRune(User self, NetNode? net)
         {

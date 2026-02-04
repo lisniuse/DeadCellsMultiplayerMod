@@ -202,9 +202,6 @@ namespace DeadCellsMultiplayerMod
             Hook_Hero.lockControlFromSkill += Hook_Hero_lockControlFromSkill;
             Hook_Hero.unlockControls += Hook_Hero_unlockControls;
             Hook_User.newGame += GameDataSync.user_hook_new_game;
-            Hook_LevelGen.generate += GameDataSync.hook_generate;
-            Hook_LevelGen.generateGraph += GameDataSync.hook_generateGraph;
-            Hook_StoryManager.levelRequiresLoreRoom += GameDataSync.hook_levelRequiresLoreRoom;
             Hook_AnimManager.play += Hook_AnimManager_play;
             Hook_AnimManager.stopWithStateAnims += Hook_AnimManager_stopWithStateAnims;
             Hook_Viewport.bumpDir += Hook_Viewport_bumpDir;

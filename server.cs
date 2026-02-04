@@ -322,6 +322,12 @@ public sealed class NetNode : IDisposable
                 {
                     await SendLineToClientSafe(connection, $"SEED|{hostSeed}\n").ConfigureAwait(false);
                 }
+                if (_role == NetRole.Host)
+                {
+                    var countersPayload = GameDataSync.HostCountersPayload;
+                    if (countersPayload != null)
+                        await SendLineToClientSafe(connection, $"COUNTERS|{countersPayload}\n").ConfigureAwait(false);
+                }
 
                 GameMenu.EnqueueMainThread(() =>
                 {
@@ -509,19 +515,11 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
-        if (line.StartsWith("GENCFG|"))
+        if (line.StartsWith("COUNTERS|"))
         {
-            var payload = line["GENCFG|".Length..];
+            var payload = line["COUNTERS|".Length..];
             lock (_sync) _hasRemote = true;
-            GameDataSync.ReceiveRoomGenConfig(payload);
-            return true;
-        }
-
-        if (line.StartsWith("LORE|"))
-        {
-            var payload = line["LORE|".Length..];
-            lock (_sync) _hasRemote = true;
-            GameDataSync.ReceiveLoreRequirement(payload);
+            GameDataSync.ReceiveCounters(payload);
             return true;
         }
 
@@ -1278,31 +1276,17 @@ public sealed class NetNode : IDisposable
         _log.Information("[NetNode] Sent seed {Seed}", seed);
     }
 
-    public void SendRoomGenConfig(bool disableLoreRooms, int fixedSeed)
+    public void SendCounters(string countersPayload)
     {
         if (!HasAnyConnection())
         {
-            _log.Information("[NetNode] Skip sending room gen config: no connected client");
+            _log.Information("[NetNode] Skip sending counters sync: no connected client");
             return;
         }
 
-        var disablePart = disableLoreRooms ? "1" : "0";
-        SendRaw($"GENCFG|{disablePart}|{fixedSeed}");
-        _log.Information("[NetNode] Sent room gen config");
-    }
-
-    public void SendLoreRequirement(string levelId, bool required)
-    {
-        if (!HasAnyConnection())
-        {
-            _log.Information("[NetNode] Skip sending lore requirement: no connected client");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(levelId))
-            return;
-
-        var requiredPart = required ? "1" : "0";
-        SendRaw($"LORE|{levelId}|{requiredPart}");
+        var safeCounters = (countersPayload ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+        SendRaw($"COUNTERS|{safeCounters}");
+        _log.Information("[NetNode] Sent counters sync");
     }
 
     public void SendUsername(string username)
