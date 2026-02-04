@@ -1,7 +1,6 @@
 
 using dc;
 using dc.haxe.ds;
-using dc.hl.types;
 using dc.pr;
 using dc.tool;
 using Hashlink.Virtuals;
@@ -10,7 +9,9 @@ using ModCore.Utilities;
 using System;
 using System.Globalization;
 using System.Text;
+using dc.haxe;
 using dc.hl.types;
+using Rand = dc.libs.Rand;
 
 namespace DeadCellsMultiplayerMod
 {
@@ -45,6 +46,10 @@ namespace DeadCellsMultiplayerMod
         private static bool _origBossRuneCaptured;
         private static int _origBossRune;
         private static bool _hasRemoteBossRune;
+        private static bool _suppressDeathBroadcast;
+        private static readonly object _levelSeedLock = new();
+        private static string? _remoteLevelId;
+        private static double? _remoteLevelSeed;
         public GameDataSync(Serilog.ILogger log)
         {
             _log = log;
@@ -63,7 +68,6 @@ namespace DeadCellsMultiplayerMod
         {
             isCustom = false;
             mode = false;
-
             Seed = lvl;
             ModEntry.me = null;
             ModEntry.ResetClientSlots();
@@ -123,13 +127,22 @@ namespace DeadCellsMultiplayerMod
 
             void apply(User user)
             {
-                var item = new StringBuilder();
-                var escaped = false;
                 CaptureOriginalUserData(user);
-                var meta = new ItemMetaManager(user);
-                user.itemMeta = meta;
+                var meta = user.itemMeta ?? new ItemMetaManager(user);
+                var list = meta.itemProgress;
+                var arr = list ?? (ArrayObj)ArrayUtils.CreateDyn().array;
+                var existing = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < arr.length; i++)
+                {
+                    var progress = arr.getDyn(i) as ItemProgress;
+                    var id = progress?.itemId?.ToString();
+                    if (!string.IsNullOrWhiteSpace(id))
+                        existing.Add(id);
+                }
                 _hasRemoteBlueprints = true;
 
+                var item = new StringBuilder();
+                var escaped = false;
                 for (var i = 0; i < payload.Length; i++)
                 {
                     var c = payload[i];
@@ -152,7 +165,15 @@ namespace DeadCellsMultiplayerMod
                         {
                             var text = item.ToString();
                             if (!string.IsNullOrWhiteSpace(text))
-                                meta.unlockItem(text.AsHaxeString());
+                            {
+                                if (!existing.Contains(text))
+                                {
+                                    var progress = new ItemProgress(text.AsHaxeString());
+                                    progress.unlocked = true;
+                                    arr.pushDyn(progress);
+                                    existing.Add(text);
+                                }
+                            }
                             item.Clear();
                         }
                         continue;
@@ -165,8 +186,19 @@ namespace DeadCellsMultiplayerMod
                 {
                     var text = item.ToString();
                     if (!string.IsNullOrWhiteSpace(text))
-                        meta.unlockItem(text.AsHaxeString());
+                    {
+                        if (!existing.Contains(text))
+                        {
+                            var progress = new ItemProgress(text.AsHaxeString());
+                            progress.unlocked = true;
+                            arr.pushDyn(progress);
+                            existing.Add(text);
+                        }
+                    }
                 }
+
+                meta.itemProgress = arr;
+                user.itemMeta = meta;
             }
 
             if (target != null)
@@ -232,7 +264,6 @@ namespace DeadCellsMultiplayerMod
                 }
                 else
                 {
-                    _log.Debug($"{_origCounters}");
                     _origStory.counters = _origCounters;
                     user.story = _origStory;
                 }
@@ -361,6 +392,78 @@ namespace DeadCellsMultiplayerMod
                 user.bossRuneActivated = bossRune;
         }
 
+        public static void TriggerRemoteDeath()
+        {
+            _suppressDeathBroadcast = true;
+            GameMenu.EnqueueMainThread(() =>
+            {
+                try
+                {
+                    ModEntry.me?.kill();
+                }
+                catch
+                {
+                }
+            });
+        }
+
+        public static bool ConsumeSuppressDeathBroadcast()
+        {
+            if (!_suppressDeathBroadcast)
+                return false;
+            _suppressDeathBroadcast = false;
+            return true;
+        }
+
+        public static void ReceiveLevelSeed(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload))
+                return;
+
+            var sep = payload.IndexOf('|');
+            if (sep <= 0 || sep >= payload.Length - 1)
+                return;
+
+            var levelId = payload[..sep];
+            var seedText = payload[(sep + 1)..];
+            if (string.IsNullOrWhiteSpace(levelId))
+                return;
+
+            if (!double.TryParse(seedText, NumberStyles.Float, CultureInfo.InvariantCulture, out var seed))
+                return;
+
+            lock (_levelSeedLock)
+            {
+                _remoteLevelId = levelId;
+                _remoteLevelSeed = seed;
+            }
+        }
+
+        public static bool TryApplyRemoteLevelSeed(string levelId, Rand rng)
+        {
+            if (rng == null || string.IsNullOrWhiteSpace(levelId))
+                return false;
+
+            lock (_levelSeedLock)
+            {
+                if (_remoteLevelSeed.HasValue && string.Equals(_remoteLevelId, levelId, StringComparison.Ordinal))
+                {
+                    rng.seed = _remoteLevelSeed.Value;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public static void SendLevelSeed(string levelId, Rand rng, NetNode? net)
+        {
+            if (net == null || !net.IsAlive || rng == null || string.IsNullOrWhiteSpace(levelId))
+                return;
+
+            net.SendLevelSeed(levelId, rng.seed);
+        }
+
         public static void ReceiveCounters(string payload, User? target = null)
         {
             _remoteCountersPayload = payload;
@@ -370,7 +473,7 @@ namespace DeadCellsMultiplayerMod
             void apply(User user)
             {
                 CaptureOriginalUserData(user);
-                var story = new StoryManager();
+                var story = user.story ?? new StoryManager();
                 var map = new StringMap();
                 var key = new StringBuilder();
                 var value = new StringBuilder();

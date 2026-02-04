@@ -579,6 +579,14 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
+        if (line.StartsWith("LSEED|"))
+        {
+            var payload = line["LSEED|".Length..];
+            lock (_sync) _hasRemote = true;
+            GameDataSync.ReceiveLevelSeed(payload);
+            return true;
+        }
+
         if (line.StartsWith("SKIN|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["SKIN|".Length..];
@@ -840,9 +848,9 @@ public sealed class NetNode : IDisposable
             {
                 var _remoteId = senderId ?? 0;
                 _log.Information("[NetNode] Remote hero died (id {Id})", _remoteId);
-                var reason = _remoteId > 0 ? $"client {_remoteId} died" : "client died";
-                GameMenu.QueueHostRestartFromDeath(reason);
+                forwardLine = "DIED\n";
             }
+            GameDataSync.TriggerRemoteDeath();
             return true;
         }
 
@@ -1352,6 +1360,19 @@ public sealed class NetNode : IDisposable
 
         SendRaw("LDESC|" + json);
         _log.Information("[NetNode] Sent LevelDesc payload");
+    }
+
+    public void SendLevelSeed(string levelId, double seed)
+    {
+        if (!HasAnyConnection())
+        {
+            _log.Information("[NetNode] Skip sending level seed: no connected client");
+            return;
+        }
+
+        var safeId = (levelId ?? string.Empty).Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
+        SendRaw($"LSEED|{safeId}|{seed.ToString(CultureInfo.InvariantCulture)}");
+        _log.Information("[NetNode] Sent level seed for {LevelId}", safeId);
     }
 
     public void SendGeneratePayload(string json)

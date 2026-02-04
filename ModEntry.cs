@@ -13,6 +13,7 @@ using dc.hl.types;
 using dc;
 using dc.shader;
 using dc.libs.heaps.slib;
+using Rand = dc.libs.Rand;
 using dc.h3d.mat;
 using dc.ui.hud;
 using dc.h2d;
@@ -202,6 +203,8 @@ namespace DeadCellsMultiplayerMod
             Hook_Hero.onLevelChanged += hook_level_changed;
             Hook_User.newGame += GameDataSync.user_hook_new_game;
             Hook_User.prepareSave += Hook_User_prepareSave;
+            Hook_User.serialize += Hook_User_serialize;
+            Hook_User.unserialize += Hook_User_unserialize;
             Hook_AnimManager.play += Hook_AnimManager_play;
             Hook_AnimManager.stopWithStateAnims += Hook_AnimManager_stopWithStateAnims;
             Hook_MiniMap.track += Hook_MiniMap_track;
@@ -244,10 +247,35 @@ namespace DeadCellsMultiplayerMod
                 }
             }
 
-            if (_netRole == NetRole.None)
-                GameDataSync.RestoreOriginalUserState(self, true);
 
             return orig(self);
+        }
+
+        private void Hook_User_serialize(Hook_User.orig_serialize orig, User self, dc.hxbit.Serializer __ctx)
+        {
+            if (_netRole == NetRole.Client)
+            {
+                var swapped = GameDataSync.SwapToOriginalUserData(self);
+                try
+                {
+                    orig(self, __ctx);
+                }
+                finally
+                {
+                    if (swapped)
+                        GameDataSync.RestoreRemoteUserData(self);
+                }
+                return;
+            }
+
+            orig(self, __ctx);
+        }
+
+        private void Hook_User_unserialize(Hook_User.orig_unserialize orig, User self, dc.hxbit.Serializer v)
+        {
+            orig(self, v);
+            if (_netRole == NetRole.Client)
+                GameDataSync.CaptureOriginalUserData(self);
         }
 
         private void Hook_Viewport_bumpDir(Hook_Viewport.orig_bumpDir orig, Viewport self, int dir, double? pow)
@@ -730,10 +758,8 @@ namespace DeadCellsMultiplayerMod
         private void Hook_Hero_onHeroDie(Hook_Hero.orig_onHeroDie orig, Hero self)
         {
             var net = _net;
-            if (_netRole == NetRole.Client)
+            if (!GameDataSync.ConsumeSuppressDeathBroadcast() && _netRole != NetRole.None)
                 net?.SendHeroDeath();
-            else if (_netRole == NetRole.Host)
-                GameMenu.QueueHostRestartFromDeath("host died");
             orig(self);
         }
 
@@ -764,7 +790,6 @@ namespace DeadCellsMultiplayerMod
             for (int i = 0; i < count; i++)
             {
                 var mobs = extraMobs.array[i];
-                // Logger.Information($"[DEBUG|MOB] mobs at index {i}: {mobs}");
             }
         }
 
@@ -782,10 +807,15 @@ namespace DeadCellsMultiplayerMod
         private LevelStruct Hook__LevelStruct_get(Hook__LevelStruct.orig_get orig,
         User user,
         virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ l,
-        dc.libs.Rand rng)
+        Rand rng)
         {
             levelId = l.id.ToString();
             SendLevel(levelId);
+            var net = _net;
+            if (_netRole == NetRole.Host)
+                GameDataSync.SendLevelSeed(levelId, rng, net);
+            else if (_netRole == NetRole.Client)
+                GameDataSync.TryApplyRemoteLevelSeed(levelId, rng);
             return orig(user, l, rng);
         }
 
@@ -862,8 +892,6 @@ namespace DeadCellsMultiplayerMod
             if(string.IsNullOrWhiteSpace(a))
                 return "idle";
 
-            // If we ended up here from a weapon transition (shield release etc),
-            // make sure we don't push a weapon/hold/parry animation into ANIM replication.
             if(IsAttackAnim(a))
                 return "idle";
             if(a.IndexOf("guard", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -1183,13 +1211,9 @@ namespace DeadCellsMultiplayerMod
             var shieldActive = client.kingWeaponsManager != null && client.kingWeaponsManager.IsShieldActive;
             if (shieldActive && ShouldLoopRemoteAnim(anim))
             {
-                // While a shield is being held, let the shield weapon logic drive the animation/frames.
-                // Otherwise incoming locomotion/idles fight the hold/parry state and cause wrong frames/flicker.
                 return;
             }
 
-            // Shield hold/parry should be driven by the weapon logic (ATK + local weapon update),
-            // not by ANIM replication. Otherwise release/hold transitions start fighting and flicker.
             if (anim.IndexOf("hold", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 anim.IndexOf("shield", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 anim.IndexOf("parry", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -1209,8 +1233,6 @@ namespace DeadCellsMultiplayerMod
 
             if (ShouldLoopRemoteAnim(anim))
             {
-                // BaseShield uses affects 96/98/99 for parry/hold flow (see ILSpy). If the remote released the shield,
-                // we don't want stale affects on GhostKing to keep re-applying hold/parry state anims and causing flicker.
                 if (!shieldActive)
                 {
                     try { client.removeAllAffects(96); } catch { }
