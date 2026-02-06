@@ -11,7 +11,7 @@ using Hashlink.Proxy.Objects;
 using Hashlink.Reflection.Members;
 using ModCore.Events;
 using ModCore.Events.Interfaces;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog;
 using Cd = CooldownHelper.Cooldown;
 

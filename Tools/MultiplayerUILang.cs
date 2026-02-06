@@ -1,7 +1,7 @@
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game;
 using ModCore.Modules;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog;
 
 namespace DeadCellsMultiplayerMod.Tools.ModLang

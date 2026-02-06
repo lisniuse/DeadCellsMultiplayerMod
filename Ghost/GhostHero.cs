@@ -1,6 +1,6 @@
 ﻿using dc.en;
 using dc.pr;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog;
 using dc;
 using HaxeProxy.Runtime;

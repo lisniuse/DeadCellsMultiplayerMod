@@ -7,7 +7,7 @@ using dc.pr;
 using dc.tool;
 using dc.tool.hero;
 using ModCore.Storage;
-using ModCore.Utitities;
+using ModCore.Utilities;
 
 namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 {

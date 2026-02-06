@@ -13,7 +13,7 @@ using HaxeProxy.Runtime;
 using Newtonsoft.Json;
 using Hashlink.Virtuals;
 using Serilog;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Microsoft.Win32;
 using Serilog.Core;
 using dc.cine;

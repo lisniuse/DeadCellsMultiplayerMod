@@ -11,7 +11,7 @@ using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using HaxeProxy.Runtime;
 using ModCore.Events;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Debug = Serilog.Log;
 
 namespace DeadCellsMultiplayerMod.MultiplayerModUI.Minimap

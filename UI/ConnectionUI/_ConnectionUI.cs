@@ -2,7 +2,7 @@ using dc.pr;
 using dc.ui;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using ModCore.Events;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using System.Collections.Generic;
 
 namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection

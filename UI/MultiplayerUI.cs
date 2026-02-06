@@ -22,7 +22,7 @@ using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Events;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog;
 using Cooldown = CooldownHelper.Cooldown;
 using DeadCellsMultiplayerMod.MultiplayerModUI.Connection;

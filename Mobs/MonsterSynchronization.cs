@@ -9,7 +9,7 @@ using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.MultiplayerModUI;
 using ModCore.Events;
 using ModCore.Modules;
-using ModCore.Utitities;
+using ModCore.Utilities;
 
 
 namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization

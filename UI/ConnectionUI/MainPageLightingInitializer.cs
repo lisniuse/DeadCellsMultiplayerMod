@@ -6,7 +6,7 @@ using dc.libs.heaps.slib;
 using dc.light;
 using dc.pr;
 using HaxeProxy.Runtime;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog;
 
 namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection.LightingInitializer

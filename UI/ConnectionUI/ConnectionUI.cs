@@ -8,7 +8,7 @@ using dc.ui;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Events;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog;
 using DeadCellsMultiplayerMod.MultiplayerModUI.Connection.LightingInitializer;
 using dc.hl.types;

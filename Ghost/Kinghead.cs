@@ -13,7 +13,7 @@ using dc.tool._AnimationTrack;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using HaxeProxy.Runtime;
 using ModCore.Storage;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog.Core;
 
 namespace DeadCellsMultiplayerMod.KingHead

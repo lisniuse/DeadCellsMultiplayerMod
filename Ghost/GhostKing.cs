@@ -13,7 +13,7 @@ using dc.shader;
 using dc.tool;
 using Hashlink.Virtuals;
 using ModCore.Storage;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using dc.spine.support.utils;
 
 namespace DeadCellsMultiplayerMod.Ghost.GhostBase

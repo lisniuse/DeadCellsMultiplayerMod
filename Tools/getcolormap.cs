@@ -1,6 +1,6 @@
 using dc;
 using dc.hxd;
-using ModCore.Utitities;
+using ModCore.Utilities;
 
 namespace DeadCellsMultiplayerMod.Tools.Sprtool
 {

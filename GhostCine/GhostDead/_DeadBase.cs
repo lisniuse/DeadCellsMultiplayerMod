@@ -14,7 +14,7 @@ using dc.ui;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using Serilog;
 using Cd = CooldownHelper.Cooldown;
 

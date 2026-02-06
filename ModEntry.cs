@@ -5,7 +5,7 @@ using ModCore.Mods;
 using System.Net;
 using dc.en;
 using dc.pr;
-using ModCore.Utitities;
+using ModCore.Utilities;
 using ModCore.Modules;
 using dc.level;
 using dc.hl.types;
