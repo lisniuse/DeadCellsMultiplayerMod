@@ -486,7 +486,7 @@ namespace DeadCellsMultiplayerMod
 
         private void PlayGhostHeadAnim(GhostKing client, string anim)
         {
-            if (client.head == null || client.head.customHeadSpr._animManager == null) return;
+            if (client == null || client?.head == null || client?.head?.customHeadSpr._animManager == null) return;
             if (string.IsNullOrWhiteSpace(anim)) return;
             var animManager = client.head.customHeadSpr._animManager;
             animManager.play(anim.AsHaxeString(), null, null).loop(null);
