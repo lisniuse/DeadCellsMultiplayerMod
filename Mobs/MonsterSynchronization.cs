@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using dc;
 using dc.en;
 using dc.h2d;
@@ -45,16 +46,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             public readonly int Dir;
             public readonly int Life;
             public readonly int MaxLife;
-            public readonly int CdSignature;
+            public readonly string CdPayload;
 
-            public ClientMobState(double x, double y, int dir, int life, int maxLife, int cdSignature)
+            public ClientMobState(double x, double y, int dir, int life, int maxLife, string cdPayload)
             {
                 X = x;
                 Y = y;
                 Dir = dir;
                 Life = life;
                 MaxLife = maxLife;
-                CdSignature = cdSignature;
+                CdPayload = cdPayload ?? string.Empty;
             }
         }
 
@@ -339,14 +340,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return 0;
         }
 
-        private static int BuildCdSignature(Mob mob)
+        private static string BuildCdPayload(Mob mob)
         {
             var fast = mob.cd?.fastCheck;
             if (fast == null)
-                return 0;
+                return string.Empty;
 
-            var signature = 0;
-            var accumulator = 0;
+            var payload = new StringBuilder();
+            var hasAny = false;
             try
             {
                 var keys = fast.keys();
@@ -357,23 +358,21 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     var key = ReadCooldownKey(keyObj);
                     var frames = ReadCooldownFrames(valueObj);
 
-                    unchecked
-                    {
-                        var entryHash = (key * 397) ^ frames;
-                        signature ^= entryHash;
-                        accumulator += (frames * 31) + key;
-                    }
+                    if (hasAny)
+                        payload.Append('.');
+
+                    payload.Append(key.ToString(CultureInfo.InvariantCulture));
+                    payload.Append(':');
+                    payload.Append(frames.ToString(CultureInfo.InvariantCulture));
+                    hasAny = true;
                 }
             }
             catch
             {
-                return 0;
+                return string.Empty;
             }
 
-            unchecked
-            {
-                return (signature * 486187739) ^ accumulator;
-            }
+            return payload.ToString();
         }
 
         private static int ReadCooldownKey(object? keyObj)
@@ -412,6 +411,101 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
+        private static Dictionary<int, int> ParseCooldownPayload(string? payload)
+        {
+            var map = new Dictionary<int, int>();
+            if (string.IsNullOrWhiteSpace(payload))
+                return map;
+
+            var entries = payload.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var entry in entries)
+            {
+                var splitIndex = entry.IndexOf(':');
+                if (splitIndex <= 0 || splitIndex >= entry.Length - 1)
+                    continue;
+
+                var keyPart = entry[..splitIndex];
+                var framesPart = entry[(splitIndex + 1)..];
+
+                if (!int.TryParse(keyPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out var key))
+                    continue;
+                if (!int.TryParse(framesPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out var frames))
+                    continue;
+
+                map[key] = frames;
+            }
+
+            return map;
+        }
+
+        private static void ApplyCooldownPayload(Mob mob, string? payload)
+        {
+            var cooldown = mob.cd;
+            var fast = cooldown?.fastCheck;
+            if (cooldown == null || fast == null)
+                return;
+
+            var targetEntries = ParseCooldownPayload(payload);
+
+            var existingKeys = new List<int>();
+            try
+            {
+                var keys = fast.keys();
+                while (keys != null && keys.hasNext.Invoke())
+                {
+                    var keyObj = keys.next.Invoke();
+                    existingKeys.Add(ReadCooldownKey(keyObj));
+                }
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (var existingKey in existingKeys)
+            {
+                if (targetEntries.ContainsKey(existingKey))
+                    continue;
+
+                try
+                {
+                    var existingObj = fast.get(existingKey);
+                    fast.remove(existingKey);
+                    if (existingObj is CdInst existingInst)
+                        cooldown.cdList?.remove(existingInst);
+                }
+                catch
+                {
+                }
+            }
+
+            foreach (var kv in targetEntries)
+            {
+                var key = kv.Key;
+                var frames = kv.Value;
+
+                try
+                {
+                    var existingObj = fast.get(key);
+                    if (existingObj is CdInst existingInst)
+                    {
+                        existingInst.frames = frames;
+                        if (existingInst.initial < frames)
+                            existingInst.initial = frames;
+                    }
+                    else
+                    {
+                        var newInst = new CdInst(key, frames);
+                        fast.set(key, newInst);
+                        cooldown.cdList?.push(newInst);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
         private static void TrySendHostMobStates(NetNode net)
         {
             var now = Stopwatch.GetTimestamp();
@@ -434,7 +528,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     var dir = NormalizeDir(mob.dir);
                     var life = mob.life;
                     var maxLife = mob.maxLife;
-                    var cd = BuildCdSignature(mob);
+                    var cd = BuildCdPayload(mob);
 
                     states.Add(new NetNode.MobStateSnapshot(i, x, y, dir, life, maxLife, cd));
                 }
@@ -463,7 +557,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         NormalizeDir(state.Dir),
                         state.Life,
                         state.MaxLife,
-                        state.CdSignature);
+                        state.CdPayload);
                 }
             }
         }
@@ -565,13 +659,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 }
             }
 
-            // Client-side mobs are host-driven; clear local velocity to avoid fall/impact side effects.
+            // Client-side mobs are host-driven: zero local movement/fall integration to avoid fake death from velocity.
             try
             {
                 self.dx = 0;
                 self.bdx = 0;
                 self.dy = 0;
                 self.bdy = 0;
+                self.fallStartY = lerpedY;
+                self.hasGravity = false;
             }
             catch
             {
@@ -584,6 +680,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 self.maxLife = target.MaxLife;
             if (target.Life >= 0 && self.life != target.Life)
                 self.life = target.Life;
+
+            ApplyCooldownPayload(self, target.CdPayload);
         }
 
         private static void ConsumeIncomingMobHits(NetNode net)
