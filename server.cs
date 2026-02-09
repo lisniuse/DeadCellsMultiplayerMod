@@ -138,46 +138,6 @@ public sealed class NetNode : IDisposable
         }
     }
 
-    public readonly struct RemoteMobDamage
-    {
-        public readonly int SpawnUid;
-        public readonly string Type;
-        public readonly int Damage;
-
-        public RemoteMobDamage(int spawnUid, string type, int damage)
-        {
-            SpawnUid = spawnUid;
-            Type = type;
-            Damage = damage;
-        }
-    }
-
-    public readonly struct RemoteMobSnapshot
-    {
-        public readonly int SpawnUid;
-        public readonly string Type;
-        public readonly double X;
-        public readonly double Y;
-        public readonly int Dir;
-        public readonly int Life;
-        public readonly int MaxLife;
-        public readonly bool Dead;
-        public readonly ulong FastCheckMask;
-
-        public RemoteMobSnapshot(int spawnUid, string type, double x, double y, int dir, int life, int maxLife, bool dead, ulong fastCheckMask)
-        {
-            SpawnUid = spawnUid;
-            Type = type;
-            X = x;
-            Y = y;
-            Dir = dir;
-            Life = life;
-            MaxLife = maxLife;
-            Dead = dead;
-            FastCheckMask = fastCheckMask;
-        }
-    }
-
     public readonly struct RemoteHpSnapshot
     {
         public readonly int Id;
@@ -212,6 +172,46 @@ public sealed class NetNode : IDisposable
         }
     }
 
+    public readonly struct MobStateSnapshot
+    {
+        public readonly int Index;
+        public readonly double X;
+        public readonly double Y;
+        public readonly int Dir;
+        public readonly int Life;
+        public readonly int MaxLife;
+        public readonly int CdSignature;
+
+        public MobStateSnapshot(int index, double x, double y, int dir, int life, int maxLife, int cdSignature)
+        {
+            Index = index;
+            X = x;
+            Y = y;
+            Dir = dir;
+            Life = life;
+            MaxLife = maxLife;
+            CdSignature = cdSignature;
+        }
+    }
+
+    public readonly struct MobHit
+    {
+        public readonly int UserId;
+        public readonly int MobIndex;
+        public readonly int Hp;
+        public readonly double X;
+        public readonly double Y;
+
+        public MobHit(int userId, int mobIndex, int hp, double x, double y)
+        {
+            UserId = userId;
+            MobIndex = mobIndex;
+            Hp = hp;
+            X = x;
+            Y = y;
+        }
+    }
+
     private TcpListener? _listener;   // host
     private TcpClient? _client;     // client
     private NetworkStream? _stream;
@@ -231,8 +231,8 @@ public sealed class NetNode : IDisposable
     private readonly Dictionary<int, ClientConnection> _clients = new();
     private readonly Dictionary<int, RemoteState> _remotes = new();
     private readonly List<RemoteAttack> _pendingAttacks = new();
-    private readonly List<RemoteMobDamage> _pendingMobDamages = new();
-    private readonly List<RemoteMobSnapshot> _pendingMobSnapshots = new();
+    private List<MobStateSnapshot> _pendingMobStates = new();
+    private readonly List<MobHit> _pendingMobHits = new();
     private int _primaryRemoteId;
 
     private readonly IPEndPoint _bindEp;   // host bind
@@ -884,68 +884,35 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
-        if (line.StartsWith("MDMG|", StringComparison.OrdinalIgnoreCase))
+        if (line.StartsWith("MOBSTATE|", StringComparison.OrdinalIgnoreCase))
         {
-            var payload = line[(line.IndexOf('|') + 1)..];
-            ParseMobDamagePayload(payload, out var parsedId, out var spawnUid, out var mobType, out var damage);
-            var effectiveId = parsedId ?? senderId;
-            if (forceSenderId)
-                effectiveId = senderId;
-
-            if (spawnUid <= 0 || damage <= 0)
+            if (_role == NetRole.Host)
                 return true;
 
-            if (_role == NetRole.Host)
+            var payload = line["MOBSTATE|".Length..];
+            var parsedStates = ParseMobStatesPayload(payload);
+            lock (_sync)
             {
-                if (!senderId.HasValue)
-                    return true;
-
-                lock (_sync)
-                {
-                    if (effectiveId.HasValue)
-                    {
-                        var state = GetOrCreateRemoteLocked(effectiveId.Value);
-                        state.HasRemote = true;
-                        _hasRemote = true;
-                        if (_primaryRemoteId == 0)
-                            _primaryRemoteId = effectiveId.Value;
-                    }
-
-                    _pendingMobDamages.Add(new RemoteMobDamage(spawnUid, mobType, damage));
-                }
+                _pendingMobStates = parsedStates;
+                _hasRemote = true;
             }
-
             return true;
         }
 
-        if (line.StartsWith("MOBS|", StringComparison.OrdinalIgnoreCase))
+        if (line.StartsWith("MOBHIT|", StringComparison.OrdinalIgnoreCase))
         {
-            var payload = line[(line.IndexOf('|') + 1)..];
-            ParseMobSnapshotPayload(payload, out var parsedId, out var spawnUid, out var mobType, out var x, out var y, out var mobDir, out var life, out var maxLife, out var dead, out var fastCheckMask);
-            var effectiveId = parsedId ?? senderId;
-            if (forceSenderId)
-                effectiveId = senderId;
-
-            if (spawnUid <= 0)
+            if (_role != NetRole.Host)
                 return true;
 
-            if (_role == NetRole.Client)
+            var payload = line["MOBHIT|".Length..];
+            if (TryParseMobHitPayload(payload, senderId, forceSenderId, out var hit))
             {
                 lock (_sync)
                 {
-                    if (effectiveId.HasValue)
-                    {
-                        var state = GetOrCreateRemoteLocked(effectiveId.Value);
-                        state.HasRemote = true;
-                        _hasRemote = true;
-                        if (_primaryRemoteId == 0)
-                            _primaryRemoteId = effectiveId.Value;
-                    }
-
-                    _pendingMobSnapshots.Add(new RemoteMobSnapshot(spawnUid, mobType, x, y, mobDir, life, maxLife, dead, fastCheckMask));
+                    _pendingMobHits.Add(hit);
+                    _hasRemote = true;
                 }
             }
-
             return true;
         }
 
@@ -1037,11 +1004,7 @@ public sealed class NetNode : IDisposable
         {
             RemoveRemoteLocked(sender.AssignedId);
             _pendingAttacks.RemoveAll(a => a.Id == sender.AssignedId);
-            if (!hasClients)
-            {
-                _pendingMobDamages.Clear();
-                _pendingMobSnapshots.Clear();
-            }
+            _pendingMobHits.RemoveAll(h => h.UserId == sender.AssignedId);
             _hasRemote = hasClients;
         }
 
@@ -1066,8 +1029,8 @@ public sealed class NetNode : IDisposable
             _remotes.Clear();
             _primaryRemoteId = 0;
             _pendingAttacks.Clear();
-            _pendingMobDamages.Clear();
-            _pendingMobSnapshots.Clear();
+            _pendingMobStates.Clear();
+            _pendingMobHits.Clear();
         }
         CloseClientConnection();
         GameMenu.EnqueueMainThread(() => GameMenu.NotifyRemoteDisconnected(_role));
@@ -1219,90 +1182,68 @@ public sealed class NetNode : IDisposable
             recover = parsedRecover;
     }
 
-    private static void ParseMobDamagePayload(string payload, out int? parsedId, out int spawnUid, out string mobType, out int damage)
+    private static List<MobStateSnapshot> ParseMobStatesPayload(string payload)
     {
-        parsedId = null;
-        spawnUid = 0;
-        mobType = string.Empty;
-        damage = 0;
+        var states = new List<MobStateSnapshot>();
+        if (string.IsNullOrWhiteSpace(payload))
+            return states;
 
-        var parts = payload.Split('|');
-        var startIndex = 0;
-        if (parts.Length >= 4 &&
-            int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var idValue) &&
-            int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+        var entries = payload.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var entry in entries)
         {
-            parsedId = idValue;
-            startIndex = 1;
+            var parts = entry.Split(',');
+            if (parts.Length < 7)
+                continue;
+
+            if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var index))
+                continue;
+            if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+                continue;
+            if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                continue;
+            if (!int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dir))
+                continue;
+            if (!int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
+                continue;
+            if (!int.TryParse(parts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxLife))
+                continue;
+            if (!int.TryParse(parts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out var cdSignature))
+                continue;
+
+            states.Add(new MobStateSnapshot(index, x, y, dir, life, maxLife, cdSignature));
         }
 
-        if (parts.Length > startIndex &&
-            int.TryParse(parts[startIndex], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedUid))
-            spawnUid = parsedUid;
-
-        if (parts.Length > startIndex + 1)
-            mobType = parts[startIndex + 1] ?? string.Empty;
-
-        if (parts.Length > startIndex + 2 &&
-            int.TryParse(parts[startIndex + 2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDamage))
-            damage = parsedDamage;
+        return states;
     }
 
-    private static void ParseMobSnapshotPayload(string payload, out int? parsedId, out int spawnUid, out string mobType, out double x, out double y, out int dir, out int life, out int maxLife, out bool dead, out ulong fastCheckMask)
+    private static bool TryParseMobHitPayload(string payload, int? senderId, bool forceSenderId, out MobHit hit)
     {
-        parsedId = null;
-        spawnUid = 0;
-        mobType = string.Empty;
-        x = 0;
-        y = 0;
-        dir = 1;
-        life = 0;
-        maxLife = 0;
-        dead = false;
-        fastCheckMask = 0;
+        hit = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
 
         var parts = payload.Split('|');
-        var startIndex = 0;
-        if (parts.Length >= 9 &&
-            int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var idValue) &&
-            int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
-        {
-            parsedId = idValue;
-            startIndex = 1;
-        }
+        if (parts.Length < 5)
+            return false;
 
-        if (parts.Length > startIndex &&
-            int.TryParse(parts[startIndex], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedUid))
-            spawnUid = parsedUid;
+        int parsedUserId = 0;
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedUserId))
+            parsedUserId = senderId ?? 0;
 
-        if (parts.Length > startIndex + 1)
-            mobType = parts[startIndex + 1] ?? string.Empty;
+        if (forceSenderId && senderId.HasValue)
+            parsedUserId = senderId.Value;
 
-        if (parts.Length > startIndex + 2 &&
-            double.TryParse(parts[startIndex + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedX))
-            x = parsedX;
+        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mobIndex))
+            return false;
+        if (!int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var hp))
+            return false;
+        if (!double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            return false;
+        if (!double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            return false;
 
-        if (parts.Length > startIndex + 3 &&
-            double.TryParse(parts[startIndex + 3], NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedY))
-            y = parsedY;
-
-        if (parts.Length > startIndex + 4 &&
-            int.TryParse(parts[startIndex + 4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDir))
-            dir = parsedDir < 0 ? -1 : parsedDir > 0 ? 1 : 0;
-
-        if (parts.Length > startIndex + 5 &&
-            int.TryParse(parts[startIndex + 5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLife))
-            life = parsedLife;
-
-        if (parts.Length > startIndex + 6 &&
-            int.TryParse(parts[startIndex + 6], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedMaxLife))
-            maxLife = parsedMaxLife;
-
-        if (parts.Length > startIndex + 7 && TryParseBool(parts[startIndex + 7], out var parsedDead))
-            dead = parsedDead;
-
-        if (parts.Length > startIndex + 8 && TryParseUlong(parts[startIndex + 8], out var parsedMask))
-            fastCheckMask = parsedMask;
+        hit = new MobHit(parsedUserId, mobIndex, hp, x, y);
+        return true;
     }
 
     private static bool TryParsePositionLine(string line, int? senderId, out int remoteId, out double rx, out double ry, out int dir, out bool hasDir)
@@ -1378,6 +1319,35 @@ public sealed class NetNode : IDisposable
     private static string BuildHpLine(int id, int life, int maxLife, int lif, int bonusLife, int recover)
     {
         return $"HP|{id}|{life}|{maxLife}|{lif}|{bonusLife}|{recover}\n";
+    }
+
+    private static string BuildMobStatesLine(IReadOnlyList<MobStateSnapshot> states)
+    {
+        var sb = new StringBuilder("MOBSTATE|");
+        if (states != null)
+        {
+            for (int i = 0; i < states.Count; i++)
+            {
+                var state = states[i];
+                if (i > 0)
+                    sb.Append(';');
+                sb.Append(state.Index.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(state.X.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(state.Y.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(state.Dir.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(state.Life.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(state.MaxLife.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(state.CdSignature.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+        sb.Append('\n');
+        return sb.ToString();
     }
 
     private static string BuildPosLine(int id, double cx, double cy, int dir)
@@ -1672,40 +1642,6 @@ public sealed class NetNode : IDisposable
         SendRaw($"ATK|{idPart}{safe}|{slot}|{permanentId}");
     }
 
-    public void SendMobDamage(int spawnUid, string mobType, int damage)
-    {
-        if (!HasAnyConnection())
-        {
-            return;
-        }
-        if (spawnUid <= 0 || damage <= 0)
-        {
-            return;
-        }
-
-        var safeType = (mobType ?? string.Empty).Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
-        var idPart = ID > 0 ? $"{ID}|" : string.Empty;
-        SendRaw($"MDMG|{idPart}{spawnUid}|{safeType}|{damage}");
-    }
-
-    public void SendMobState(int spawnUid, string mobType, double x, double y, int dir, int life, int maxLife, bool dead, ulong fastCheckMask = 0)
-    {
-        if (!HasAnyConnection())
-        {
-            return;
-        }
-        if (spawnUid <= 0)
-        {
-            return;
-        }
-
-        var safeType = (mobType ?? string.Empty).Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
-        var idPart = ID > 0 ? $"{ID}|" : string.Empty;
-        var deadPart = dead ? "1" : "0";
-        var fastCheckPart = fastCheckMask.ToString("X", CultureInfo.InvariantCulture);
-        SendRaw(string.Create(CultureInfo.InvariantCulture, $"MOBS|{idPart}{spawnUid}|{safeType}|{x}|{y}|{dir}|{life}|{maxLife}|{deadPart}|{fastCheckPart}"));
-    }
-
     public void SendHeroSkin(string skin)
     {
         if (!HasAnyConnection())
@@ -1750,6 +1686,34 @@ public sealed class NetNode : IDisposable
 
         SendRaw("DIED");
         _log.Information("[NetNode] Sent hero death");
+    }
+
+    public void SendMobStates(IReadOnlyList<MobStateSnapshot> states)
+    {
+        if (_role != NetRole.Host)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (states == null || states.Count == 0)
+            return;
+
+        var line = BuildMobStatesLine(states);
+        _ = SendLineSafe(line);
+    }
+
+    public void SendMobHit(int mobIndex, int hp, double x, double y)
+    {
+        if (_role != NetRole.Client)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+
+        var payload = string.Create(
+            CultureInfo.InvariantCulture,
+            $"MOBHIT|{ID}|{mobIndex}|{hp}|{x}|{y}");
+        SendRaw(payload);
     }
 
     private void SendRaw(string payload)
@@ -1851,35 +1815,35 @@ public sealed class NetNode : IDisposable
         }
     }
 
-    public bool TryConsumeRemoteMobDamages(out List<RemoteMobDamage> damages)
+    public bool TryConsumeMobStates(out List<MobStateSnapshot> snapshot)
     {
         lock (_sync)
         {
-            if (_pendingMobDamages.Count == 0)
+            if (_pendingMobStates.Count == 0)
             {
-                damages = new List<RemoteMobDamage>();
+                snapshot = new List<MobStateSnapshot>();
                 return false;
             }
 
-            damages = new List<RemoteMobDamage>(_pendingMobDamages);
-            _pendingMobDamages.Clear();
-            return damages.Count > 0;
+            snapshot = new List<MobStateSnapshot>(_pendingMobStates);
+            _pendingMobStates.Clear();
+            return snapshot.Count > 0;
         }
     }
 
-    public bool TryConsumeRemoteMobSnapshots(out List<RemoteMobSnapshot> snapshots)
+    public bool TryConsumeMobHits(out List<MobHit> hits)
     {
         lock (_sync)
         {
-            if (_pendingMobSnapshots.Count == 0)
+            if (_pendingMobHits.Count == 0)
             {
-                snapshots = new List<RemoteMobSnapshot>();
+                hits = new List<MobHit>();
                 return false;
             }
 
-            snapshots = new List<RemoteMobSnapshot>(_pendingMobSnapshots);
-            _pendingMobSnapshots.Clear();
-            return snapshots.Count > 0;
+            hits = new List<MobHit>(_pendingMobHits);
+            _pendingMobHits.Clear();
+            return hits.Count > 0;
         }
     }
 
@@ -2007,27 +1971,6 @@ public sealed class NetNode : IDisposable
         return false;
     }
 
-    private static bool TryParseUlong(string text, out ulong value)
-    {
-        value = 0;
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-
-        if (ulong.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
-        {
-            value = parsed;
-            return true;
-        }
-
-        if (ulong.TryParse(text, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out parsed))
-        {
-            value = parsed;
-            return true;
-        }
-
-        return false;
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
@@ -2062,8 +2005,8 @@ public sealed class NetNode : IDisposable
             _hasRemote = false;
             _connectedClientCount = 0;
             _pendingAttacks.Clear();
-            _pendingMobDamages.Clear();
-            _pendingMobSnapshots.Clear();
+            _pendingMobStates.Clear();
+            _pendingMobHits.Clear();
         }
         _stream = null; _client = null; _listener = null;
         try { _sendLock.Dispose(); } catch { }

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using dc;
 using dc.en;
+using dc.h2d;
 using dc.pr;
-using dc.tool._Cooldown;
 using dc.tool.atk;
+using dc.tool._Cooldown;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using ModCore.Events;
 using ModCore.Modules;
@@ -13,79 +15,48 @@ using ModCore.Modules;
 namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 {
     public class MobsSynchronization :
-        IOnAdvancedModuleInitializing,
-        IEventReceiver
+    IOnAdvancedModuleInitializing,
+    IEventReceiver
     {
         private readonly ModEntry modEntry;
 
-        private readonly struct MobTargetState
+        private static readonly object Sync = new();
+        private static readonly List<Mob> trackedMobs = new();
+        private static readonly Dictionary<Mob, int> trackedMobIndices = new();
+
+        private static readonly Dictionary<int, ClientMobState> clientMobTargets = new();
+        private static readonly Dictionary<int, int> hostToLocalIndices = new();
+        private static readonly Dictionary<int, int> localToHostIndices = new();
+
+        private static Level? currentLevel;
+        private static long lastHostStateSendTick;
+
+        private const double HostStateSendRateHz = 20.0;
+        private const double ClientInterpolationAlpha = 0.25;
+        private const double ClientAiLockSeconds = 0.3;
+        private const bool ClientSyncVerticalPosition = false;
+        private const double MaxCoordinateMatchDistance = 96.0;
+        private const double MaxCoordinateMatchDistanceSq = MaxCoordinateMatchDistance * MaxCoordinateMatchDistance;
+
+        private readonly struct ClientMobState
         {
-            public readonly int SpawnUid;
-            public readonly string Type;
             public readonly double X;
             public readonly double Y;
             public readonly int Dir;
             public readonly int Life;
             public readonly int MaxLife;
-            public readonly bool Dead;
-            public readonly ulong FastCheckMask;
+            public readonly int CdSignature;
 
-            public MobTargetState(int spawnUid, string type, double x, double y, int dir, int life, int maxLife, bool dead, ulong fastCheckMask)
+            public ClientMobState(double x, double y, int dir, int life, int maxLife, int cdSignature)
             {
-                SpawnUid = spawnUid;
-                Type = type;
                 X = x;
                 Y = y;
                 Dir = dir;
                 Life = life;
                 MaxLife = maxLife;
-                Dead = dead;
-                FastCheckMask = fastCheckMask;
+                CdSignature = cdSignature;
             }
         }
-
-        private static readonly Dictionary<int, Mob> MobBySpawnUid = new();
-        private static readonly Dictionary<int, int> SpawnUidByRuntimeUid = new();
-        private static readonly Dictionary<int, MobTargetState> ClientTargets = new();
-        private static readonly object SyncLock = new();
-
-        private static long _nextPumpTicks;
-        private static long _nextSnapshotTicks;
-        private static int _fallbackSpawnUid = -1;
-        private static int _lastLevelUid;
-        private static bool _applyingRemoteDamage;
-
-        private static readonly long PumpIntervalTicks = global::System.Math.Max(1, Stopwatch.Frequency / 60);
-        private static readonly long SnapshotIntervalTicks = global::System.Math.Max(1, Stopwatch.Frequency / 12);
-        private const double SnapshotLerp = 0.35;
-        private const double SnapshotSnapDistanceSq = 4.0;
-        private static readonly int[] SyncedFastCheckKeys =
-        {
-            54525952,   // aiLocked
-            314572800,  // invalidateMove/canUpdateMove
-            316669952,  // behaviour_platformPatrol
-            318767104,  // aggressiveTeleportAi/necromancedTeleportAi
-            320864256,  // aggressiveTeleportAi/necromancedTeleportAi
-            325058560,  // eliteTeleportAi
-            111149056,  // eliteTeleportAi/initSkills
-            331350016,  // fixedUpdate state
-            333447168,  // fixedUpdate state
-            335544320,  // fixedUpdate state
-            46137344,   // temporary death/unconscious state
-            65011712,   // onLand/fall splash timing
-            71303168,   // initSkills/tryToPreventDeath timing
-            75497472,   // initSkills timing
-            77594624,   // teleport initSkills timing
-            83886080,   // aggressiveTeleportAi/initSkills timing
-            94371840,   // onCooldownEnd/initSkills timing
-            96468992,   // onCooldownEnd/initSkills timing
-            98566144,   // onCooldownEnd/initSkills timing
-            117440512,  // skill execution timing
-            119537664,  // skill execution timing
-            121634816,  // skill execution timing
-            123731968,  // skill execution timing
-            1742733312, // preUpdate state
-        };
 
         public MobsSynchronization(ModEntry entry)
         {
@@ -96,829 +67,601 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         public void OnAdvancedModuleInitializing(ModEntry entry)
         {
             entry.Logger.Information("\x1b[32m[[ModEntry.MobsSynchronization] Initializing MobsSynchronization hooks...]\x1b[0m ");
-            Hook_Level.init += Hook_Level_init;
-            Hook_Level.attachMob += Hook_Level_attachMob;
-            Hook_Mob.dispose += Hook_Mob_dispose;
-            Hook_Mob.behaviourAi += Hook_Mob_behaviourAi;
-            Hook_Mob.onDamage += Hook_Mob_onDamage;
-            Hook_Mob.fixedUpdate += Hook_Mob_fixedUpdate;
+
+            Hook_Level.entitiesPostCreate += Hook_Level_entitiesPostCreate;
+            Hook_Level.registerEntity += Hook_Level_registerEntity;
+            Hook_Level.onDispose += Hook_Level_onDispose;
+
             Hook_Mob.setNemesisTarget += Hook_Mob_setNemesisTarget;
+            Hook_Mob.fixedUpdate += Hook_Mob_fixedupdate;
+            Hook_Mob.onDamage += Hook_Mob_onDamage;
         }
 
-        private void Hook_Level_init(Hook_Level.orig_init orig, Level self)
+        private static bool IsHost(NetNode? net) => net != null && net.IsAlive && net.IsHost;
+        private static bool IsClient(NetNode? net) => net != null && net.IsAlive && !net.IsHost;
+
+        private static void Hook_Level_entitiesPostCreate(Hook_Level.orig_entitiesPostCreate orig, Level self)
         {
-            ResetMobState();
             orig(self);
-            SetCurrentLevelUid(self?.__uid ?? 0);
+            RebuildMobArray(self);
         }
 
-        private Mob Hook_Level_attachMob(Hook_Level.orig_attachMob orig, Level self, dc.level.Mob e)
+        private static void Hook_Level_registerEntity(Hook_Level.orig_registerEntity orig, Level self, Entity clid)
         {
-            var mob = orig(self, e);
-            if (mob == null || !IsRealMob(mob))
-                return mob;
+            orig(self, clid);
 
-            var spawnUid = e?.__uid ?? 0;
-            var mobType = NormalizeMobType(e?.kind?.ToString() ?? GetMobType(mob));
-            var cx = e?.cx ?? mob.cx;
-            var cy = e?.cy ?? mob.cy;
-
-            lock (SyncLock)
-            {
-                if (spawnUid == 0)
-                    spawnUid = BuildFallbackSpawnUidLocked(mobType, cx, cy);
-                RegisterMobLocked(spawnUid, mob);
-            }
-
-            return mob;
-        }
-
-        private void Hook_Mob_dispose(Hook_Mob.orig_dispose orig, Mob self)
-        {
-            if (self != null && IsRealMob(self))
-                UnregisterMob(self);
-            orig(self);
-        }
-
-        private void Hook_Mob_behaviourAi(Hook_Mob.orig_behaviourAi orig, Mob self)
-        {
-            if (self != null && IsRealMob(self))
-            {
-                var net = ModEntry._net;
-                if (net != null && net.IsAlive && !net.IsHost)
-                    return;
-            }
-
-            orig(self);
-        }
-
-        private void Hook_Mob_onDamage(Hook_Mob.orig_onDamage orig, Mob self, AttackData attack)
-        {
-            if (self == null || !IsRealMob(self))
-            {
-                orig(self, attack);
+            if (clid is not Mob mob || !IsSyncMob(mob))
                 return;
-            }
 
-            var net = ModEntry._net;
-            if (net == null || !net.IsAlive)
+            lock (Sync)
             {
-                orig(self, attack);
-                return;
-            }
-
-            if (!net.IsHost)
-            {
-                var before = self.life;
-                orig(self, attack);
-                var after = self.life;
-                var damage = global::System.Math.Max(0, before - after);
-                if (damage <= 0)
+                if (currentLevel != null && !ReferenceEquals(currentLevel, self))
                     return;
 
-                if (!WasDamageFromLocalHero(attack))
+                if (trackedMobIndices.ContainsKey(mob))
                     return;
 
-                EnsureMobRegistered(self);
-                if (!TryGetSpawnUid(self, out var spawnUid))
-                    return;
-
-                var mobType = GetMobType(self);
-                net.SendMobDamage(spawnUid, mobType, damage);
-                return;
+                var index = trackedMobs.Count;
+                trackedMobs.Add(mob);
+                trackedMobIndices[mob] = index;
             }
-
-            if (_applyingRemoteDamage)
-            {
-                orig(self, attack);
-                return;
-            }
-
-            orig(self, attack);
         }
 
-        private void Hook_Mob_fixedUpdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
+        private static void Hook_Level_onDispose(Hook_Level.orig_onDispose orig, Level self)
         {
             orig(self);
 
-            if (self == null || !IsRealMob(self))
+            lock (Sync)
+            {
+                if (currentLevel != null && ReferenceEquals(currentLevel, self))
+                    ResetMobTrackingLocked();
+            }
+        }
+
+        private void Hook_Mob_fixedupdate(Hook_Mob.orig_fixedUpdate orig, Mob self)
+        {
+            if (self == null)
+            {
+                orig(self);
+                return;
+            }
+
+            EnsureMobTracked(self);
+
+            var net = GameMenu.NetRef;
+            var isHost = IsHost(net);
+            var isClient = IsClient(net);
+
+            if (isClient && IsSyncMob(self))
+            {
+                // Client does not run real mob AI, it only mirrors host states.
+                TryLockMobAi(self, ClientAiLockSeconds);
+            }
+
+            orig(self);
+
+            if (!IsSyncMob(self))
                 return;
 
-            EnsureLevelContext(self._level);
-            EnsureMobRegistered(self);
+            if (isHost)
+            {
+                ConsumeIncomingMobHits(net!);
+                TrySendHostMobStates(net!);
+            }
+            else if (isClient)
+            {
+                ConsumeIncomingHostMobStates(net!);
+                ApplyInterpolatedState(self);
+            }
+        }
 
-            var net = ModEntry._net;
-            if (net == null || !net.IsAlive)
+        private void Hook_Mob_onDamage(Hook_Mob.orig_onDamage orig, Mob self, AttackData i)
+        {
+            orig(self, i);
+
+            if (self == null)
                 return;
 
-            PumpNetwork(self, net);
+            var net = GameMenu.NetRef;
+            if (!IsClient(net))
+                return;
 
-            if (!net.IsHost)
-                ApplyClientSnapshot(self);
+            if (!IsSyncMob(self) || IsOutOfGame(self))
+                return;
+
+            if (i?.source != null && ModEntry.me != null && !ReferenceEquals(i.source, ModEntry.me))
+                return;
+
+            if (!TryGetTrackedIndex(self, out var mobIndex))
+                return;
+
+            var hp = self.life;
+            var x = self.spr?.x ?? self.cx;
+            var y = self.spr?.y ?? self.cy;
+
+            net!.SendMobHit(mobIndex, hp, x, y);
         }
 
         private void Hook_Mob_setNemesisTarget(Hook_Mob.orig_setNemesisTarget orig, Mob self, Entity e)
         {
-            if (self == null)
-            {
-                orig(self, e);
-                return;
-            }
-
-            if (ModEntry.me != null && ReferenceEquals(e, ModEntry.me))
+            if (e == ModCore.Modules.Game.Instance.HeroInstance)
             {
                 var team = self._team;
-                var targetHelper = team.get_targetHelper();
-                targetHelper.filterUntargetables();
-                orig(self, targetHelper.getBest());
+                var helper = team.get_targetHelper();
+                helper.filterUntargetables();
+                e = helper.getBest();
+
+                orig(self, helper.getBest());
                 return;
             }
 
             orig(self, e);
         }
 
-        private static void PumpNetwork(Mob context, NetNode net)
+        private static void RebuildMobArray(Level? level)
         {
-            var now = Stopwatch.GetTimestamp();
-            if (now < _nextPumpTicks)
-                return;
-            _nextPumpTicks = now + PumpIntervalTicks;
-
-            var level = context._level;
-            if (level == null)
-                return;
-
-            if (net.IsHost)
+            lock (Sync)
             {
-                ProcessHostDamageQueue(net, level);
-                if (now >= _nextSnapshotTicks)
-                {
-                    _nextSnapshotTicks = now + SnapshotIntervalTicks;
-                    BroadcastHostSnapshots(net, level);
-                }
-            }
-            else
-            {
-                ProcessClientSnapshotQueue(net, level);
-            }
-        }
-
-        private static void ProcessHostDamageQueue(NetNode net, Level level)
-        {
-            if (!net.TryConsumeRemoteMobDamages(out var damages))
-                return;
-
-            for (int i = 0; i < damages.Count; i++)
-            {
-                var damage = damages[i];
-                if (damage.SpawnUid == 0 || damage.Damage <= 0)
-                    continue;
-
-                if (!TryResolveMob(level, damage.SpawnUid, damage.Type, null, null, out var mob))
-                    continue;
-
-                ApplyAuthoritativeDamage(mob, damage.Damage);
-            }
-        }
-
-        private static void ProcessClientSnapshotQueue(NetNode net, Level level)
-        {
-            if (!net.TryConsumeRemoteMobSnapshots(out var snapshots))
-                return;
-
-            for (int i = 0; i < snapshots.Count; i++)
-            {
-                var snapshot = snapshots[i];
-                if (snapshot.SpawnUid == 0)
-                    continue;
-
-                var normalizedType = NormalizeMobType(snapshot.Type);
-                var normalizedSnapshot = new MobTargetState(
-                    snapshot.SpawnUid,
-                    normalizedType,
-                    snapshot.X,
-                    snapshot.Y,
-                    snapshot.Dir,
-                    snapshot.Life,
-                    snapshot.MaxLife,
-                    snapshot.Dead,
-                    snapshot.FastCheckMask);
-
-                lock (SyncLock)
-                {
-                    ClientTargets[snapshot.SpawnUid] = normalizedSnapshot;
-                }
-
-                TryResolveMob(level, snapshot.SpawnUid, normalizedType, snapshot.X, snapshot.Y, out _);
-            }
-        }
-
-        private static void BroadcastHostSnapshots(NetNode net, Level level)
-        {
-            var entities = level.entities;
-            if (entities == null)
-                return;
-
-            for (int i = 0; i < entities.length; i++)
-            {
-                var mob = entities.array[i] as Mob;
-                if (mob == null || mob.destroyed || !IsRealMob(mob))
-                    continue;
-
-                EnsureMobRegistered(mob);
-                if (!TryGetSpawnUid(mob, out var spawnUid))
-                    continue;
-
-                var mobType = GetMobType(mob);
-                var x = mob.spr != null ? mob.spr.x : mob.cx;
-                var y = mob.spr != null ? mob.spr.y : mob.cy;
-                var fastCheckMask = BuildFastCheckMask(mob);
-                net.SendMobState(spawnUid, mobType, x, y, mob.dir, mob.life, mob.maxLife, mob.life <= 0, fastCheckMask);
-            }
-        }
-
-        private static void ApplyClientSnapshot(Mob mob)
-        {
-            if (mob == null || mob.destroyed)
-                return;
-
-            if (!TryGetSpawnUid(mob, out var spawnUid))
-                return;
-
-            MobTargetState target;
-            lock (SyncLock)
-            {
-                if (!ClientTargets.TryGetValue(spawnUid, out target))
+                ResetMobTrackingLocked();
+                currentLevel = level;
+                if (level == null || level.entities == null)
                     return;
-            }
 
-            var currentX = mob.spr != null ? mob.spr.x : mob.cx;
-            var currentY = mob.spr != null ? mob.spr.y : mob.cy;
-            var dx = target.X - currentX;
-            var dy = target.Y - currentY;
-            var distSq = dx * dx + dy * dy;
-            double nextX;
-            double nextY;
-
-            if (distSq > SnapshotSnapDistanceSq)
-            {
-                nextX = target.X;
-                nextY = target.Y;
-            }
-            else
-            {
-                nextX = currentX + dx * SnapshotLerp;
-                nextY = currentY + dy * SnapshotLerp;
-            }
-
-            mob.setPosPixel(nextX, nextY);
-            if (mob.spr != null)
-            {
-                // Keep visual sprite interpolation authoritative on client.
-                mob.spr.x = nextX;
-                mob.spr.y = nextY;
-            }
-
-            if (target.Dir != 0)
-                mob.dir = target.Dir;
-
-            if (target.MaxLife > 0 && mob.maxLife != target.MaxLife)
-                mob.maxLife = target.MaxLife;
-
-            if (mob.life != target.Life)
-                mob.life = target.Life;
-
-            if (target.Dead && mob.life > 0)
-                mob.life = 0;
-
-            ApplyFastCheckMask(mob, target.FastCheckMask);
-        }
-
-        private static ulong BuildFastCheckMask(Mob mob)
-        {
-            var cd = mob?.cd;
-            var fastCheck = cd?.fastCheck;
-            if (fastCheck == null)
-                return 0;
-
-            ulong mask = 0;
-            var keyCount = global::System.Math.Min(SyncedFastCheckKeys.Length, 64);
-
-            for (var i = 0; i < keyCount; i++)
-            {
-                try
+                var buffer = new List<Mob>();
+                var entities = level.entities;
+                for (int i = 0; i < entities.length; i++)
                 {
-                    if (fastCheck.exists(SyncedFastCheckKeys[i]))
-                        mask |= 1UL << i;
-                }
-                catch
-                {
-                }
-            }
-
-            return mask;
-        }
-
-        private static void ApplyFastCheckMask(Mob mob, ulong mask)
-        {
-            var cd = mob?.cd;
-            var fastCheck = cd?.fastCheck;
-            if (cd == null || fastCheck == null)
-                return;
-
-            var refreshFrames = GetFastCheckRefreshFrames(cd);
-            var keyCount = global::System.Math.Min(SyncedFastCheckKeys.Length, 64);
-
-            for (var i = 0; i < keyCount; i++)
-            {
-                var key = SyncedFastCheckKeys[i];
-                var shouldExist = (mask & (1UL << i)) != 0;
-
-                bool hasKey;
-                try
-                {
-                    hasKey = fastCheck.exists(key);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (shouldExist)
-                {
-                    if (hasKey)
-                    {
-                        try
-                        {
-                            if (fastCheck.get(key) is CdInst current && current.frames < refreshFrames)
-                                current.frames = refreshFrames;
-                        }
-                        catch
-                        {
-                        }
-
+                    var mob = entities.getDyn(i) as Mob;
+                    if (!IsSyncMob(mob))
                         continue;
-                    }
-
-                    try
-                    {
-                        var inst = new CdInst(key, refreshFrames);
-                        fastCheck.set(key, inst);
-                        try { cd.cdList?.push(inst); } catch { }
-                    }
-                    catch
-                    {
-                    }
-
-                    continue;
+                    buffer.Add(mob!);
                 }
 
-                if (!hasKey)
-                    continue;
-
-                try
+                buffer.Sort(CompareMobsForStableOrder);
+                for (int i = 0; i < buffer.Count; i++)
                 {
-                    if (fastCheck.get(key) is CdInst existing)
-                    {
-                        try { cd.cdList?.remove(existing); } catch { }
-                    }
-
-                    fastCheck.remove(key);
-                }
-                catch
-                {
+                    trackedMobs.Add(buffer[i]);
+                    trackedMobIndices[buffer[i]] = i;
                 }
             }
         }
 
-        private static double GetFastCheckRefreshFrames(dc.tool.Cooldown cd)
+        private static void ResetMobTrackingLocked()
         {
-            var baseFps = cd.baseFps;
-            if (baseFps <= 0)
-                baseFps = 60;
-            return global::System.Math.Max(6.0, baseFps * 0.25);
+            trackedMobs.Clear();
+            trackedMobIndices.Clear();
+            clientMobTargets.Clear();
+            hostToLocalIndices.Clear();
+            localToHostIndices.Clear();
+            currentLevel = null;
+            lastHostStateSendTick = 0;
         }
 
-        private static void ApplyAuthoritativeDamage(Mob mob, int damage)
+        private static int CompareMobsForStableOrder(Mob a, Mob b)
         {
-            if (mob == null || mob.destroyed || damage <= 0)
-                return;
-            if (mob.life <= 0)
-                return;
+            var byCx = a.cx.CompareTo(b.cx);
+            if (byCx != 0) return byCx;
 
-            _applyingRemoteDamage = true;
-            try
-            {
-                var lifeBefore = mob.life;
-                var source = ModEntry.me != null ? (Entity)ModEntry.me : mob;
+            var byCy = a.cy.CompareTo(b.cy);
+            if (byCy != 0) return byCy;
 
-                var attack = new AttackData();
-                attack.init(source, damage);
-                attack.source = source;
-                attack.rawFinalDmg = damage;
-                attack.finalDmg = damage;
+            var ax = a.spr?.x ?? 0.0;
+            var bx = b.spr?.x ?? 0.0;
+            var byX = ax.CompareTo(bx);
+            if (byX != 0) return byX;
 
-                mob.onDamage(attack);
+            var ay = a.spr?.y ?? 0.0;
+            var by = b.spr?.y ?? 0.0;
+            var byY = ay.CompareTo(by);
+            if (byY != 0) return byY;
 
-                if (mob.life >= lifeBefore)
-                    mob.life = global::System.Math.Max(0, lifeBefore - damage);
-
-                if (mob.life <= 0 && lifeBefore > 0)
-                {
-                    try { mob.onDie(); } catch { }
-                }
-            }
-            catch
-            {
-                try
-                {
-                    mob.life = global::System.Math.Max(0, mob.life - damage);
-                }
-                catch
-                {
-                }
-            }
-            finally
-            {
-                _applyingRemoteDamage = false;
-            }
+            var at = a.type?.ToString() ?? string.Empty;
+            var bt = b.type?.ToString() ?? string.Empty;
+            return string.Compare(at, bt, StringComparison.Ordinal);
         }
 
-        private static bool TryResolveMob(Level level, int spawnUid, string mobType, double? expectedX, double? expectedY, out Mob mob)
-        {
-            mob = null!;
-            if (spawnUid == 0 || level == null)
-                return false;
-
-            lock (SyncLock)
-            {
-                if (MobBySpawnUid.TryGetValue(spawnUid, out var mapped) && mapped != null && !mapped.destroyed)
-                {
-                    mob = mapped;
-                    return true;
-                }
-            }
-
-            var entities = level.entities;
-            if (entities == null)
-                return false;
-
-            Mob bestMob = null!;
-            var bestScore = double.MaxValue;
-            var hasExpectedPosition = expectedX.HasValue && expectedY.HasValue;
-
-            for (int i = 0; i < entities.length; i++)
-            {
-                var candidate = entities.array[i] as Mob;
-                if (candidate == null || candidate.destroyed || !IsRealMob(candidate))
-                    continue;
-
-                var candidateType = GetMobType(candidate);
-                if (!IsMobTypeCompatible(candidateType, mobType))
-                    continue;
-
-                var candidateRuntimeUid = candidate.__uid;
-                var mappedToOtherSpawnUid = false;
-                lock (SyncLock)
-                {
-                    if (candidateRuntimeUid != 0 &&
-                        SpawnUidByRuntimeUid.TryGetValue(candidateRuntimeUid, out var existingSpawnUid) &&
-                        existingSpawnUid != spawnUid)
-                    {
-                        if (!hasExpectedPosition)
-                            continue;
-                        mappedToOtherSpawnUid = true;
-                    }
-                }
-
-                var score = 0.0;
-                if (hasExpectedPosition)
-                {
-                    var x = candidate.spr != null ? candidate.spr.x : candidate.cx;
-                    var y = candidate.spr != null ? candidate.spr.y : candidate.cy;
-                    var dx = x - expectedX!.Value;
-                    var dy = y - expectedY!.Value;
-                    score = dx * dx + dy * dy;
-
-                    if (mappedToOtherSpawnUid)
-                    {
-                        // Allow rebinding from local runtime UIDs to host spawn UIDs,
-                        // but still slightly prefer already-unbound candidates.
-                        score += 0.25;
-                    }
-                }
-
-                if (bestMob == null || score < bestScore)
-                {
-                    bestMob = candidate;
-                    bestScore = score;
-                    if (bestScore <= 0.0001)
-                        break;
-                }
-            }
-
-            if (bestMob == null)
-                return false;
-
-            lock (SyncLock)
-            {
-                RegisterMobLocked(spawnUid, bestMob);
-            }
-
-            mob = bestMob;
-            return true;
-        }
-
-        private static bool WasDamageFromLocalHero(AttackData attack)
-        {
-            if (attack == null)
-                return false;
-
-            var hero = ModEntry.me;
-            if (hero == null)
-                return false;
-
-            if (attack.source != null && ReferenceEquals(attack.source, hero))
-                return true;
-
-            return attack.sourceWeapon != null &&
-                   attack.sourceWeapon.owner != null &&
-                   ReferenceEquals(attack.sourceWeapon.owner, hero);
-        }
-
-        private static bool IsRealMob(Mob mob)
+        private static bool IsSyncMob(Mob? mob)
         {
             if (mob == null)
                 return false;
+
             var typeName = mob.GetType().ToString();
             return typeName.Contains("dc.en.mob.", StringComparison.Ordinal);
         }
 
-        private static string NormalizeMobType(string mobType)
+        private static void EnsureMobTracked(Mob mob)
         {
-            if (string.IsNullOrWhiteSpace(mobType))
-                return string.Empty;
-            return mobType.Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
-        }
-
-        private static string GetMobType(Mob mob)
-        {
-            if (mob == null)
-                return string.Empty;
-
-            var type = mob.type?.ToString();
-            if (string.IsNullOrWhiteSpace(type))
-                type = mob.GetType().ToString();
-
-            return NormalizeMobType(type);
-        }
-
-        private static bool IsMobTypeCompatible(string runtimeType, string incomingType)
-        {
-            if (string.IsNullOrWhiteSpace(incomingType))
-                return true;
-            if (string.IsNullOrWhiteSpace(runtimeType))
-                return false;
-
-            if (string.Equals(runtimeType, incomingType, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (runtimeType.EndsWith(incomingType, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (incomingType.EndsWith(runtimeType, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            return false;
-        }
-
-        private static void EnsureMobRegistered(Mob mob)
-        {
-            if (mob == null)
+            if (!IsSyncMob(mob))
                 return;
 
-            if (TryGetSpawnUid(mob, out _))
-                return;
-
-            lock (SyncLock)
+            lock (Sync)
             {
-                if (TryGetSpawnUidLocked(mob, out _))
+                var mobLevel = mob._level;
+                if (mobLevel != null && !ReferenceEquals(currentLevel, mobLevel))
+                {
+                    RebuildMobArray(mobLevel);
+                    return;
+                }
+
+                if (trackedMobIndices.ContainsKey(mob))
                     return;
 
-                var spawnUid = BuildFallbackSpawnUidLocked(GetMobType(mob), mob.cx, mob.cy);
-                RegisterMobLocked(spawnUid, mob);
+                var index = trackedMobs.Count;
+                trackedMobs.Add(mob);
+                trackedMobIndices[mob] = index;
             }
         }
 
-        private static bool TryGetSpawnUid(Mob mob, out int spawnUid)
+        private static bool TryGetTrackedIndex(Mob mob, out int index)
         {
-            lock (SyncLock)
+            lock (Sync)
             {
-                return TryGetSpawnUidLocked(mob, out spawnUid);
+                return trackedMobIndices.TryGetValue(mob, out index);
             }
         }
 
-        private static bool TryGetSpawnUidLocked(Mob mob, out int spawnUid)
+        private static bool IsOutOfGame(Mob mob)
         {
-            spawnUid = 0;
-            if (mob == null)
-                return false;
-
-            var runtimeUid = mob.__uid;
-            if (runtimeUid != 0 && SpawnUidByRuntimeUid.TryGetValue(runtimeUid, out spawnUid))
+            try
             {
-                if (MobBySpawnUid.TryGetValue(spawnUid, out var mapped) && ReferenceEquals(mapped, mob))
+                if (mob.isOutOfGame)
                     return true;
-                SpawnUidByRuntimeUid.Remove(runtimeUid);
+            }
+            catch
+            {
             }
 
-            foreach (var pair in MobBySpawnUid)
+            try
             {
-                if (!ReferenceEquals(pair.Value, mob))
+                return mob._isOutOfGame();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void TryLockMobAi(Mob mob, double seconds)
+        {
+            try
+            {
+                mob.lockAiS(seconds);
+            }
+            catch
+            {
+            }
+        }
+
+        private static int NormalizeDir(int dir)
+        {
+            if (dir < 0) return -1;
+            if (dir > 0) return 1;
+            return 0;
+        }
+
+        private static int BuildCdSignature(Mob mob)
+        {
+            var fast = mob.cd?.fastCheck;
+            if (fast == null)
+                return 0;
+
+            var signature = 0;
+            var accumulator = 0;
+            try
+            {
+                var keys = fast.keys();
+                while (keys != null && keys.hasNext.Invoke())
+                {
+                    var keyObj = keys.next.Invoke();
+                    var valueObj = fast.get(keyObj);
+                    var key = ReadCooldownKey(keyObj);
+                    var frames = ReadCooldownFrames(valueObj);
+
+                    unchecked
+                    {
+                        var entryHash = (key * 397) ^ frames;
+                        signature ^= entryHash;
+                        accumulator += (frames * 31) + key;
+                    }
+                }
+            }
+            catch
+            {
+                return 0;
+            }
+
+            unchecked
+            {
+                return (signature * 486187739) ^ accumulator;
+            }
+        }
+
+        private static int ReadCooldownKey(object? keyObj)
+        {
+            try
+            {
+                return Convert.ToInt32(keyObj, CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static int ReadCooldownFrames(object? valueObj)
+        {
+            if (valueObj is CdInst inst)
+            {
+                try
+                {
+                    return (int)System.Math.Round(inst.frames);
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                var raw = Convert.ToDouble(valueObj, CultureInfo.InvariantCulture);
+                return (int)System.Math.Round(raw);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static void TrySendHostMobStates(NetNode net)
+        {
+            var now = Stopwatch.GetTimestamp();
+            var minDelta = (long)(Stopwatch.Frequency / HostStateSendRateHz);
+            if (lastHostStateSendTick != 0 && now - lastHostStateSendTick < minDelta)
+                return;
+            lastHostStateSendTick = now;
+
+            List<NetNode.MobStateSnapshot> states = new();
+            lock (Sync)
+            {
+                for (int i = 0; i < trackedMobs.Count; i++)
+                {
+                    var mob = trackedMobs[i];
+                    if (mob == null || IsOutOfGame(mob))
+                        continue;
+
+                    var x = mob.spr?.x ?? mob.cx;
+                    var y = mob.spr?.y ?? mob.cy;
+                    var dir = NormalizeDir(mob.dir);
+                    var life = mob.life;
+                    var maxLife = mob.maxLife;
+                    var cd = BuildCdSignature(mob);
+
+                    states.Add(new NetNode.MobStateSnapshot(i, x, y, dir, life, maxLife, cd));
+                }
+            }
+
+            if (states.Count > 0)
+                net.SendMobStates(states);
+        }
+
+        private static void ConsumeIncomingHostMobStates(NetNode net)
+        {
+            if (!net.TryConsumeMobStates(out var states))
+                return;
+
+            lock (Sync)
+            {
+                foreach (var state in states)
+                {
+                    var localIndex = ResolveLocalIndexByCoordinatesLocked(state);
+                    if (localIndex < 0)
+                        continue;
+
+                    clientMobTargets[localIndex] = new ClientMobState(
+                        state.X,
+                        state.Y,
+                        NormalizeDir(state.Dir),
+                        state.Life,
+                        state.MaxLife,
+                        state.CdSignature);
+                }
+            }
+        }
+
+        private static int ResolveLocalIndexByCoordinatesLocked(NetNode.MobStateSnapshot hostState)
+        {
+            if (hostToLocalIndices.TryGetValue(hostState.Index, out var mappedIndex))
+            {
+                if (IsValidLocalMobIndexLocked(mappedIndex))
+                    return mappedIndex;
+
+                hostToLocalIndices.Remove(hostState.Index);
+                localToHostIndices.Remove(mappedIndex);
+            }
+
+            var bestIndex = -1;
+            var bestDistance = double.MaxValue;
+
+            for (int i = 0; i < trackedMobs.Count; i++)
+            {
+                if (!IsValidLocalMobIndexLocked(i))
                     continue;
 
-                spawnUid = pair.Key;
-                if (runtimeUid != 0)
-                    SpawnUidByRuntimeUid[runtimeUid] = spawnUid;
-                return true;
+                if (localToHostIndices.TryGetValue(i, out var boundHost) && boundHost != hostState.Index)
+                    continue;
+
+                var mob = trackedMobs[i];
+                var x = mob.spr?.x ?? mob.cx;
+                var y = mob.spr?.y ?? mob.cy;
+                var dx = x - hostState.X;
+                var dy = y - hostState.Y;
+                var distSq = dx * dx + dy * dy;
+
+                if (distSq < bestDistance)
+                {
+                    bestDistance = distSq;
+                    bestIndex = i;
+                }
             }
 
-            return false;
+            if (bestIndex >= 0 && bestDistance <= MaxCoordinateMatchDistanceSq)
+            {
+                hostToLocalIndices[hostState.Index] = bestIndex;
+                localToHostIndices[bestIndex] = hostState.Index;
+                return bestIndex;
+            }
+
+            if (hostState.Index >= 0 && hostState.Index < trackedMobs.Count && IsValidLocalMobIndexLocked(hostState.Index))
+            {
+                hostToLocalIndices[hostState.Index] = hostState.Index;
+                localToHostIndices[hostState.Index] = hostState.Index;
+                return hostState.Index;
+            }
+
+            return -1;
         }
 
-        private static void RegisterMobLocked(int spawnUid, Mob mob)
+        private static bool IsValidLocalMobIndexLocked(int index)
         {
-            if (spawnUid == 0 || mob == null)
+            if (index < 0 || index >= trackedMobs.Count)
+                return false;
+
+            var mob = trackedMobs[index];
+            if (mob == null || !IsSyncMob(mob))
+                return false;
+
+            return !IsOutOfGame(mob);
+        }
+
+        private static void ApplyInterpolatedState(Mob self)
+        {
+            if (!TryGetTrackedIndex(self, out var localIndex))
                 return;
 
-            if (MobBySpawnUid.TryGetValue(spawnUid, out var oldMob) && oldMob != null && !ReferenceEquals(oldMob, mob))
+            ClientMobState target;
+            lock (Sync)
             {
-                var oldRuntimeUid = oldMob.__uid;
-                if (oldRuntimeUid != 0 &&
-                    SpawnUidByRuntimeUid.TryGetValue(oldRuntimeUid, out var oldSpawnUid) &&
-                    oldSpawnUid == spawnUid)
-                    SpawnUidByRuntimeUid.Remove(oldRuntimeUid);
-            }
-
-            MobBySpawnUid[spawnUid] = mob;
-
-            var runtimeUid = mob.__uid;
-            if (runtimeUid == 0)
-                return;
-
-            if (SpawnUidByRuntimeUid.TryGetValue(runtimeUid, out var previousSpawnUid) && previousSpawnUid != spawnUid)
-                MobBySpawnUid.Remove(previousSpawnUid);
-
-            SpawnUidByRuntimeUid[runtimeUid] = spawnUid;
-        }
-
-        private static int BuildFallbackSpawnUidLocked(string mobType, int cx, int cy)
-        {
-            unchecked
-            {
-                var baseHash = ComputeDeterministicSpawnHash(mobType, cx, cy);
-                var candidate = baseHash;
-                var salt = 1;
-
-                while (candidate == 0 || MobBySpawnUid.ContainsKey(candidate))
-                {
-                    candidate = MixDeterministicSpawnHash(baseHash, salt++);
-                    if (salt > 64)
-                        break;
-                }
-
-                if (candidate != 0 && !MobBySpawnUid.ContainsKey(candidate))
-                    return candidate;
-
-                while (MobBySpawnUid.ContainsKey(_fallbackSpawnUid))
-                    _fallbackSpawnUid--;
-
-                return _fallbackSpawnUid--;
-            }
-        }
-
-        private static int ComputeDeterministicSpawnHash(string mobType, int cx, int cy)
-        {
-            unchecked
-            {
-                uint hash = 2166136261;
-                var text = (mobType ?? string.Empty).ToLowerInvariant();
-                for (var i = 0; i < text.Length; i++)
-                {
-                    hash ^= text[i];
-                    hash *= 16777619;
-                }
-
-                hash ^= (uint)cx;
-                hash *= 16777619;
-                hash ^= (uint)cy;
-                hash *= 16777619;
-
-                var candidate = (int)(hash & 0x7FFFFFFF);
-                return candidate == 0 ? 1 : candidate;
-            }
-        }
-
-        private static int MixDeterministicSpawnHash(int baseHash, int salt)
-        {
-            unchecked
-            {
-                uint hash = (uint)baseHash;
-                hash ^= (uint)(salt * 374761393);
-                hash = (hash << 13) | (hash >> 19);
-                hash *= 1274126177;
-                var candidate = (int)(hash & 0x7FFFFFFF);
-                return candidate == 0 ? 1 : candidate;
-            }
-        }
-
-        private static void UnregisterMob(Mob mob)
-        {
-            lock (SyncLock)
-            {
-                var runtimeUid = mob.__uid;
-                if (runtimeUid != 0 && SpawnUidByRuntimeUid.TryGetValue(runtimeUid, out var spawnUid))
-                {
-                    SpawnUidByRuntimeUid.Remove(runtimeUid);
-                    MobBySpawnUid.Remove(spawnUid);
-                    ClientTargets.Remove(spawnUid);
+                if (!clientMobTargets.TryGetValue(localIndex, out target))
                     return;
-                }
+            }
 
-                var found = 0;
-                var hasFound = false;
-                foreach (var pair in MobBySpawnUid)
+            var currentX = self.spr?.x ?? self.cx;
+            var currentY = self.spr?.y ?? self.cy;
+            var lerpedX = currentX + (target.X - currentX) * ClientInterpolationAlpha;
+            var lerpedY = ClientSyncVerticalPosition
+                ? currentY + (target.Y - currentY) * ClientInterpolationAlpha
+                : currentY;
+
+            try
+            {
+                self.setPosPixel(lerpedX, lerpedY);
+            }
+            catch
+            {
+                if (self.spr != null)
                 {
-                    if (!ReferenceEquals(pair.Value, mob))
+                    self.spr.x = lerpedX;
+                    self.spr.y = lerpedY;
+                }
+            }
+
+            // Client-side mobs are host-driven; clear local velocity to avoid fall/impact side effects.
+            try
+            {
+                self.dx = 0;
+                self.bdx = 0;
+                self.dy = 0;
+                self.bdy = 0;
+            }
+            catch
+            {
+            }
+
+            if (target.Dir != 0)
+                self.dir = target.Dir;
+
+            if (target.MaxLife > 0 && self.maxLife != target.MaxLife)
+                self.maxLife = target.MaxLife;
+            if (target.Life >= 0 && self.life != target.Life)
+                self.life = target.Life;
+        }
+
+        private static void ConsumeIncomingMobHits(NetNode net)
+        {
+            if (!net.TryConsumeMobHits(out var hits))
+                return;
+
+            lock (Sync)
+            {
+                foreach (var hit in hits)
+                {
+                    var mob = ResolveMobFromHitLocked(hit);
+                    if (mob == null || IsOutOfGame(mob))
                         continue;
-                    found = pair.Key;
-                    hasFound = true;
-                    break;
-                }
 
-                if (hasFound)
-                {
-                    MobBySpawnUid.Remove(found);
-                    ClientTargets.Remove(found);
+                    var prevLife = mob.life;
+                    var maxLife = System.Math.Max(1, mob.maxLife);
+                    var targetLife = System.Math.Clamp(hit.Hp, 0, maxLife);
+
+                    if (targetLife >= prevLife)
+                        continue;
+
+                    mob.life = targetLife;
+                    if (targetLife <= 0 && prevLife > 0)
+                    {
+                        try
+                        {
+                            mob.onDie();
+                        }
+                        catch
+                        {
+                        }
+                    }
                 }
             }
         }
 
-        private static void ResetMobState()
+        private static Mob? ResolveMobFromHitLocked(NetNode.MobHit hit)
         {
-            lock (SyncLock)
+            if (hit.MobIndex >= 0 && hit.MobIndex < trackedMobs.Count)
             {
-                MobBySpawnUid.Clear();
-                SpawnUidByRuntimeUid.Clear();
-                ClientTargets.Clear();
-                _fallbackSpawnUid = -1;
-                _lastLevelUid = 0;
-            }
-
-            _nextPumpTicks = 0;
-            _nextSnapshotTicks = 0;
-        }
-
-        private static void SetCurrentLevelUid(int levelUid)
-        {
-            lock (SyncLock)
-            {
-                _lastLevelUid = levelUid;
-            }
-        }
-
-        private static void EnsureLevelContext(Level level)
-        {
-            if (level == null)
-                return;
-
-            var levelUid = level.__uid;
-            var changed = false;
-
-            lock (SyncLock)
-            {
-                if (_lastLevelUid == 0)
+                var byIndex = trackedMobs[hit.MobIndex];
+                if (byIndex != null && !IsOutOfGame(byIndex))
                 {
-                    _lastLevelUid = levelUid;
-                    return;
-                }
-
-                if (_lastLevelUid != levelUid)
-                {
-                    _lastLevelUid = levelUid;
-                    MobBySpawnUid.Clear();
-                    SpawnUidByRuntimeUid.Clear();
-                    ClientTargets.Clear();
-                    _fallbackSpawnUid = -1;
-                    changed = true;
+                    var idxX = byIndex.spr?.x ?? byIndex.cx;
+                    var idxY = byIndex.spr?.y ?? byIndex.cy;
+                    var idxDx = idxX - hit.X;
+                    var idxDy = idxY - hit.Y;
+                    if (idxDx * idxDx + idxDy * idxDy <= MaxCoordinateMatchDistanceSq)
+                        return byIndex;
                 }
             }
 
-            if (changed)
+            Mob? best = null;
+            var bestDist = double.MaxValue;
+
+            for (int i = 0; i < trackedMobs.Count; i++)
             {
-                _nextPumpTicks = 0;
-                _nextSnapshotTicks = 0;
+                var mob = trackedMobs[i];
+                if (mob == null || IsOutOfGame(mob))
+                    continue;
+
+                var x = mob.spr?.x ?? mob.cx;
+                var y = mob.spr?.y ?? mob.cy;
+                var dx = x - hit.X;
+                var dy = y - hit.Y;
+                var distSq = dx * dx + dy * dy;
+                if (distSq < bestDist)
+                {
+                    bestDist = distSq;
+                    best = mob;
+                }
             }
+
+            if (bestDist <= MaxCoordinateMatchDistanceSq)
+                return best;
+
+            return null;
         }
     }
 }
