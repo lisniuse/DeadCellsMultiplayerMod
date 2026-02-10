@@ -167,7 +167,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!IsClient(net))
                 return;
 
-            if (!IsSyncMob(self) || IsOutOfGame(self))
+            // if (!IsSyncMob(self) || IsOutOfGame(self))
+            if (!IsSyncMob(self))
                 return;
 
             if (i?.source != null && ModEntry.me != null && !ReferenceEquals(i.source, ModEntry.me))
@@ -298,27 +299,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             lock (Sync)
             {
                 return trackedMobIndices.TryGetValue(mob, out index);
-            }
-        }
-
-        private static bool IsOutOfGame(Mob mob)
-        {
-            try
-            {
-                if (mob.isOutOfGame)
-                    return true;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                return mob._isOutOfGame();
-            }
-            catch
-            {
-                return false;
             }
         }
 
@@ -520,7 +500,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 for (int i = 0; i < trackedMobs.Count; i++)
                 {
                     var mob = trackedMobs[i];
-                    if (mob == null || IsOutOfGame(mob))
+                    // if (mob == null || IsOutOfGame(mob))
+                    if (mob == null)
                         continue;
 
                     var x = mob.spr?.x ?? mob.cx;
@@ -624,7 +605,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (mob == null || !IsSyncMob(mob))
                 return false;
 
-            return !IsOutOfGame(mob);
+            return true;
         }
 
         private static void ApplyInterpolatedState(Mob self)
@@ -694,7 +675,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 foreach (var hit in hits)
                 {
                     var mob = ResolveMobFromHitLocked(hit);
-                    if (mob == null || IsOutOfGame(mob))
+                    // if (mob == null || IsOutOfGame(mob))
+                    if (mob == null)
                         continue;
 
                     var prevLife = mob.life;
@@ -724,7 +706,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (hit.MobIndex >= 0 && hit.MobIndex < trackedMobs.Count)
             {
                 var byIndex = trackedMobs[hit.MobIndex];
-                if (byIndex != null && !IsOutOfGame(byIndex))
+                // if (byIndex != null && !IsOutOfGame(byIndex))
+                if (byIndex != null)
                 {
                     var idxX = byIndex.spr?.x ?? byIndex.cx;
                     var idxY = byIndex.spr?.y ?? byIndex.cy;
@@ -741,7 +724,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             for (int i = 0; i < trackedMobs.Count; i++)
             {
                 var mob = trackedMobs[i];
-                if (mob == null || IsOutOfGame(mob))
+                // if (mob == null || IsOutOfGame(mob))
+                if (mob == null)
                     continue;
 
                 var x = mob.spr?.x ?? mob.cx;
