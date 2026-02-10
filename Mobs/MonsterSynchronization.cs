@@ -1182,11 +1182,23 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!draw.IsOnScreen && draw.IsOutOfGame)
                 return;
 
+            var refreshFrames = 120.0;
+            try
+            {
+                var threshold = mob.frameCountThresholdForOutOfGame;
+                if (threshold > 0)
+                    refreshFrames = threshold;
+            }
+            catch
+            {
+            }
+
             try
             {
                 if (draw.IsOnScreen)
                     mob.isOnScreen = true;
-                mob.onScreenRecent = 0.0;
+                if (mob.onScreenRecent < refreshFrames)
+                    mob.onScreenRecent = refreshFrames;
             }
             catch
             {
