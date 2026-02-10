@@ -93,7 +93,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             orig(self, clid);
 
-            if (clid is not Mob mob || !IsSyncMob(mob))
+            // if (clid is not Mob mob || !IsSyncMob(mob))
+            if (clid is not Mob mob)
                 return;
 
             lock (Sync)
@@ -135,8 +136,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var isHost = IsHost(net);
             var isClient = IsClient(net);
 
+            if (isClient)
+                ConsumeIncomingHostMobStates(net!);
+
             if (isClient && IsSyncMob(self))
             {
+                ApplyClientAnimationStateBeforeUpdate(self);
                 TryLockMobAi(self, ClientAiLockSeconds);
             }
 
@@ -152,7 +157,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
             else if (isClient)
             {
-                ConsumeIncomingHostMobStates(net!);
                 ApplyInterpolatedState(self);
             }
         }
@@ -340,29 +344,53 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static string BuildCdPayload(Mob mob)
         {
             var cooldown = mob.cd;
-            if (cooldown == null)
+            var fast = cooldown?.fastCheck;
+            if (cooldown == null || fast == null)
                 return string.Empty;
 
-            var cdByKey = BuildCdInstMap(cooldown);
-            if (cdByKey.Count == 0)
+            var framesByKey = new Dictionary<int, double>();
+            try
+            {
+                var keys = fast.keys();
+                while (keys != null && keys.hasNext.Invoke())
+                {
+                    var keyObj = keys.next.Invoke();
+                    var key = ReadCooldownKey(keyObj);
+                    var rawValue = fast.get(keyObj);
+                    if (!TryReadCooldownFrames(rawValue, out double frames))
+                        continue;
+                    framesByKey[key] = System.Math.Max(0.0, frames);
+                }
+            }
+            catch
+            {
+            }
+
+            if (framesByKey.Count == 0)
+            {
+                var cdByKey = BuildCdInstMap(cooldown);
+                foreach (var kv in cdByKey)
+                    framesByKey[kv.Key] = System.Math.Max(0.0, kv.Value.frames);
+            }
+
+            if (framesByKey.Count == 0)
                 return string.Empty;
 
-            var sortedKeys = new List<int>(cdByKey.Keys);
+            var sortedKeys = new List<int>(framesByKey.Keys);
             sortedKeys.Sort();
 
             var payload = new StringBuilder();
             foreach (var key in sortedKeys)
             {
-                if (!cdByKey.TryGetValue(key, out var inst))
+                if (!framesByKey.TryGetValue(key, out var frames))
                     continue;
 
-                var frames = (int)System.Math.Round(inst.frames);
                 if (payload.Length > 0)
-                    payload.Append('.');
+                    payload.Append('|');
 
                 payload.Append(key.ToString(CultureInfo.InvariantCulture));
-                payload.Append(':');
-                payload.Append(frames.ToString(CultureInfo.InvariantCulture));
+                payload.Append('=');
+                payload.Append(frames.ToString("R", CultureInfo.InvariantCulture));
             }
 
             return payload.ToString();
@@ -403,16 +431,36 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
-        private static Dictionary<int, int> ParseCooldownPayload(string? payload)
+        private static bool TryReadCooldownFrames(object? rawValue, out double frames)
         {
-            var map = new Dictionary<int, int>();
+            if (rawValue is CdInst inst)
+            {
+                frames = inst.frames;
+                return true;
+            }
+
+            try
+            {
+                frames = Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
+                return true;
+            }
+            catch
+            {
+                frames = 0.0;
+                return false;
+            }
+        }
+
+        private static Dictionary<int, double> ParseCooldownPayload(string? payload)
+        {
+            var map = new Dictionary<int, double>();
             if (string.IsNullOrWhiteSpace(payload))
                 return map;
 
-            var entries = payload.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            var entries = payload.Split('|', StringSplitOptions.RemoveEmptyEntries);
             foreach (var entry in entries)
             {
-                var parts = entry.Split(':', StringSplitOptions.None);
+                var parts = entry.Split('=', StringSplitOptions.None);
                 if (parts.Length < 2)
                     continue;
 
@@ -421,10 +469,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 if (!int.TryParse(keyPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out var key))
                     continue;
-                if (!int.TryParse(framesPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out var frames))
+                if (!double.TryParse(framesPart, NumberStyles.Float, CultureInfo.InvariantCulture, out var frames))
                     continue;
 
-                map[key] = frames;
+                map[key] = System.Math.Max(0.0, frames);
             }
 
             return map;
@@ -440,19 +488,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var targetEntries = ParseCooldownPayload(payload);
             var cdByKey = BuildCdInstMap(cooldown);
             var existingKeys = new HashSet<int>(cdByKey.Keys);
-            try
-            {
-                var keys = fast.keys();
-                while (keys != null && keys.hasNext.Invoke())
-                {
-                    var keyObj = keys.next.Invoke();
-                    existingKeys.Add(ReadCooldownKey(keyObj));
-                }
-            }
-            catch
-            {
-                return;
-            }
 
             foreach (var existingKey in existingKeys)
             {
@@ -476,7 +511,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             foreach (var kv in targetEntries)
             {
                 var key = kv.Key;
-                var frames = System.Math.Max(0, kv.Value);
+                var frames = System.Math.Max(0.0, kv.Value);
 
                 try
                 {
@@ -681,6 +716,24 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 self.maxLife = target.MaxLife;
             if (target.Life >= 0 && self.life != target.Life)
                 self.life = target.Life;
+
+            ApplyCooldownPayload(self, target.CdPayload);
+        }
+
+        private static void ApplyClientAnimationStateBeforeUpdate(Mob self)
+        {
+            if (!TryGetTrackedIndex(self, out var localIndex))
+                return;
+
+            ClientMobState target;
+            lock (Sync)
+            {
+                if (!clientMobTargets.TryGetValue(localIndex, out target))
+                    return;
+            }
+
+            if (target.Dir != 0)
+                self.dir = target.Dir;
 
             ApplyCooldownPayload(self, target.CdPayload);
         }
