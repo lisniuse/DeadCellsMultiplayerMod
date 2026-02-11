@@ -7,6 +7,7 @@ using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using dc.haxe;
@@ -96,10 +97,7 @@ namespace DeadCellsMultiplayerMod
                 }
                 if (TryGetRemoteBossRune(out var bossRune))
                 {
-                    _origBossRune = self.bossRuneActivated;
-                    _origBossRuneCaptured = true;
-                    self.bossRuneActivated = bossRune;
-                    _hasRemoteBossRune = true;
+                    ApplyRemoteBossRune(self, bossRune);
                 }
                 else
                 {
@@ -130,73 +128,81 @@ namespace DeadCellsMultiplayerMod
                 CaptureOriginalUserData(user);
                 var meta = EnsureItemMeta(user, user.itemMeta);
                 var arr = EnsureArray(meta.itemProgress);
-                var existing = new HashSet<string>(StringComparer.Ordinal);
+                var existing = new Dictionary<string, ItemProgress>(StringComparer.Ordinal);
                 for (int i = 0; i < arr.length; i++)
                 {
                     var progress = arr.getDyn(i) as ItemProgress;
                     var id = progress?.itemId?.ToString();
-                    if (!string.IsNullOrWhiteSpace(id))
-                        existing.Add(id);
+                    if (progress != null && !string.IsNullOrWhiteSpace(id))
+                        existing[id] = progress;
+                }
+                var permanent = EnsureArray(meta.permanentItems);
+                var existingPermanent = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < permanent.length; i++)
+                {
+                    var permanentId = permanent.getDyn(i)?.ToString();
+                    if (!string.IsNullOrWhiteSpace(permanentId))
+                        existingPermanent.Add(permanentId);
                 }
                 _hasRemoteBlueprints = true;
 
-                var item = new StringBuilder();
-                var escaped = false;
-                for (var i = 0; i < payload.Length; i++)
+                var isV2 = payload.Equals("V2", StringComparison.Ordinal) || payload.StartsWith("V2|", StringComparison.Ordinal);
+                ForEachEscapedToken(payload, token =>
                 {
-                    var c = payload[i];
-                    if (escaped)
-                    {
-                        item.Append(c);
-                        escaped = false;
-                        continue;
-                    }
+                    if (string.IsNullOrWhiteSpace(token))
+                        return;
 
-                    if (c == '\\')
+                    if (isV2)
                     {
-                        escaped = true;
-                        continue;
-                    }
+                        if (token.Equals("V2", StringComparison.Ordinal))
+                            return;
 
-                    if (c == '|')
-                    {
-                        if (item.Length > 0)
+                        if (token.StartsWith("I:", StringComparison.Ordinal))
                         {
-                            var text = item.ToString();
-                            if (!string.IsNullOrWhiteSpace(text))
+                            var parts = token.Split(':');
+                            if (parts.Length < 5)
+                                return;
+
+                            var itemId = DecodeToken(parts[1]);
+                            if (string.IsNullOrWhiteSpace(itemId))
+                                return;
+
+                            if (!existing.TryGetValue(itemId, out var progress) || progress == null)
                             {
-                                if (!existing.Contains(text))
-                                {
-                                    var progress = new ItemProgress(text.AsHaxeString());
-                                    progress.unlocked = true;
-                                    arr.pushDyn(progress);
-                                    existing.Add(text);
-                                }
+                                progress = new ItemProgress(itemId.AsHaxeString());
+                                arr.pushDyn(progress);
+                                existing[itemId] = progress;
                             }
-                            item.Clear();
+
+                            progress.investedCells = ParseInt(parts[2], ToInt(progress.investedCells));
+                            progress.unlocked = ParseBool(parts[3], progress.unlocked);
+                            progress.isNew = ParseBool(parts[4], progress.isNew);
+                            return;
                         }
-                        continue;
-                    }
 
-                    item.Append(c);
-                }
-
-                if (item.Length > 0)
-                {
-                    var text = item.ToString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        if (!existing.Contains(text))
+                        if (token.StartsWith("P:", StringComparison.Ordinal))
                         {
-                            var progress = new ItemProgress(text.AsHaxeString());
-                            progress.unlocked = true;
-                            arr.pushDyn(progress);
-                            existing.Add(text);
+                            var permanentId = DecodeToken(token[2..]);
+                            if (string.IsNullOrWhiteSpace(permanentId))
+                                return;
+                            if (existingPermanent.Add(permanentId))
+                                permanent.pushDyn(permanentId.AsHaxeString());
                         }
+                        return;
                     }
-                }
+
+                    var text = token;
+                    if (!string.IsNullOrWhiteSpace(text) && !existing.ContainsKey(text))
+                    {
+                        var progress = new ItemProgress(text.AsHaxeString());
+                        progress.unlocked = true;
+                        arr.pushDyn(progress);
+                        existing[text] = progress;
+                    }
+                });
 
                 meta.itemProgress = arr;
+                meta.permanentItems = permanent;
                 user.itemMeta = meta;
             }
 
@@ -226,23 +232,44 @@ namespace DeadCellsMultiplayerMod
                 return;
 
             var meta = user.itemMeta;
-            var list = meta?.itemProgress;
             var builder = new StringBuilder();
+            builder.Append("V2");
+
+            var list = meta?.itemProgress;
             if (list != null)
             {
-                var first = true;
                 for (int i = 0; i < list.length; i++)
                 {
                     var progress = list.getDyn(i) as ItemProgress;
-                    if (progress == null || !progress.unlocked)
+                    if (progress == null)
                         continue;
+
                     var text = progress.itemId?.ToString();
                     if (string.IsNullOrWhiteSpace(text))
                         continue;
-                    if (!first)
-                        builder.Append('|');
-                    builder.Append(text.Replace("\\", "\\\\").Replace("|", "\\|"));
-                    first = false;
+
+                    builder.Append("|I:");
+                    builder.Append(EncodeToken(text));
+                    builder.Append(':');
+                    builder.Append(ToInt(progress.investedCells).ToString(CultureInfo.InvariantCulture));
+                    builder.Append(':');
+                    builder.Append(progress.unlocked ? "1" : "0");
+                    builder.Append(':');
+                    builder.Append(progress.isNew ? "1" : "0");
+                }
+            }
+
+            var permanentItems = meta?.permanentItems;
+            if (permanentItems != null)
+            {
+                for (int i = 0; i < permanentItems.length; i++)
+                {
+                    var item = permanentItems.getDyn(i);
+                    var text = item?.ToString();
+                    if (string.IsNullOrWhiteSpace(text))
+                        continue;
+                    builder.Append("|P:");
+                    builder.Append(EncodeToken(text));
                 }
             }
 
@@ -340,6 +367,10 @@ namespace DeadCellsMultiplayerMod
                 _hasRemoteCounters = false;
                 _hasRemoteBlueprints = false;
                 _hasRemoteBossRune = false;
+                lock (_bossRuneLock)
+                {
+                    _remoteBossRune = null;
+                }
                 _origStoryCaptured = false;
                 _origStory = null;
                 _origCounters = null;
@@ -389,8 +420,8 @@ namespace DeadCellsMultiplayerMod
                 ReceiveCounters(_remoteCountersPayload, user);
             if (!string.IsNullOrEmpty(_remoteBlueprintsPayload))
                 ReceiveBlueprints(_remoteBlueprintsPayload, user);
-            if (_hasRemoteBossRune && TryGetRemoteBossRune(out var bossRune))
-                user.bossRuneActivated = bossRune;
+            if (TryGetRemoteBossRune(out var bossRune))
+                ApplyRemoteBossRune(user, bossRune);
         }
 
         public static void TriggerRemoteDeath()
@@ -631,6 +662,24 @@ namespace DeadCellsMultiplayerMod
             {
                 _remoteBossRune = bossRune;
             }
+            _hasRemoteBossRune = true;
+
+            var net = GameMenu.NetRef;
+            if (net != null && net.IsHost)
+                return;
+
+            GameMenu.EnqueueMainThread(() =>
+            {
+                try
+                {
+                    var user = dc.Main.Class.ME?.user;
+                    if (user != null)
+                        ApplyRemoteBossRune(user, bossRune);
+                }
+                catch
+                {
+                }
+            });
 
         }
 
@@ -730,6 +779,89 @@ namespace DeadCellsMultiplayerMod
                 return string.Empty;
 
             return skin.Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty);
+        }
+
+        private static void ApplyRemoteBossRune(User user, int bossRune)
+        {
+            CaptureOriginalUserData(user);
+            user.bossRuneActivated = bossRune;
+            _hasRemoteBossRune = true;
+        }
+
+        private static void ForEachEscapedToken(string payload, Action<string> onToken)
+        {
+            if (string.IsNullOrEmpty(payload))
+                return;
+
+            var token = new StringBuilder();
+            var escaped = false;
+            for (var i = 0; i < payload.Length; i++)
+            {
+                var c = payload[i];
+                if (escaped)
+                {
+                    token.Append(c);
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '|')
+                {
+                    onToken(token.ToString());
+                    token.Clear();
+                    continue;
+                }
+
+                token.Append(c);
+            }
+
+            if (escaped)
+                token.Append('\\');
+            onToken(token.ToString());
+        }
+
+        private static string EncodeToken(string value)
+        {
+            return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+        }
+
+        private static string? DecodeToken(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            try
+            {
+                return Encoding.UTF8.GetString(Convert.FromBase64String(value));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int ParseInt(string value, int fallback)
+        {
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                return parsed;
+            return fallback;
+        }
+
+        private static bool ParseBool(string value, bool fallback)
+        {
+            if (value == "1")
+                return true;
+            if (value == "0")
+                return false;
+            if (bool.TryParse(value, out var parsed))
+                return parsed;
+            return fallback;
         }
 
         private static ArrayObj? CloneItemProgress(ArrayObj? source)
