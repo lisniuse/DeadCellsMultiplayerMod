@@ -237,6 +237,8 @@ namespace DeadCellsMultiplayerMod
                         if (firstSeedForClient || seedChanged)
                         {
                             _inActualRun = false;
+                            _pendingAutoStart = false;
+                            _autoStartTriggered = false;
                             restartClientWorldNow = true;
                         }
                     }
@@ -299,6 +301,20 @@ namespace DeadCellsMultiplayerMod
                 }
 
                 _log?.Information("[NetMod] Client restarting run from host seed {Seed} ({Reason})", seed, reason);
+                try
+                {
+                    var main = dc.Main.Class.ME;
+                    if (main != null)
+                    {
+                        main.launchGame(GameDataSync._launch, null, 0.8);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log?.Warning("[NetMod] Client launchGame restart failed, fallback to direct newGame: {Message}", ex.Message);
+                }
+
                 game.destroy();
                 game.disposeImmediately();
                 game.user.newGame(seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
