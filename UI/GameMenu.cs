@@ -223,19 +223,21 @@ namespace DeadCellsMultiplayerMod
         public static void ReceiveHostRunSeed(int seed)
         {
             int? previousSeed = null;
+            bool restartClientWorldNow = false;
             lock (Sync)
             {
                 previousSeed = _remoteSeed;
                 _remoteSeed = seed;
                 if (_role == NetRole.Client)
                 {
+                    var firstSeedForClient = !previousSeed.HasValue;
+                    var seedChanged = previousSeed.HasValue && previousSeed.Value != seed;
                     if (_inActualRun)
                     {
-                        if (previousSeed.HasValue && previousSeed.Value != seed)
+                        if (firstSeedForClient || seedChanged)
                         {
-                            _seedArrived = true;
-                            _pendingAutoStart = true;
-                            _autoStartTriggered = false;
+                            _inActualRun = false;
+                            restartClientWorldNow = true;
                         }
                     }
                     else
@@ -246,6 +248,8 @@ namespace DeadCellsMultiplayerMod
                 }
             }
             _log?.Information("[NetMod] Client received host seed {Seed}", seed);
+            if (restartClientWorldNow)
+                QueueClientRestartFromHostSeed(seed, "host_restart");
         }
 
         internal static void QueueHostRestartFromDeath(string reason)
@@ -274,6 +278,30 @@ namespace DeadCellsMultiplayerMod
                 game.disposeImmediately();
 
                 game.user.newGame(GameDataSync.Seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
+            });
+        }
+
+        private static void QueueClientRestartFromHostSeed(int seed, string reason)
+        {
+            EnqueueMainThread(() =>
+            {
+                var game = ModEntry.Instance?.game;
+                if (game?.user == null)
+                {
+                    _log?.Warning("[NetMod] Skipping client restart ({Reason}): game not ready", reason);
+                    lock (Sync)
+                    {
+                        _seedArrived = true;
+                        _pendingAutoStart = true;
+                        _autoStartTriggered = false;
+                    }
+                    return;
+                }
+
+                _log?.Information("[NetMod] Client restarting run from host seed {Seed} ({Reason})", seed, reason);
+                game.destroy();
+                game.disposeImmediately();
+                game.user.newGame(seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
             });
         }
 
