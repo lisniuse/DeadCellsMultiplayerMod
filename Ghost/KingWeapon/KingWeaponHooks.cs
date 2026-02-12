@@ -485,6 +485,8 @@ internal static class KingWeaponHooks
             });
             return;
         }
+
+        ModEntry.Instance?.NotifyLocalShieldHoldingPulseFromKingWeaponHooks(self, ratio);
         orig(self, ratio);
     }
 

@@ -865,9 +865,6 @@ namespace DeadCellsMultiplayerMod
 
             if(me != null && me?.spr?._animManager != null && ReferenceEquals(self, me.spr._animManager))
             {
-                if(Stopwatch.GetTimestamp() < _suppressHeroAnimUntilTicks)
-                    return;
-
                 string anim = "idle";
                 try
                 {
@@ -1421,6 +1418,25 @@ namespace DeadCellsMultiplayerMod
             var inv = client.inventory;
             var existing = permanentId != 0 ? inv.getByPermanentId(permanentId) : null;
             var currentSlotItem = slot >= 0 ? inv.getEquippedWeaponOn(slot) : null;
+
+            if(existing == null && permanentId == 0)
+            {
+                if(IsWeaponKindMatch(currentSlotItem, cleaned))
+                    existing = currentSlotItem;
+                else
+                {
+                    var w0 = inv.getEquippedWeaponOn(0);
+                    if(IsWeaponKindMatch(w0, cleaned))
+                        existing = w0;
+                    else
+                    {
+                        var w1 = inv.getEquippedWeaponOn(1);
+                        if(IsWeaponKindMatch(w1, cleaned))
+                            existing = w1;
+                    }
+                }
+            }
+
             if (existing == null)
             {
                 var newItem = new InventItem(new InventItemKind.Weapon(cleaned.AsHaxeString()));
@@ -1441,7 +1457,11 @@ namespace DeadCellsMultiplayerMod
                 }
                 existing = newItem;
             }
-            else if(currentSlotItem != null && currentSlotItem.permanentId != existing.permanentId)
+            else if(currentSlotItem != null &&
+                    !ReferenceEquals(currentSlotItem, existing) &&
+                    (currentSlotItem.permanentId == 0 ||
+                     existing.permanentId == 0 ||
+                     currentSlotItem.permanentId != existing.permanentId))
             {
                 currentSlotItem.posID = -1;
             }
@@ -1458,6 +1478,15 @@ namespace DeadCellsMultiplayerMod
             {
                 _inventorySyncGuard = false;
             }
+        }
+
+        private static bool IsWeaponKindMatch(InventItem? item, string expectedKindId)
+        {
+            if(item == null || string.IsNullOrWhiteSpace(expectedKindId))
+                return false;
+            if(!TryGetWeaponKindId(item, out var itemKindId) || string.IsNullOrWhiteSpace(itemKindId))
+                return false;
+            return string.Equals(itemKindId, expectedKindId, StringComparison.Ordinal);
         }
 
 

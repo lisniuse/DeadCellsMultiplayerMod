@@ -374,7 +374,11 @@ namespace DeadCellsMultiplayerMod
             _log?.Information("[NetMod] Received remote username {Username}", cleaned);
             if (_role == NetRole.Host &&
                 !string.Equals(previous, cleaned, StringComparison.Ordinal))
-                MultiplayerUI.PushSystemMessage(FormatLocalized("{0} connected to the server.", cleaned));
+            {
+                var userForMsg = cleaned;
+                EnqueueMainThread(() =>
+                    MultiplayerUI.PushSystemMessage(FormatLocalized("{0} connected to the server.", userForMsg)));
+            }
         }
 
         private static void SendCachedGeneratePayload()

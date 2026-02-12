@@ -39,7 +39,7 @@ namespace DeadCellsMultiplayerMod.Ghost
             var item = GetWeaponItem(pendingSlot);
             if(item == null || item.kind?.Index == InventItemKind.Indexes.Meta) return;
 
-            if(weapon == null || weaponItem == null || weaponItem.permanentId != item.permanentId)
+            if(NeedsWeaponRebuild(item))
             {
                 if(weapon != null && !weapon.destroyed)
                 {
@@ -112,6 +112,9 @@ namespace DeadCellsMultiplayerMod.Ghost
                 pendingAttacks--;
             }
 
+            if(pendingAttacks > 1)
+                pendingAttacks = 1;
+
             if(!weapon.destroyed && weapon is not BaseBow)
             {
                 weapon.fixedUpdate();
@@ -124,6 +127,38 @@ namespace DeadCellsMultiplayerMod.Ghost
             if(slot >= 0) pendingSlot = slot;
             if(pendingAttacks < 3)
                 pendingAttacks++;
+        }
+
+        private bool NeedsWeaponRebuild(InventItem item)
+        {
+            if(item == null)
+                return false;
+            if(weapon == null || weapon.destroyed || weaponItem == null)
+                return true;
+            if(ReferenceEquals(weaponItem, item))
+                return false;
+
+            var oldPermanentId = weaponItem.permanentId;
+            var newPermanentId = item.permanentId;
+            if(oldPermanentId != 0 && newPermanentId != 0 && oldPermanentId != newPermanentId)
+                return true;
+
+            var oldKind = GetWeaponKindId(weaponItem);
+            var newKind = GetWeaponKindId(item);
+            if(!string.Equals(oldKind, newKind, StringComparison.Ordinal))
+                return true;
+
+            if(weaponItem.posID != item.posID)
+                return true;
+
+            return false;
+        }
+
+        private static string? GetWeaponKindId(InventItem? item)
+        {
+            if(item?.kind is InventItemKind.Weapon w)
+                return w.Param0?.ToString();
+            return null;
         }
 
         private void ClearShieldAffects()

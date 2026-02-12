@@ -841,16 +841,21 @@ public sealed class NetNode : IDisposable
                     primaryId = _primaryRemoteId;
                 }
 
-                try
+                var skinId = effectiveId.Value;
+                var skinValue = skin;
+                GameMenu.EnqueueMainThread(() =>
                 {
-                    ModEntry.SetClientSkin(effectiveId.Value, skin);
-                    if (effectiveId.Value == primaryId)
-                        GameDataSync.ReceiveHeroSkin(skin);
-                }
-                catch (Exception ex)
-                {
-                    _log.Warning("[NetNode] Failed to handle hero skin: {msg}", ex.Message);
-                }
+                    try
+                    {
+                        ModEntry.SetClientSkin(skinId, skinValue);
+                        if (skinId == primaryId)
+                            GameDataSync.ReceiveHeroSkin(skinValue);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warning("[NetNode] Failed to handle hero skin: {msg}", ex.Message);
+                    }
+                });
 
                 if (_role == NetRole.Host && senderId.HasValue)
                     forwardLine = BuildTaggedLine("SKIN", effectiveId.Value, skin);
@@ -879,16 +884,21 @@ public sealed class NetNode : IDisposable
                     primaryId = _primaryRemoteId;
                 }
 
-                try
+                var headId = effectiveId.Value;
+                var headSkinValue = skinHead;
+                GameMenu.EnqueueMainThread(() =>
                 {
-                    ModEntry.SetClientHeadSkin(effectiveId.Value, skinHead);
-                    if (effectiveId.Value == primaryId)
-                        GameDataSync.ReceiveHeroHeadSkin(skinHead);
-                }
-                catch (Exception ex)
-                {
-                    _log.Warning("[NetNode] Failed to handle hero skin: {msg}", ex.Message);
-                }
+                    try
+                    {
+                        ModEntry.SetClientHeadSkin(headId, headSkinValue);
+                        if (headId == primaryId)
+                            GameDataSync.ReceiveHeroHeadSkin(headSkinValue);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warning("[NetNode] Failed to handle hero skin: {msg}", ex.Message);
+                    }
+                });
 
                 if (_role == NetRole.Host && senderId.HasValue)
                     forwardLine = BuildTaggedLine("HEAD", effectiveId.Value, skinHead);
