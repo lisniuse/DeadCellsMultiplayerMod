@@ -43,7 +43,7 @@ public class LevelExitSync :
     }
 
     private const double ExitCircleRadiusPx = 84.0;
-    private const double ExitCounterYOffsetPx = 28.0;
+    private const double ExitCounterYOffsetPx = 100.0;
     private const double ExitStateResendSeconds = 0.20;
     private const double CounterScale = 1.10;
     private const int CounterColor = 0xFFFFFF;
@@ -51,6 +51,7 @@ public class LevelExitSync :
     private const int CircleColor = 0x59D5FF;
     private const double CircleAlphaIdle = 0.10;
     private const double CircleAlphaActive = 0.22;
+    private const int PointerFxSuppressionKey = 188743680;
 
     private readonly ILogger _log;
 
@@ -178,6 +179,7 @@ public class LevelExitSync :
             _localDoorOutOfGame = SafeRead(() => nearestExit.isOutOfGame, false);
             _localDoorOnScreen = SafeRead(() => nearestExit.isOnScreen, false);
             _localInsideCircle = insideCircle;
+            EnsureDoorVisual(nearestExit);
         }
         else
         {
@@ -197,6 +199,7 @@ public class LevelExitSync :
 
         UpdateLocalPlayerState(net, forceSend: false);
         ApplyLocalTimerPause(_localPressed && _localInsideCircle);
+        RefreshDoorVisuals();
 
         if (_localPressed &&
             _localInsideCircle &&
@@ -372,9 +375,9 @@ public class LevelExitSync :
             return true;
 
         var ready = 0;
-        foreach (var userId in _activePlayerIds)
+        foreach (var state in _playerStates.Values)
         {
-            if (!_playerStates.TryGetValue(userId, out var state))
+            if (state.UserId <= 0)
                 continue;
             if (!state.Pressed || !state.InsideCircle)
                 continue;
@@ -392,9 +395,9 @@ public class LevelExitSync :
             return 0;
 
         var ready = 0;
-        foreach (var userId in _activePlayerIds)
+        foreach (var state in _playerStates.Values)
         {
-            if (!_playerStates.TryGetValue(userId, out var state))
+            if (state.UserId <= 0)
                 continue;
             if (!state.Pressed || !state.InsideCircle)
                 continue;
@@ -409,11 +412,17 @@ public class LevelExitSync :
     private int GetExpectedPlayerCount(NetNode net)
     {
         var expected = System.Math.Max(1, _activePlayerIds.Count);
+        expected = System.Math.Max(expected, _playerStates.Count);
         if (net.IsHost)
         {
             var hostExpected = 1 + NetNode.ConnectedClientCount;
             if (hostExpected > expected)
                 expected = hostExpected;
+        }
+        else if (net.IsAlive)
+        {
+            // Client is connected to host even when snapshots are late.
+            expected = System.Math.Max(expected, 2);
         }
         return System.Math.Max(1, expected);
     }
@@ -553,7 +562,10 @@ public class LevelExitSync :
 
             try
             {
-                visual.Counter = Assets.Class.makeText("0/1".AsHaxeString(), dc.ui.Text.Class.COLORS.get("WO".AsHaxeString()), false, parent);
+                var net = GameMenu.NetRef;
+                var expected = net != null && net.IsAlive ? GetExpectedPlayerCount(net) : System.Math.Max(1, _activePlayerIds.Count);
+                var initialLabel = BuildCounterLabel(0, expected);
+                visual.Counter = Assets.Class.makeText(initialLabel.AsHaxeString(), dc.ui.Text.Class.COLORS.get("WO".AsHaxeString()), false, parent);
                 visual.Counter.textColor = CounterColor;
                 visual.Counter.scaleX = CounterScale;
                 visual.Counter.scaleY = CounterScale;
@@ -581,7 +593,7 @@ public class LevelExitSync :
         var ready = CountReadyPlayersForDoor(key);
         var net = GameMenu.NetRef;
         var expected = net != null ? GetExpectedPlayerCount(net) : System.Math.Max(1, _activePlayerIds.Count);
-        var label = string.Create(CultureInfo.InvariantCulture, $"{ready}/{expected}");
+        var label = BuildCounterLabel(ready, expected);
 
         if (visual.Circle != null)
         {
@@ -592,12 +604,32 @@ public class LevelExitSync :
 
         if (visual.Counter != null)
         {
-            visual.Counter.text = label.AsHaxeString();
+            visual.Counter.set_text(label.AsHaxeString());
             visual.Counter.y = -ExitCounterYOffsetPx;
-            var len = label.Length;
-            visual.Counter.x = -6.2 * len;
+            var textWidth = SafeRead(() => visual.Counter.textWidth, label.Length * 10);
+            visual.Counter.x = -(textWidth * visual.Counter.scaleX) * 0.5;
             visual.Counter.visible = true;
         }
+    }
+
+    private void RefreshDoorVisuals()
+    {
+        if (_doorVisuals.Count == 0)
+            return;
+
+        foreach (var visual in _doorVisuals.Values)
+            UpdateDoorVisual(visual);
+    }
+
+    private static string BuildCounterLabel(int ready, int expected)
+    {
+        if (ready < 0)
+            ready = 0;
+        if (expected < 1)
+            expected = 1;
+        if (ready > expected)
+            ready = expected;
+        return string.Create(CultureInfo.InvariantCulture, $"{ready}/{expected}");
     }
 
     private static void DrawDoorCircle(Graphics circle, bool active)
@@ -667,6 +699,9 @@ public class LevelExitSync :
 
     private void UpdateExitPointer()
     {
+        if (_exitPointer != null && SafeRead(() => _exitPointer.destroyed, true))
+            _exitPointer = null;
+
         var watchedDoor = ResolveWatchedDoorKey();
         if (string.IsNullOrWhiteSpace(watchedDoor))
         {
@@ -698,6 +733,7 @@ public class LevelExitSync :
         try
         {
             _exitPointer = new Pointer(door, "".AsHaxeString(), 99999.0, MarkerColor);
+            SuppressPointerFx(_exitPointer);
         }
         catch
         {
@@ -730,7 +766,7 @@ public class LevelExitSync :
 
         try
         {
-            _exitPointer.destroyed = true;
+            _exitPointer.destroy();
         }
         catch
         {
@@ -738,6 +774,21 @@ public class LevelExitSync :
         finally
         {
             _exitPointer = null;
+        }
+    }
+
+    private static void SuppressPointerFx(Pointer? pointer)
+    {
+        if (pointer == null)
+            return;
+
+        try
+        {
+            dynamic fastCheck = pointer.cd.fastCheck;
+            fastCheck.set(PointerFxSuppressionKey, (object)1);
+        }
+        catch
+        {
         }
     }
 
