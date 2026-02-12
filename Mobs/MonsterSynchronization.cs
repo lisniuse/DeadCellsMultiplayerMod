@@ -25,7 +25,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private readonly ModEntry modEntry;
 
         private static readonly object Sync = new();
-        private static readonly List<Mob> trackedMobs = new();
+        private static readonly List<Mob?> trackedMobs = new();
         private static readonly Dictionary<Mob, int> trackedMobIndices = new();
 
         private static readonly Dictionary<int, ClientMobState> clientMobTargets = new();
@@ -110,6 +110,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             Hook_Level.entitiesPostCreate += Hook_Level_entitiesPostCreate;
             Hook_Level.registerEntity += Hook_Level_registerEntity;
+            Hook_Level.unregisterEntity += Hook_Level_unregisterEntity;
             Hook_Level.onDispose += Hook_Level_onDispose;
 
             Hook_Mob.setNemesisTarget += Hook_Mob_setNemesisTarget;
@@ -155,12 +156,27 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
+        private static void Hook_Level_unregisterEntity(Hook_Level.orig_unregisterEntity orig, Level self, Entity clid)
+        {
+            orig(self, clid);
+
+            if (clid is not Mob mob || !IsSyncMob(mob))
+                return;
+
+            lock (Sync)
+            {
+                RemoveTrackedMobLocked(mob);
+            }
+        }
+
         private static void Hook_Level_onDispose(Hook_Level.orig_onDispose orig, Level self)
         {
             orig(self);
 
             lock (Sync)
             {
+                RemoveTrackedMobsForLevelLocked(self);
+
                 if (currentLevel != null && ReferenceEquals(currentLevel, self))
                     ResetMobTrackingLocked();
             }
@@ -491,6 +507,72 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 clientNetPumpTask = null;
                 hostNetPumpTask = null;
+            }
+        }
+
+        private static void RemoveTrackedMobLocked(Mob mob)
+        {
+            if (!trackedMobIndices.TryGetValue(mob, out var index))
+                return;
+
+            trackedMobIndices.Remove(mob);
+
+            if (index >= 0 && index < trackedMobs.Count && ReferenceEquals(trackedMobs[index], mob))
+                trackedMobs[index] = null;
+
+            clientMobTargets.Remove(index);
+            clientAttackUnlockUntilTick.Remove(index);
+            hostContactAttackSendTick.Remove(index);
+            hostQueuedOldSkillMarkers.Remove(index);
+
+            if (localToHostIndices.TryGetValue(index, out var hostIndex))
+            {
+                localToHostIndices.Remove(index);
+                hostToLocalIndices.Remove(hostIndex);
+            }
+
+            List<int>? staleHost = null;
+            foreach (var pair in hostToLocalIndices)
+            {
+                if (pair.Value != index)
+                    continue;
+
+                staleHost ??= new List<int>();
+                staleHost.Add(pair.Key);
+            }
+
+            if (staleHost != null)
+            {
+                for (int i = 0; i < staleHost.Count; i++)
+                    hostToLocalIndices.Remove(staleHost[i]);
+            }
+        }
+
+        private static void RemoveTrackedMobsForLevelLocked(Level level)
+        {
+            if (level == null || trackedMobs.Count == 0)
+                return;
+
+            for (int i = 0; i < trackedMobs.Count; i++)
+            {
+                var mob = trackedMobs[i];
+                if (mob == null)
+                    continue;
+
+                var shouldRemove = false;
+                try
+                {
+                    shouldRemove = ReferenceEquals(mob._level, level);
+                }
+                catch
+                {
+                    shouldRemove = true;
+                }
+
+                if (!shouldRemove)
+                    continue;
+
+                RemoveTrackedMobLocked(mob);
             }
         }
 
@@ -1719,7 +1801,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (localToHostIndices.TryGetValue(i, out var boundHost) && boundHost != hostIndex)
                     continue;
 
-                var mob = trackedMobs[i];
+                var mob = trackedMobs[i]!;
                 var x = GetSyncX(mob);
                 var y = GetSyncY(mob);
                 var dx = x - hostX;
