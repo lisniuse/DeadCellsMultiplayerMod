@@ -203,3 +203,27 @@ msgstr ""
 
 msgid "(you)"
 msgstr ""
+
+msgid "{0} connected to the server."
+msgstr ""
+
+msgid "{0} disconnected from the server."
+msgstr ""
+
+msgid "Host disconnected from server."
+msgstr ""
+
+msgid "Back to menu in {0}..."
+msgstr ""
+
+msgid "{0} reached the exit to {1}"
+msgstr ""
+
+msgid "next area"
+msgstr ""
+
+msgid "Guest"
+msgstr ""
+
+msgid "Player {0}"
+msgstr ""

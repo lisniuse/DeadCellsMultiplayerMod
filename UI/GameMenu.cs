@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.IO;
@@ -373,7 +374,7 @@ namespace DeadCellsMultiplayerMod
             _log?.Information("[NetMod] Received remote username {Username}", cleaned);
             if (_role == NetRole.Host &&
                 !string.Equals(previous, cleaned, StringComparison.Ordinal))
-                MultiplayerUI.PushSystemMessage($"{cleaned} connected to the server.");
+                MultiplayerUI.PushSystemMessage(FormatLocalized("{0} connected to the server.", cleaned));
         }
 
         private static void SendCachedGeneratePayload()
@@ -1157,8 +1158,8 @@ namespace DeadCellsMultiplayerMod
         {
             if (role == NetRole.Host)
             {
-                var disconnectedName = string.IsNullOrWhiteSpace(_remoteUsername) ? "Guest" : _remoteUsername.Trim();
-                MultiplayerUI.PushSystemMessage($"{disconnectedName} disconnect from the server.");
+                var disconnectedName = string.IsNullOrWhiteSpace(_remoteUsername) ? Localize("Guest") : _remoteUsername.Trim();
+                MultiplayerUI.PushSystemMessage(FormatLocalized("{0} disconnected from the server.", disconnectedName));
                 _remoteUsername = "guest";
                 _localReady = false;
                 _genArrived = false;
@@ -1182,7 +1183,7 @@ namespace DeadCellsMultiplayerMod
             _remoteUsername = "guest";
             _localReady = false;
             _genArrived = false;
-            MultiplayerUI.PushSystemMessage("Host has disconnect from server.");
+            MultiplayerUI.PushSystemMessage(Localize("Host disconnected from server."));
             if (wasInRun)
                 StartHostDisconnectCountdown();
         }
@@ -1238,7 +1239,7 @@ namespace DeadCellsMultiplayerMod
             _hostDisconnectCountdownActive = true;
             _hostDisconnectCountdownUntil = DateTime.UtcNow.AddSeconds(HostDisconnectCountdownSeconds);
             _lastHostDisconnectCountdown = HostDisconnectCountdownSeconds;
-            MultiplayerUI.PushSystemMessage($"Back to menu in {HostDisconnectCountdownSeconds}...");
+            MultiplayerUI.PushSystemMessage(FormatLocalized("Back to menu in {0}...", HostDisconnectCountdownSeconds));
         }
 
         private static void ResetHostDisconnectCountdown()
@@ -1260,7 +1261,7 @@ namespace DeadCellsMultiplayerMod
             if (remaining != _lastHostDisconnectCountdown)
             {
                 _lastHostDisconnectCountdown = remaining;
-                MultiplayerUI.PushSystemMessage($"Back to menu in {remaining}...");
+                MultiplayerUI.PushSystemMessage(FormatLocalized("Back to menu in {0}...", remaining));
             }
 
             if (remaining > 0)
@@ -1268,6 +1269,24 @@ namespace DeadCellsMultiplayerMod
 
             _hostDisconnectCountdownActive = false;
             ForceExitToMainMenu();
+        }
+
+        private static string Localize(string message)
+        {
+            return GetText.Instance.GetString(message);
+        }
+
+        private static string FormatLocalized(string format, params object[] args)
+        {
+            var localizedFormat = Localize(format);
+            try
+            {
+                return string.Format(CultureInfo.InvariantCulture, localizedFormat, args);
+            }
+            catch
+            {
+                return string.Format(CultureInfo.InvariantCulture, format, args);
+            }
         }
 
         public static void ReceiveGeneratePayload(string json)

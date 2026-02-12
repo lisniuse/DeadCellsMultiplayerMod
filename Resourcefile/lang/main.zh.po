@@ -186,3 +186,27 @@ msgstr ""
 
 msgid "(you)"
 msgstr ""
+
+msgid "{0} connected to the server."
+msgstr "{0} 已连接到服务器。"
+
+msgid "{0} disconnected from the server."
+msgstr "{0} 已断开与服务器的连接。"
+
+msgid "Host disconnected from server."
+msgstr "主机已与服务器断开连接。"
+
+msgid "Back to menu in {0}..."
+msgstr "将在 {0} 秒后返回菜单..."
+
+msgid "{0} reached the exit to {1}"
+msgstr "{0} 已到达通往 {1} 的出口"
+
+msgid "next area"
+msgstr "下一张地图"
+
+msgid "Guest"
+msgstr "访客"
+
+msgid "Player {0}"
+msgstr "玩家 {0}"

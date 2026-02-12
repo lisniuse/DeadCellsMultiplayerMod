@@ -186,3 +186,27 @@ msgstr "(Хост)"
 
 msgid "(you)"
 msgstr "(ты)"
+
+msgid "{0} connected to the server."
+msgstr "{0} подключился к серверу."
+
+msgid "{0} disconnected from the server."
+msgstr "{0} отключился от сервера."
+
+msgid "Host disconnected from server."
+msgstr "Хост отключился от сервера."
+
+msgid "Back to menu in {0}..."
+msgstr "Возврат в меню через {0}..."
+
+msgid "{0} reached the exit to {1}"
+msgstr "{0} добрался до выхода в {1}"
+
+msgid "next area"
+msgstr "следующую локацию"
+
+msgid "Guest"
+msgstr "Гость"
+
+msgid "Player {0}"
+msgstr "Игрок {0}"

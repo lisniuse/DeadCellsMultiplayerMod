@@ -431,13 +431,13 @@ public class LevelExitSync :
     {
         var playerName = ResolveUserDisplayName(userId, net);
         var destination = ResolveExitDestinationName(exit);
-        MultiplayerUI.PushSystemMessage($"{playerName} reached the exit to {destination}");
+        MultiplayerUI.PushSystemMessage(FormatLocalized("{0} reached the exit to {1}", playerName, destination));
     }
 
     private static string ResolveExitDestinationName(Exit? exit)
     {
         if (exit == null)
-            return "next area";
+            return Localize("next area");
 
         var byFunc = SafeRead(() => exit.getDestName()?.ToString() ?? string.Empty, string.Empty);
         if (!string.IsNullOrWhiteSpace(byFunc))
@@ -451,16 +451,16 @@ public class LevelExitSync :
         if (!string.IsNullOrWhiteSpace(byLevel))
             return byLevel.Trim();
 
-        return "next area";
+        return Localize("next area");
     }
 
     private static string ResolveUserDisplayName(int userId, NetNode net)
     {
         if (userId <= 0)
-            return "Guest";
+            return Localize("Guest");
 
         if (net.id > 0 && userId == net.id)
-            return string.IsNullOrWhiteSpace(GameMenu.Username) ? "Guest" : GameMenu.Username.Trim();
+            return string.IsNullOrWhiteSpace(GameMenu.Username) ? Localize("Guest") : GameMenu.Username.Trim();
 
         if (net.TryGetRemoteUserSnapshots(out var users))
         {
@@ -479,7 +479,35 @@ public class LevelExitSync :
         if (userId == 1 && !string.IsNullOrWhiteSpace(GameMenu.RemoteUsername))
             return GameMenu.RemoteUsername.Trim();
 
-        return $"Player {userId}";
+        return FormatLocalized("Player {0}", userId);
+    }
+
+    private static string Localize(string value)
+    {
+        try
+        {
+            var localized = Lang.Class.t.get(value.AsHaxeString(), null)?.ToString();
+            if (!string.IsNullOrWhiteSpace(localized))
+                return localized;
+        }
+        catch
+        {
+        }
+
+        return value;
+    }
+
+    private static string FormatLocalized(string format, params object[] args)
+    {
+        var localizedFormat = Localize(format);
+        try
+        {
+            return string.Format(CultureInfo.InvariantCulture, localizedFormat, args);
+        }
+        catch
+        {
+            return string.Format(CultureInfo.InvariantCulture, format, args);
+        }
     }
 
     private static string BuildDoorKey(Exit exit)

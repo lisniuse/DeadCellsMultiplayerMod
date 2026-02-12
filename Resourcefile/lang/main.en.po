@@ -20,3 +20,27 @@ msgstr ""
 #: ConnectionUI.cs 278
 msgid "Lobby menu"
 msgstr ""
+
+msgid "{0} connected to the server."
+msgstr "{0} connected to the server."
+
+msgid "{0} disconnected from the server."
+msgstr "{0} disconnected from the server."
+
+msgid "Host disconnected from server."
+msgstr "Host disconnected from server."
+
+msgid "Back to menu in {0}..."
+msgstr "Back to menu in {0}..."
+
+msgid "{0} reached the exit to {1}"
+msgstr "{0} reached the exit to {1}"
+
+msgid "next area"
+msgstr "next area"
+
+msgid "Guest"
+msgstr "Guest"
+
+msgid "Player {0}"
+msgstr "Player {0}"
