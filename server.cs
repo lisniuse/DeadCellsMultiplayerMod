@@ -232,6 +232,22 @@ public sealed class NetNode : IDisposable
         }
     }
 
+    public readonly struct MobDie
+    {
+        public readonly int UserId;
+        public readonly int MobIndex;
+        public readonly double X;
+        public readonly double Y;
+
+        public MobDie(int userId, int mobIndex, double x, double y)
+        {
+            UserId = userId;
+            MobIndex = mobIndex;
+            X = x;
+            Y = y;
+        }
+    }
+
     public readonly struct MobAttack
     {
         public readonly int Index;
@@ -344,6 +360,7 @@ public sealed class NetNode : IDisposable
     private readonly List<RemoteChatMessage> _pendingChatMessages = new();
     private List<MobStateSnapshot> _pendingMobStates = new();
     private readonly List<MobHit> _pendingMobHits = new();
+    private readonly List<MobDie> _pendingMobDies = new();
     private readonly List<MobAttack> _pendingMobAttacks = new();
     private readonly List<MobDraw> _pendingMobDraws = new();
     private readonly List<ExitReadyState> _pendingExitReadyStates = new();
@@ -1179,6 +1196,23 @@ public sealed class NetNode : IDisposable
             return true;
         }
 
+        if (line.StartsWith("MOBDIE|", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_role != NetRole.Host)
+                return true;
+
+            var payload = line["MOBDIE|".Length..];
+            if (TryParseMobDiePayload(payload, senderId, forceSenderId, out var die))
+            {
+                lock (_sync)
+                {
+                    _pendingMobDies.Add(die);
+                    _hasRemote = true;
+                }
+            }
+            return true;
+        }
+
         if (line.StartsWith("MOBDRAW|", StringComparison.OrdinalIgnoreCase))
         {
             if (_role != NetRole.Host)
@@ -1354,6 +1388,7 @@ public sealed class NetNode : IDisposable
             _pendingAttacks.RemoveAll(a => a.Id == sender.AssignedId);
             _pendingChatMessages.RemoveAll(m => m.Id == sender.AssignedId);
             _pendingMobHits.RemoveAll(h => h.UserId == sender.AssignedId);
+            _pendingMobDies.RemoveAll(d => d.UserId == sender.AssignedId);
             _pendingExitReadyStates.RemoveAll(s => s.UserId == sender.AssignedId);
             _pendingPlayerDownStates.RemoveAll(s => s.UserId == sender.AssignedId);
             _pendingPlayerReviveRequests.RemoveAll(s => s.ReviverId == sender.AssignedId || s.TargetId == sender.AssignedId);
@@ -1384,6 +1419,7 @@ public sealed class NetNode : IDisposable
             _pendingChatMessages.Clear();
             _pendingMobStates.Clear();
             _pendingMobHits.Clear();
+            _pendingMobDies.Clear();
             _pendingMobAttacks.Clear();
             _pendingMobDraws.Clear();
             _pendingExitReadyStates.Clear();
@@ -1625,6 +1661,34 @@ public sealed class NetNode : IDisposable
             return false;
 
         hit = new MobHit(parsedUserId, mobIndex, hp, x, y);
+        return true;
+    }
+
+    private static bool TryParseMobDiePayload(string payload, int? senderId, bool forceSenderId, out MobDie die)
+    {
+        die = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|');
+        if (parts.Length < 4)
+            return false;
+
+        int parsedUserId = 0;
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedUserId))
+            parsedUserId = senderId ?? 0;
+
+        if (forceSenderId && senderId.HasValue)
+            parsedUserId = senderId.Value;
+
+        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mobIndex))
+            return false;
+        if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            return false;
+        if (!double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            return false;
+
+        die = new MobDie(parsedUserId, mobIndex, x, y);
         return true;
     }
 
@@ -2522,6 +2586,21 @@ public sealed class NetNode : IDisposable
         SendRaw(payload);
     }
 
+    public void SendMobDie(int mobIndex, double x, double y)
+    {
+        if (_role != NetRole.Client)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+
+        var payload = string.Create(
+            CultureInfo.InvariantCulture,
+            $"MOBDIE|{ID}|{mobIndex}|{x}|{y}");
+        SendRaw(payload);
+    }
+
     public void SendMobDraw(int mobIndex, bool isOutOfGame, bool isOnScreen)
     {
         if (_role != NetRole.Client)
@@ -2709,6 +2788,22 @@ public sealed class NetNode : IDisposable
             hits = new List<MobHit>(_pendingMobHits);
             _pendingMobHits.Clear();
             return hits.Count > 0;
+        }
+    }
+
+    public bool TryConsumeMobDies(out List<MobDie> dies)
+    {
+        lock (_sync)
+        {
+            if (_pendingMobDies.Count == 0)
+            {
+                dies = new List<MobDie>();
+                return false;
+            }
+
+            dies = new List<MobDie>(_pendingMobDies);
+            _pendingMobDies.Clear();
+            return dies.Count > 0;
         }
     }
 
@@ -2959,6 +3054,7 @@ public sealed class NetNode : IDisposable
             _pendingAttacks.Clear();
             _pendingMobStates.Clear();
             _pendingMobHits.Clear();
+            _pendingMobDies.Clear();
             _pendingMobAttacks.Clear();
             _pendingMobDraws.Clear();
             _pendingExitReadyStates.Clear();

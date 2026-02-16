@@ -31,6 +31,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly Dictionary<int, int> localToHostIndices = new();
         private static readonly Dictionary<int, long> clientAttackUnlockUntilTick = new();
         private static readonly Dictionary<int, long> hostContactAttackSendTick = new();
+        private static readonly Dictionary<int, int> clientLastReportedMobLife = new();
+        private static readonly Dictionary<int, long> clientLastMobHitReportTick = new();
         private static readonly List<Entity> hostDetectedTargets = new();
         private static readonly Random hostTargetRandom = new();
 
@@ -50,6 +52,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double ClientAiLockSeconds = 0.3;
         private const double ClientAttackUnlockSeconds = 2.2;
         private const double HostContactAttackSendCooldownSeconds = 0.3;
+        private const double ClientMobHitReportMinIntervalSeconds = 0.05;
         private const double ClientAnimSpeedEpsilon = 0.05;
         private static readonly bool ClientSyncVerticalPosition = false;
         private const double PixelsPerCase = 24.0;
@@ -257,6 +260,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (IsSyncMob(self) && ShouldRunHostNetPumpForFrame(self))
             {
                 ConsumeIncomingMobDraws(net!);
+                ConsumeIncomingMobDies(net!);
                 ConsumeIncomingMobHits(net!);
                 TrySendHostMobStates(net!);
             }
@@ -292,7 +296,73 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!TryGetTrackedIndex(self, out var mobIndex))
                 return;
 
-            net.SendMobHit(mobIndex, self.life, GetSyncX(self), GetSyncY(self));
+            var life = self.life;
+            var x = GetSyncX(self);
+            var y = GetSyncY(self);
+
+            if (IsHost(net))
+            {
+                TrySendImmediateHostMobState(net, mobIndex, self, x, y);
+            }
+
+            if (IsClient(net))
+            {
+                var now = Stopwatch.GetTimestamp();
+                var minDelta = (long)(Stopwatch.Frequency * ClientMobHitReportMinIntervalSeconds);
+
+                lock (Sync)
+                {
+                    if (clientLastReportedMobLife.TryGetValue(mobIndex, out var lastLife) && life >= lastLife)
+                        return;
+
+                    if (life > 0 &&
+                        clientLastMobHitReportTick.TryGetValue(mobIndex, out var lastTick) &&
+                        now - lastTick < minDelta)
+                    {
+                        clientLastReportedMobLife[mobIndex] = life;
+                        return;
+                    }
+
+                    clientLastReportedMobLife[mobIndex] = life;
+                    clientLastMobHitReportTick[mobIndex] = now;
+                }
+
+                if (life <= 0)
+                {
+                    net.SendMobDie(mobIndex, x, y);
+                    return;
+                }
+            }
+
+            net.SendMobHit(mobIndex, life, x, y);
+        }
+
+        private static void TrySendImmediateHostMobState(NetNode net, int mobIndex, Mob mob, double x, double y)
+        {
+            if (!IsHost(net) || mob == null || mobIndex < 0)
+                return;
+
+            var dir = NormalizeDir(mob.dir);
+            var life = mob.life;
+            var maxLife = mob.maxLife;
+            var animPayload = BuildAnimPayload(mob);
+
+            string mobType;
+            try
+            {
+                mobType = mob.type?.ToString() ?? string.Empty;
+            }
+            catch
+            {
+                mobType = string.Empty;
+            }
+
+            var one = new List<NetNode.MobStateSnapshot>(1)
+            {
+                new(mobIndex, x, y, dir, life, maxLife, animPayload, mobType)
+            };
+
+            net.SendMobStates(one);
         }
 
         private void Hook_Mob_contactAttack(Hook_Mob.orig_contactAttack orig, Mob self, Entity pow)
@@ -463,6 +533,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             localToHostIndices.Clear();
             clientAttackUnlockUntilTick.Clear();
             hostContactAttackSendTick.Clear();
+            clientLastReportedMobLife.Clear();
+            clientLastMobHitReportTick.Clear();
             hostQueuedOldSkillMarkers.Clear();
             hostDetectedTargets.Clear();
             currentLevel = null;
@@ -517,6 +589,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             ShiftDictionaryKeysLocked(clientMobTargets, deletedIndex);
             ShiftDictionaryKeysLocked(clientAttackUnlockUntilTick, deletedIndex);
             ShiftDictionaryKeysLocked(hostContactAttackSendTick, deletedIndex);
+            ShiftDictionaryKeysLocked(clientLastReportedMobLife, deletedIndex);
+            ShiftDictionaryKeysLocked(clientLastMobHitReportTick, deletedIndex);
             ShiftDictionaryKeysLocked(hostQueuedOldSkillMarkers, deletedIndex);
         }
 
@@ -1348,6 +1422,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (states == null || states.Count == 0)
                 return;
 
+            List<(Mob mob, int life, int maxLife)> lifeApplies = new(states.Count);
             lock (Sync)
             {
                 PruneInvalidTrackedMobsLocked();
@@ -1358,6 +1433,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     var localIndex = ResolveLocalIndexByCoordinatesLocked(state);
                     if (localIndex < 0)
                         continue;
+
+                    Mob? mob = null;
+                    if (localIndex >= 0 && localIndex < trackedMobs.Count)
+                        mob = trackedMobs[localIndex];
+                    if (mob != null)
+                        lifeApplies.Add((mob, state.Life, state.MaxLife));
 
                     var animPayload = state.AnimPayload;
                     if (IsClientAttackUnlockActiveLocked(localIndex, nowTick) &&
@@ -1374,6 +1455,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         state.MaxLife,
                         animPayload);
                 }
+            }
+
+            for (int i = 0; i < lifeApplies.Count; i++)
+            {
+                var entry = lifeApplies[i];
+                ApplyAuthoritativeLifeState(entry.mob, entry.life, entry.maxLife);
             }
         }
 
@@ -1993,36 +2080,48 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (target.Dir != 0)
                 self.dir = target.Dir;
 
-            if (target.MaxLife > 0 && self.maxLife != target.MaxLife)
-                self.maxLife = target.MaxLife;
-            if (target.Life >= 0 && self.life != target.Life)
-            {
-                var wasAlive = self.life > 0;
-                self.life = target.Life;
+            ApplyAuthoritativeLifeState(self, target.Life, target.MaxLife);
+        }
 
-                if (self.life <= 0 && wasAlive)
+        private static void ApplyAuthoritativeLifeState(Mob mob, int targetLife, int targetMaxLife)
+        {
+            if (mob == null)
+                return;
+
+            if (targetMaxLife > 0 && mob.maxLife != targetMaxLife)
+                mob.maxLife = targetMaxLife;
+
+            var clampedLife = targetLife;
+            if (mob.maxLife > 0)
+                clampedLife = System.Math.Clamp(clampedLife, 0, mob.maxLife);
+            else if (clampedLife < 0)
+                clampedLife = 0;
+
+            if (mob.life == clampedLife)
+                return;
+
+            var wasAlive = mob.life > 0;
+            mob.life = clampedLife;
+
+            if (mob.life <= 0 && wasAlive)
+            {
+                try
                 {
-                    // Clean death transition on client
-                    try 
-                    { 
-                        if (!self.destroyed)
-                        {
-                            self.life = 0;
-                            self.onDie(); 
-                        }
-                        
-                        var animManager = GetMobAnimManager(self);
-                        if (animManager != null)
-                        {
-                            // Reset animation stack to prevent freezing in attack poses
-                            if (animManager.stack != null)
-                            {
-                                while (animManager.stack.length > 0)
-                                    animManager.stack.pop();
-                            }
-                        }
-                    } 
-                    catch { }
+                    if (!mob.destroyed)
+                    {
+                        mob.life = 0;
+                        mob.onDie();
+                    }
+
+                    var animManager = GetMobAnimManager(mob);
+                    if (animManager?.stack != null)
+                    {
+                        while (animManager.stack.length > 0)
+                            animManager.stack.pop();
+                    }
+                }
+                catch
+                {
                 }
             }
         }
@@ -2056,6 +2155,44 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             ApplyIncomingMobHits(hits);
         }
 
+        private static void ConsumeIncomingMobDies(NetNode net)
+        {
+            if (!net.TryConsumeMobDies(out var dies))
+                return;
+
+            ApplyIncomingMobDies(dies);
+        }
+
+        private static void ApplyIncomingMobDies(IReadOnlyList<NetNode.MobDie> dies)
+        {
+            if (dies == null || dies.Count == 0)
+                return;
+
+            lock (Sync)
+            {
+                PruneInvalidTrackedMobsLocked();
+                foreach (var die in dies)
+                {
+                    var mob = ResolveMobFromDieLocked(die);
+                    if (mob == null)
+                        continue;
+
+                    if (mob.life <= 0)
+                        continue;
+
+                    TryWakeMobForForcedSimulation(mob);
+                    try
+                    {
+                        mob.life = 0;
+                        mob.onDie();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+
         private static void ApplyIncomingMobHits(IReadOnlyList<NetNode.MobHit> hits)
         {
             if (hits == null || hits.Count == 0)
@@ -2079,17 +2216,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                     if (targetLife <= 0 && prevLife > 0)
                     {
-                        TryWakeMobForForcedSimulation(mob);
-                        try
-                        {
-                            // Authority Check: If HP is 0, they MUST die.
-                            // We use onDie() to trigger engine hooks without calling the problematic kill()
-                            mob.life = 0;
-                            mob.onDie();
-                        }
-                        catch
-                        {
-                        }
+                        // Death is finalized by explicit MOBDIE to avoid ambiguous coordinate-based kill guesses.
+                        if (mob.life > 1)
+                            mob.life = 1;
                         continue;
                     }
 
@@ -2164,6 +2293,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         }
                     }
                 }
+
+                var byIndex = ResolveMobByIndexAndCoordinatesLocked(hit.MobIndex, hit.X, hit.Y);
+                if (byIndex != null)
+                    return byIndex;
                 
                 Mob? best = null;
                 var bestDistSq = double.MaxValue;
@@ -2191,6 +2324,53 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 return null;
             }
+        }
+
+        private static Mob? ResolveMobFromDieLocked(NetNode.MobDie die)
+        {
+            lock (Sync)
+            {
+                return ResolveMobByIndexAndCoordinatesLocked(die.MobIndex, die.X, die.Y);
+            }
+        }
+
+        private static Mob? ResolveMobByIndexAndCoordinatesLocked(int mobIndex, double x, double y)
+        {
+            if (mobIndex >= 0 && mobIndex < trackedMobs.Count)
+            {
+                var byIndex = trackedMobs[mobIndex];
+                if (byIndex != null && IsSyncMob(byIndex))
+                {
+                    var idxDx = GetSyncX(byIndex) - x;
+                    var idxDy = GetSyncY(byIndex) - y;
+                    if (idxDx * idxDx + idxDy * idxDy <= MaxCoordinateMatchDistanceSq * 4.0)
+                        return byIndex;
+                }
+            }
+
+            Mob? best = null;
+            var bestDistSq = double.MaxValue;
+
+            for (int i = 0; i < trackedMobs.Count; i++)
+            {
+                var mob = trackedMobs[i];
+                if (mob == null || !IsSyncMob(mob))
+                    continue;
+
+                var dx = GetSyncX(mob) - x;
+                var dy = GetSyncY(mob) - y;
+                var distSq = dx * dx + dy * dy;
+                if (distSq < bestDistSq)
+                {
+                    bestDistSq = distSq;
+                    best = mob;
+                }
+            }
+
+            if (bestDistSq <= MaxCoordinateMatchDistanceSq)
+                return best;
+
+            return null;
         }
     }
 }
