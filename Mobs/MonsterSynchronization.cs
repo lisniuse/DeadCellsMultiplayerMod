@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -12,6 +12,7 @@ using dc.tool.atk;
 using dc.tool.skill;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using ModCore.Events;
+using ModCore.Events.Interfaces.Game;
 using ModCore.Modules;
 using ModCore.Utilities;
 
@@ -19,6 +20,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 {
     public class MobsSynchronization :
     IOnAdvancedModuleInitializing,
+    IOnFrameUpdate,
     IEventReceiver
     {
         private readonly ModEntry modEntry;
@@ -48,7 +50,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private const double ClientMobDrawSendRateHz = 60.0;
         private const double HostStateSendRateHz = 60.0;
-        private const double ClientInterpolationAlpha = 0.25;
+        private const double ClientInterpolationAlpha = 0.50;
         private const double ClientAiLockSeconds = 0.3;
         private const double ClientAttackUnlockSeconds = 2.2;
         private const double HostContactAttackSendCooldownSeconds = 0.3;
@@ -128,6 +130,29 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             Hook_Mob.queueAttack += Hook_Mob_queueAttack;
             Hook_OldMobSkill.execute += Hook_OldMobSkill_execute;
             Hook_MobSkill.execute += Hook_MobSkill_execute;
+        }
+
+        void IOnFrameUpdate.OnFrameUpdate(double dt)
+        {
+            var net = GameMenu.NetRef;
+            if (net == null || !net.IsAlive)
+                return;
+
+            if (IsHost(net))
+            {
+                ConsumeIncomingMobDraws(net);
+                ConsumeIncomingMobDies(net);
+                ConsumeIncomingMobHits(net);
+                TrySendHostMobStates(net);
+                return;
+            }
+
+            if (IsClient(net))
+            {
+                ConsumeIncomingHostMobAttacks(net);
+                ConsumeIncomingHostMobStates(net);
+                TrySendClientMobDraws(net);
+            }
         }
 
         private static bool IsHost(NetNode? net) => net != null && net.IsAlive && net.IsHost;
