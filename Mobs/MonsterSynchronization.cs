@@ -30,8 +30,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly List<Mob> trackedMobs = new();
 
         private static readonly Dictionary<int, ClientMobState> clientMobTargets = new();
-        private static readonly Dictionary<int, int> hostToLocalIndices = new();
-        private static readonly Dictionary<int, int> localToHostIndices = new();
         private static readonly Dictionary<int, long> clientAttackUnlockUntilTick = new();
         private static readonly Dictionary<int, long> hostContactAttackSendTick = new();
         private static readonly Dictionary<int, int> clientLastReportedMobLife = new();
@@ -598,9 +596,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         continue;
                     buffer.Add(mob);
                 }
-
-                // Deterministic Sort: Required for all players to have matching indices
-                buffer.Sort(CompareMobsForStableOrder);
                 
                 foreach (var mob in buffer)
                 {
@@ -614,8 +609,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             trackedMobs.Clear();
             clientMobTargets.Clear();
-            hostToLocalIndices.Clear();
-            localToHostIndices.Clear();
             clientAttackUnlockUntilTick.Clear();
             hostContactAttackSendTick.Clear();
             clientLastReportedMobLife.Clear();
@@ -654,26 +647,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static void ShiftIndicesAfterRemovalLocked(int deletedIndex)
         {
-            // Update mapping dictionaries
-            if (localToHostIndices.TryGetValue(deletedIndex, out var hostIndex))
-            {
-                localToHostIndices.Remove(deletedIndex);
-                hostToLocalIndices.Remove(hostIndex);
-            }
-
-            var localToHostCopy = new Dictionary<int, int>(localToHostIndices);
-            localToHostIndices.Clear();
-            hostToLocalIndices.Clear();
-
-            foreach (var pair in localToHostCopy)
-            {
-                var oldLocal = pair.Key;
-                var host = pair.Value;
-                var newLocal = oldLocal > deletedIndex ? oldLocal - 1 : oldLocal;
-                localToHostIndices[newLocal] = host;
-                hostToLocalIndices[host] = newLocal;
-            }
-
             ShiftDictionaryKeysLocked(clientMobTargets, deletedIndex);
             ShiftDictionaryKeysLocked(clientAttackUnlockUntilTick, deletedIndex);
             ShiftDictionaryKeysLocked(hostContactAttackSendTick, deletedIndex);
@@ -727,11 +700,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return -1;
         }
 
-        private static void RemoveTrackedLocalIndexBindingsLocked(int index)
-        {
-            // [DELETED - Logic merged into ShiftIndicesAfterRemovalLocked]
-        }
-
         private static void PruneInvalidTrackedMobsLocked()
         {
             if (trackedMobs.Count == 0)
@@ -773,90 +741,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 {
                     RemoveTrackedMobAtIndexLocked(i);
                 }
-            }
-        }
-
-        private static void RemoveTrackedMobsForLevelLocked(Level level)
-        {
-            if (level == null || trackedMobs.Count == 0)
-                return;
-
-            for (int i = trackedMobs.Count - 1; i >= 0; i--)
-            {
-                var mob = trackedMobs[i];
-                if (mob == null)
-                    continue;
-
-                var shouldRemove = false;
-                try
-                {
-                    shouldRemove = ReferenceEquals(mob._level, level);
-                }
-                catch
-                {
-                    shouldRemove = true;
-                }
-
-                if (!shouldRemove)
-                    continue;
-
-                RemoveTrackedMobAtIndexLocked(i);
-            }
-        }
-
-        private static int CompareMobsForStableOrder(Mob a, Mob b)
-        {
-            if (ReferenceEquals(a, b))
-                return 0;
-            if (a == null)
-                return 1;
-            if (b == null)
-                return -1;
-
-            var byCx = SafeCompare(() => a.cx, () => b.cx);
-            if (byCx != 0) return byCx;
-
-            var byCy = SafeCompare(() => a.cy, () => b.cy);
-            if (byCy != 0) return byCy;
-
-            var byXr = SafeCompare(() => a.xr, () => b.xr);
-            if (byXr != 0) return byXr;
-
-            var byYr = SafeCompare(() => a.yr, () => b.yr);
-            if (byYr != 0) return byYr;
-
-            var at = SafeMobTypeName(a);
-            var bt = SafeMobTypeName(b);
-            return string.Compare(at, bt, StringComparison.Ordinal);
-        }
-
-        private static int SafeCompare(Func<int> left, Func<int> right)
-        {
-            var l = int.MaxValue;
-            var r = int.MaxValue;
-            try { l = left(); } catch { }
-            try { r = right(); } catch { }
-            return l.CompareTo(r);
-        }
-
-        private static int SafeCompare(Func<double> left, Func<double> right)
-        {
-            var l = double.MaxValue;
-            var r = double.MaxValue;
-            try { l = left(); } catch { }
-            try { r = right(); } catch { }
-            return l.CompareTo(r);
-        }
-
-        private static string SafeMobTypeName(Mob mob)
-        {
-            try
-            {
-                return mob.type?.ToString() ?? string.Empty;
-            }
-            catch
-            {
-                return string.Empty;
             }
         }
 
@@ -1576,7 +1460,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 foreach (var state in states)
                 {
-                    var localIndex = ResolveLocalIndexByCoordinatesLocked(state);
+                    var localIndex = ResolveLocalIndexBySyncIdLocked(state.Index);
                     if (localIndex < 0)
                         continue;
 
@@ -1630,7 +1514,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 lock (Sync)
                 {
-                    var localIndex = ResolveLocalIndexByCoordinatesLocked(attack.Index, attack.X, attack.Y);
+                    var localIndex = ResolveLocalIndexBySyncIdLocked(attack.Index);
                     if (localIndex >= 0 && localIndex < trackedMobs.Count)
                     {
                         mob = trackedMobs[localIndex];
@@ -2055,40 +1939,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return best;
         }
 
-        private static int ResolveLocalIndexByCoordinatesLocked(int hostIndex, double hostX, double hostY)
-        {
-            _ = hostX;
-            _ = hostY;
-            return ResolveLocalIndexBySyncIdLocked(hostIndex);
-        }
-
-        private static int ResolveLocalIndexByCoordinatesLocked(NetNode.MobStateSnapshot state)
-        {
-            return ResolveLocalIndexBySyncIdLocked(state.Index);
-        }
-
-        private static bool IsValidLocalMobIndexLocked(int index)
-        {
-            if (index < 0 || index >= trackedMobs.Count)
-                return false;
-
-            var mob = trackedMobs[index];
-            if (mob == null || !IsSyncMob(mob))
-                return false;
-
-            try
-            {
-                if (mob.destroyed || mob._level == null || mob.life <= 0)
-                    return false;
-            }
-            catch
-            {
-                return false;
-            }
-
-            return true;
-        }
-
         private static void ApplyInterpolatedState(Mob self)
         {
             if (!TryGetTrackedIndex(self, out var localIndex))
@@ -2409,7 +2259,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             lock (Sync)
             {
-                return ResolveMobByIndexAndCoordinatesLocked(hit.MobIndex, hit.X, hit.Y);
+                return ResolveMobBySyncIdLocked(hit.MobIndex);
             }
         }
 
@@ -2417,14 +2267,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             lock (Sync)
             {
-                return ResolveMobByIndexAndCoordinatesLocked(die.MobIndex, die.X, die.Y);
+                return ResolveMobBySyncIdLocked(die.MobIndex);
             }
         }
 
-        private static Mob? ResolveMobByIndexAndCoordinatesLocked(int mobIndex, double x, double y)
+        private static Mob? ResolveMobBySyncIdLocked(int mobIndex)
         {
-            _ = x;
-            _ = y;
             if (mobIndex < 0)
                 return null;
 
