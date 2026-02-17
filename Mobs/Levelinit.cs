@@ -33,8 +33,21 @@ public class Levelinit : ModBase
     public override void Initialize()
     {
         base.Initialize();
-        //Room_group room_Group = new Room_group();
         dc.pr.Hook_Level.init += Levelinit_Main;
+        dc.pr.Hook_Level.entitiesPostCreate += Levelinit_EntitiesPostCreate;
+        dc.pr.Hook_Level.onDispose += Levelinit_OnDispose;
+    }
+
+    private void Levelinit_EntitiesPostCreate(Hook_Level.orig_entitiesPostCreate orig, Level self)
+    {
+        orig(self);
+        SyncMobIdRegistry.RebuildForLevel(self);
+    }
+
+    private void Levelinit_OnDispose(Hook_Level.orig_onDispose orig, Level self)
+    {
+        SyncMobIdRegistry.ClearForLevel(self);
+        orig(self);
     }
 
 
@@ -123,6 +136,8 @@ public class Levelinit : ModBase
                 }
             }
         }
+
+        SyncMobIdRegistry.RebuildForLevel(self);
 
 
         self.splatters = (ArrayObj)ArrayUtils.CreateDyn().array;

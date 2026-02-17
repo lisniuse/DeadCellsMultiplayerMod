@@ -43,6 +43,7 @@ using DeadCellsMultiplayerMod.MultiplayerModUI.Connection;
 using DeadCellsMultiplayerMod.Tools.ModLang;
 using DeadCellsMultiplayerMod.KingHead;
 using dc.steam.ugc;
+using DeadCellsMultiplayerMod.Mobs.Levelinit;
 
 
 namespace DeadCellsMultiplayerMod
@@ -212,6 +213,7 @@ namespace DeadCellsMultiplayerMod
             MultiplayerModLang modLang = new MultiplayerModLang(this);
             CineHooks CineHooks = new CineHooks();
             MultiplayerUI MultiplayerUI = new MultiplayerUI(this, 0);
+            Levelinit levelinit = new Levelinit(info);
             MobsSynchronization mobs = new MobsSynchronization(this);
             Minimapreveal minimapreveal = new Minimapreveal();
             LevelExitSync levelExitSync = new LevelExitSync(this);

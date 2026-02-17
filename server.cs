@@ -1198,9 +1198,6 @@ public sealed class NetNode : IDisposable
 
         if (line.StartsWith("MOBDIE|", StringComparison.OrdinalIgnoreCase))
         {
-            if (_role != NetRole.Host)
-                return true;
-
             var payload = line["MOBDIE|".Length..];
             if (TryParseMobDiePayload(payload, senderId, forceSenderId, out var die))
             {
@@ -1209,6 +1206,9 @@ public sealed class NetNode : IDisposable
                     _pendingMobDies.Add(die);
                     _hasRemote = true;
                 }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildMobDieLine(die);
             }
             return true;
         }
@@ -2050,6 +2050,13 @@ public sealed class NetNode : IDisposable
             $"MOBATK|{attack.Index},{encodedSkill},{(attack.RequiresTargetInArea ? 1 : 0)},{(hasData ? 1 : 0)},{dataPart},{attack.X},{attack.Y},{attack.TargetUserId}\n");
     }
 
+    private static string BuildMobDieLine(MobDie die)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"MOBDIE|{die.UserId}|{die.MobIndex}|{die.X}|{die.Y}\n");
+    }
+
     private static string BuildMobDrawLine(int userId, int mobIndex, bool isOutOfGame, bool isOnScreen)
     {
         return string.Create(
@@ -2588,7 +2595,7 @@ public sealed class NetNode : IDisposable
 
     public void SendMobDie(int mobIndex, double x, double y)
     {
-        if (_role != NetRole.Client)
+        if (_role != NetRole.Client && _role != NetRole.Host)
             return;
         if (!HasAnyConnection())
             return;

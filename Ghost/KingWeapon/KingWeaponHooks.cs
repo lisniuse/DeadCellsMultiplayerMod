@@ -35,6 +35,7 @@ internal static class KingWeaponHooks
         Hook_Entity.bump += Hook_Entity_bump;
         Hook_Entity.bumpAwayFrom += Hook_Entity_bumpAwayFrom;
         Hook_Entity.cancelVelocities += Hook_Entity_cancelVelocities;
+        Hook_Entity.onDamage += Hook_Entity_onDamage;
         Hook_Entity.setAffectS += Hook_Entity_setAffectS;
         Hook_Entity.removeAllAffects += Hook_Entity_removeAllAffects;
         Hook_Entity.addAllAffixesFrom += Hook_Entity_addAllAffixesFrom;
@@ -164,6 +165,13 @@ internal static class KingWeaponHooks
         if(KingWeaponSupport.IsInKingContext && ModEntry.me != null && ReferenceEquals(self, ModEntry.me))
             return;
         orig(self);
+    }
+
+    private static void Hook_Entity_onDamage(Hook_Entity.orig_onDamage orig, Entity self, AttackData a)
+    {
+        if(ShouldSuppressDamageFromKingWeapon(a))
+            return;
+        orig(self, a);
     }
 
     private static void Hook_Entity_setAffectS(
@@ -706,6 +714,40 @@ internal static class KingWeaponHooks
             return true;
         if(self is KingSkin)
             return true;
+        return false;
+    }
+
+    private static bool ShouldSuppressDamageFromKingWeapon(AttackData? attack)
+    {
+        if(attack == null)
+            return false;
+
+        Weapon sourceWeapon;
+        try
+        {
+            sourceWeapon = attack.sourceWeapon;
+        }
+        catch
+        {
+            sourceWeapon = null!;
+        }
+
+        if(sourceWeapon != null && KingWeaponSupport.IsKingWeapon(sourceWeapon))
+            return true;
+
+        InventItem sourceItem;
+        try
+        {
+            sourceItem = attack.sourceItem;
+        }
+        catch
+        {
+            sourceItem = null!;
+        }
+
+        if(sourceItem != null && KingWeaponSupport.TryGetSourceByItem(sourceItem, out var source) && source != null)
+            return true;
+
         return false;
     }
 
