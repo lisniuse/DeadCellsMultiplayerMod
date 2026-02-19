@@ -171,6 +171,11 @@ namespace DeadCellsMultiplayerMod
             return clientLabels[slotIndex] ?? string.Empty;
         }
 
+        internal static bool IsLocalPlayerDowned()
+        {
+            return Instance != null && Instance._localFakeDead;
+        }
+
         internal static GhostKing? GetPrimaryClient()
         {
             for (int i = 0; i < clients.Length; i++)

@@ -11,6 +11,8 @@ namespace DeadCellsMultiplayerMod
         private bool _lethalFallStarted;
         private bool _hadHeroVisibleState;
         private bool _heroWasVisible;
+        private bool _hadHeroHeadBlackState;
+        private int _heroHeadBlackValue;
 
         public DeadBase(Hero hero, GhostKing? king)
         {
@@ -212,6 +214,19 @@ namespace DeadCellsMultiplayerMod
             try { _heroWasVisible = _hero.visible; }
             catch { _heroWasVisible = true; }
             _hadHeroVisibleState = true;
+
+            try
+            {
+                var head = _hero?.heroHead;
+                if (head != null)
+                {
+                    _heroHeadBlackValue = head.headBlack;
+                    _hadHeroHeadBlackState = true;
+                }
+            }
+            catch
+            {
+            }
         }
 
         private void RestoreHeroVisibility()
@@ -231,11 +246,18 @@ namespace DeadCellsMultiplayerMod
                 if (head == null)
                     return;
 
-                try { head.parent?.set_visible(visible); } catch { }
                 try { head.customHeadSpr?.set_visible(visible); } catch { }
                 try { head.customBackSpr?.set_visible(visible); } catch { }
                 try { head.headNormalSb?.set_visible(visible); } catch { }
                 try { head.headAddSb?.set_visible(visible); } catch { }
+                if (visible && _hadHeroHeadBlackState)
+                {
+                    try { head.headBlack = _heroHeadBlackValue; } catch { }
+                }
+                else
+                {
+                    try { head.headBlack = 0; } catch { }
+                }
                 try { head.eye?.set_visible(visible); } catch { }
             }
             catch

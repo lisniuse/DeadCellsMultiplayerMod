@@ -725,6 +725,10 @@ internal static class KingWeaponHooks
         if(attack == null)
             return false;
 
+        // When local player is downed, KingSkin must be able to damage mobs with KingWeapon.
+        if(ModEntry.IsLocalPlayerDowned())
+            return false;
+
         if(KingWeaponSupport.IsInKingContext)
             return true;
 

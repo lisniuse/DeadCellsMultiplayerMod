@@ -24,7 +24,7 @@ namespace DeadCellsMultiplayerMod
         private int _targetDir;
         private string? _interactionLabelText;
         private Pointer? _corpsePointer;
-        private const int CorpseMarkerColor = 0xFF4A4A;
+        private const int CorpseMarkerColor = 0xED6a1F;
         private const int PointerFxSuppressionKey = 188743680;
 
         public RemoteDownedCorpse(Hero templateHero, GhostKing ghost, double x, double y, int dir, dc.GameCinematic? previousCine)

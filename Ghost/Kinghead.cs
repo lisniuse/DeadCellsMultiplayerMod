@@ -209,21 +209,38 @@ namespace DeadCellsMultiplayerMod.KingHead
             }
 
             var savedLastHeadPos = hero.lastHeadPos;
+            bool savedHeroVisible;
+            try { savedHeroVisible = hero.visible; } catch { savedHeroVisible = true; }
+            bool ghostVisible;
+            try { ghostVisible = ghost.visible; } catch { ghostVisible = true; }
             if (kingLastHeadPos == null)
             {
                 kingLastHeadPos = new FPoint(0, 0);
             }
             hero.lastHeadPos = kingLastHeadPos;
+            try { hero.visible = ghostVisible; } catch { }
 
             try
             {
                 base.updateHeadFx(c1);
                 this.postUpdate();
+
+                // Never force KingSkin head visible. Only force-hide when ghost is hidden.
+                if (!ghostVisible)
+                {
+                    try { this.customHeadSpr?.set_visible(false); } catch { }
+                    try { this.customBackSpr?.set_visible(false); } catch { }
+                    try { this.headNormalSb?.set_visible(false); } catch { }
+                    try { this.headAddSb?.set_visible(false); } catch { }
+                    try { this.headBlack = 0; } catch { }
+                    try { this.eye?.set_visible(false); } catch { }
+                }
             }
             finally
             {
                 kingLastHeadPos = hero.lastHeadPos;
                 hero.lastHeadPos = savedLastHeadPos;
+                try { hero.visible = savedHeroVisible; } catch { }
             }
         }
 
