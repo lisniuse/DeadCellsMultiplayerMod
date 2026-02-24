@@ -1564,21 +1564,42 @@ namespace DeadCellsMultiplayerMod
                 if (dst == null)
                     return;
 
+                var reflect = dc._Reflect.Class as dc._Reflect;
+                if (reflect == null)
+                    return;
+
+                void SetIfPresent(string fieldName, object? value)
+                {
+                    if (value == null)
+                        return;
+
+                    try
+                    {
+                        var hxField = fieldName.AsHaxeString();
+                        if (!reflect.hasField.Invoke(dst, hxField))
+                            return;
+                        reflect.setField.Invoke(dst, hxField, value);
+                    }
+                    catch
+                    {
+                    }
+                }
+
                 if (genData.SpecificBiome != null)
-                    dst.specificBiome = genData.SpecificBiome.AsHaxeString();
+                    SetIfPresent("specificBiome", genData.SpecificBiome.AsHaxeString());
                 if (genData.ZDoorLock.HasValue)
-                    dst.zDoorLock = genData.ZDoorLock.Value;
+                    SetIfPresent("zDoorLock", genData.ZDoorLock.Value);
                 if (genData.ForcePauseTimer.HasValue)
-                    dst.forcePauseTimer = genData.ForcePauseTimer.Value;
+                    SetIfPresent("forcePauseTimer", genData.ForcePauseTimer.Value);
                 if (genData.ShouldBeFlipped.HasValue)
-                    dst.shouldBeFlipped = genData.ShouldBeFlipped.Value;
+                    SetIfPresent("shouldBeFlipped", genData.ShouldBeFlipped.Value);
                 if (genData.GenSubTeleportTo.HasValue)
-                    dst.subTeleportTo = genData.GenSubTeleportTo.Value;
+                    SetIfPresent("subTeleportTo", genData.GenSubTeleportTo.Value);
                 if (genData.ZDoorType != null)
                 {
                     var zDoorType = CreateZDoorTypeFromSync(genData.ZDoorType);
                     if (zDoorType is not null)
-                        dst.zDoorType = zDoorType;
+                        SetIfPresent("zDoorType", zDoorType);
                 }
             }
             catch
@@ -1598,6 +1619,8 @@ namespace DeadCellsMultiplayerMod
 
             try
             {
+                var localNodesByUid = CaptureExistingRoomNodesByUid(target);
+
                 target.nodes = new StringMap();
                 target.all = (ArrayObj)ArrayUtils.CreateDyn().array;
                 target.zLinkId = sync.ZLinkId;
@@ -1667,6 +1690,18 @@ namespace DeadCellsMultiplayerMod
                             var npc = CreateNpcIdFromIndex(src.Npcs[n]);
                             if (npc is not null)
                                 node.npcs.pushDyn(npc);
+                        }
+                    }
+
+                    if (localNodesByUid.TryGetValue(src.Uid, out var localNode))
+                    {
+                        try
+                        {
+                            if (localNode.genData != null)
+                                node.genData = localNode.genData;
+                        }
+                        catch
+                        {
                         }
                     }
 
@@ -1851,6 +1886,38 @@ namespace DeadCellsMultiplayerMod
         private static NpcId? CreateNpcIdFromIndex(int index)
         {
             return CreateEnumByIndex<NpcId, NpcId.Indexes>(index);
+        }
+
+        private static Dictionary<string, RoomNode> CaptureExistingRoomNodesByUid(LevelStruct target)
+        {
+            var result = new Dictionary<string, RoomNode>(StringComparer.Ordinal);
+            if (target == null)
+                return result;
+
+            try
+            {
+                var all = target.all;
+                if (all == null)
+                    return result;
+
+                for (int i = 0; i < all.length; i++)
+                {
+                    if (all.getDyn(i) is not RoomNode node)
+                        continue;
+
+                    var uid = node.uid?.ToString();
+                    if (string.IsNullOrWhiteSpace(uid))
+                        continue;
+
+                    if (!result.ContainsKey(uid))
+                        result[uid] = node;
+                }
+            }
+            catch
+            {
+            }
+
+            return result;
         }
 
         private static LinkConstraint? CreateLinkConstraintFromIndex(int index)
