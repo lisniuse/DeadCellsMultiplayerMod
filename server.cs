@@ -418,6 +418,7 @@ public sealed class NetNode : IDisposable
     private int? _cachedHostBossRune;
     private string? _cachedHostCountersPayload;
     private string? _cachedHostBlueprintsPayload;
+    private string? _cachedHostLevelGraphPayload;
 
     public bool HasRemote
     {
@@ -534,12 +535,14 @@ public sealed class NetNode : IDisposable
                     int? cachedSeed;
                     string? cachedCountersPayload;
                     string? cachedBlueprintsPayload;
+                    string? cachedLevelGraphPayload;
                     lock (_hostCacheSync)
                     {
                         cachedBossRune = _cachedHostBossRune;
                         cachedSeed = _cachedHostSeed;
                         cachedCountersPayload = _cachedHostCountersPayload;
                         cachedBlueprintsPayload = _cachedHostBlueprintsPayload;
+                        cachedLevelGraphPayload = _cachedHostLevelGraphPayload;
                     }
 
                     if (cachedBossRune.HasValue)
@@ -553,6 +556,9 @@ public sealed class NetNode : IDisposable
 
                     if (cachedBlueprintsPayload != null)
                         await SendLineToClientSafe(connection, $"BLUEPRINTS|{cachedBlueprintsPayload}\n").ConfigureAwait(false);
+
+                    if (cachedLevelGraphPayload != null)
+                        await SendLineToClientSafe(connection, $"LGRAPH|{cachedLevelGraphPayload}\n").ConfigureAwait(false);
                 }
 
                 GameMenu.EnqueueMainThread(() =>
@@ -731,6 +737,12 @@ public sealed class NetNode : IDisposable
                 while (reader.TryRead(out var line))
                 {
                     var lineCopy = line;
+
+                    // Fast-path packet types used during level generation waits.
+                    // They only update thread-safe buffers in GameDataSync and must not wait for main-thread queue.
+                    if (_role == NetRole.Client && TryHandleClientFastPathLine(lineCopy))
+                        continue;
+
                     GameMenu.EnqueueMainThread(() =>
                     {
                         try
@@ -757,6 +769,45 @@ public sealed class NetNode : IDisposable
         {
             _log.Warning("[NetNode] Recv process error: {msg}", ex.Message);
         }
+    }
+
+    private bool TryHandleClientFastPathLine(string line)
+    {
+        if (string.IsNullOrEmpty(line))
+            return false;
+
+        try
+        {
+            if (line.StartsWith("HXSYNC|", StringComparison.Ordinal))
+            {
+                var payload = line["HXSYNC|".Length..];
+                lock (_sync) _hasRemote = true;
+                GameDataSync.ReceiveSerializerSync(payload);
+                return true;
+            }
+
+            if (line.StartsWith("LSEED|", StringComparison.Ordinal))
+            {
+                var payload = line["LSEED|".Length..];
+                lock (_sync) _hasRemote = true;
+                GameDataSync.ReceiveLevelSeed(payload);
+                return true;
+            }
+
+            if (line.StartsWith("LGRAPH|", StringComparison.Ordinal))
+            {
+                var payload = line["LGRAPH|".Length..];
+                lock (_sync) _hasRemote = true;
+                GameDataSync.ReceiveLevelGraph(payload);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning("[NetNode] Fast-path line handling failed: {msg}", ex.Message);
+        }
+
+        return false;
     }
 
     private static bool TryReadBufferedLine(StringBuilder buffer, out string line)
@@ -923,6 +974,14 @@ public sealed class NetNode : IDisposable
             var payload = line["LSEED|".Length..];
             lock (_sync) _hasRemote = true;
             GameDataSync.ReceiveLevelSeed(payload);
+            return true;
+        }
+
+        if (line.StartsWith("LGRAPH|"))
+        {
+            var payload = line["LGRAPH|".Length..];
+            lock (_sync) _hasRemote = true;
+            GameDataSync.ReceiveLevelGraph(payload);
             return true;
         }
 
@@ -2453,6 +2512,26 @@ public sealed class NetNode : IDisposable
         _log.Information("[NetNode] Sent level seed for {LevelId}", safeId);
     }
 
+    public void SendLevelGraph(string json)
+    {
+        if (!HasAnyConnection())
+        {
+            _log.Information("[NetNode] Skip sending level graph: no connected client");
+            lock (_hostCacheSync)
+                _cachedHostLevelGraphPayload = string.IsNullOrWhiteSpace(json) ? null : json;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+
+        lock (_hostCacheSync)
+            _cachedHostLevelGraphPayload = json;
+
+        SendRaw("LGRAPH|" + json);
+        _log.Information("[NetNode] Sent level graph ({Length} bytes)", json.Length);
+    }
+
     public void SendGeneratePayload(string json)
     {
         if (!HasAnyConnection())
@@ -2896,6 +2975,18 @@ public sealed class NetNode : IDisposable
             messages = new List<RemoteChatMessage>(_pendingChatMessages);
             _pendingChatMessages.Clear();
             return messages.Count > 0;
+        }
+    }
+
+    public void ClearMobSyncQueues()
+    {
+        lock (_sync)
+        {
+            _pendingMobStates.Clear();
+            _pendingMobHits.Clear();
+            _pendingMobDies.Clear();
+            _pendingMobAttacks.Clear();
+            _pendingMobDraws.Clear();
         }
     }
 

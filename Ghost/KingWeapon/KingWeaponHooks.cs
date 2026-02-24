@@ -17,6 +17,7 @@ namespace DeadCellsMultiplayerMod.Ghost;
 internal static class KingWeaponHooks
 {
     private static bool _installed;
+    private const double SuppressLocalHeroSkillLockMaxSeconds = 0.35;
     private static readonly Dictionary<int, long> _recentKingWeaponMobUidHits = new();
     private static readonly Dictionary<int, long> _recentKingWeaponMobRefHits = new();
     private static readonly Dictionary<string, long> _recentKingWeaponMobSignatureHits = new(StringComparer.Ordinal);
@@ -134,15 +135,17 @@ internal static class KingWeaponHooks
 
     private static void Hook_Hero_lockControlFromSkill(Hook_Hero.orig_lockControlFromSkill orig, Hero self, double sec)
     {
-        if(KingWeaponSupport.IsInKingContext && ModEntry.me != null && ReferenceEquals(self, ModEntry.me))
+        if(KingWeaponSupport.IsInKingContext &&
+           sec > 0 &&
+           sec <= SuppressLocalHeroSkillLockMaxSeconds &&
+           ModEntry.me != null &&
+           ReferenceEquals(self, ModEntry.me))
             return;
         orig(self, sec);
     }
 
     private static void Hook_Hero_unlockControls(Hook_Hero.orig_unlockControls orig, Hero self)
     {
-        if(KingWeaponSupport.IsInKingContext && ModEntry.me != null && ReferenceEquals(self, ModEntry.me))
-            return;
         orig(self);
     }
 
