@@ -1263,9 +1263,6 @@ namespace DeadCellsMultiplayerMod
 
         private bool ShouldKeepRemoteKingVisibleInRoom(NetNode.RemoteSnapshot remote, string localLevelId)
         {
-            if (string.IsNullOrWhiteSpace(localLevelId))
-                return true;
-
             if (!string.IsNullOrWhiteSpace(localLevelId) &&
                 !string.IsNullOrWhiteSpace(remote.LevelId) &&
                 !string.Equals(remote.LevelId, localLevelId, StringComparison.Ordinal))
