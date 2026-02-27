@@ -75,6 +75,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double MobStateTypeRebindSearchRadius = 96.0;
         private const double MobStateTypeRebindSearchRadiusSq = MobStateTypeRebindSearchRadius * MobStateTypeRebindSearchRadius;
         private const string ContactAttackPacketSkillId = "@contact";
+        private const string OldSkillPreparePacketPrefix = "@oldprep:";
         private const string OldSkillChargeCompletePacketPrefix = "@oldcc:";
         private const string OldSkillExecutePacketPrefix = "@oldexec:";
         private const string NewSkillExecutePacketPrefix = "@newexec:";
@@ -182,6 +183,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             Hook_Mob.contactAttack += Hook_Mob_contactAttack;
             Hook_Mob.onTouch += Hook_Mob_onTouch;
             Hook_Mob.queueAttack += Hook_Mob_queueAttack;
+            Hook_OldMobSkill.prepareOnOwnerTarget += Hook_OldMobSkill_prepareOnOwnerTarget;
             Hook_OldMobSkill.execute += Hook_OldMobSkill_execute;
             Hook_MobSkill.execute += Hook_MobSkill_execute;
         }
@@ -738,6 +740,36 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             TrySendHostMobAttack(ownerMob, OldSkillChargeCompletePacketPrefix + skillId, false, null);
+        }
+
+        private bool Hook_OldMobSkill_prepareOnOwnerTarget(Hook_OldMobSkill.orig_prepareOnOwnerTarget orig, OldMobSkill self, bool? data, int? e)
+        {
+            var prepared = false;
+            try
+            {
+                prepared = orig(self, data, e);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (!prepared)
+                return false;
+
+            var net = GameMenu.NetRef;
+            if (!IsHost(net))
+                return true;
+
+            var ownerMob = self?.owner as Mob;
+            var skillId = self?.id?.ToString() ?? string.Empty;
+            if (ownerMob == null || string.IsNullOrWhiteSpace(skillId))
+                return true;
+
+            Entity? explicitTarget = null;
+            try { explicitTarget = ownerMob.aTarget; } catch { }
+            TrySendHostMobAttack(ownerMob, OldSkillPreparePacketPrefix + skillId, false, e, explicitTarget);
+            return true;
         }
 
         private void Hook_Mob_queueAttack(Hook_Mob.orig_queueAttack orig, Mob self, OldMobSkill a, bool requiresTargetInArea, int? data)
@@ -2564,6 +2596,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             }
 
+            if (skillId.StartsWith(OldSkillPreparePacketPrefix, StringComparison.Ordinal))
+            {
+                TryPrepareClientOldSkill(mob, skillId[OldSkillPreparePacketPrefix.Length..], data, targetUserId, attackDir);
+                return;
+            }
+
             if (skillId.StartsWith(OldSkillChargeCompletePacketPrefix, StringComparison.Ordinal))
             {
                 TryExecuteClientOldSkill(mob, skillId[OldSkillChargeCompletePacketPrefix.Length..], data, targetUserId, attackDir);
@@ -2633,6 +2671,45 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 TryResetQueuedOldSkillIfMatches(mob, normalizedSkillId);
                 TryInvokeOldSkillChargeComplete(oldSkill);
                 oldSkill.execute(null);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void TryPrepareClientOldSkill(Mob mob, string rawSkillId, int? data, int targetUserId, int attackDir)
+        {
+            if (mob == null || string.IsNullOrWhiteSpace(rawSkillId))
+                return;
+
+            try
+            {
+                var normalizedSkillId = rawSkillId.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedSkillId))
+                    return;
+
+                var skillId = normalizedSkillId.AsHaxeString();
+                if (!mob.hasOldSkill(skillId))
+                    return;
+
+                var oldSkill = mob.getOldSkill(skillId) as OldMobSkill;
+                if (oldSkill == null)
+                    return;
+
+                if (TryGetChargingOldSkillId(mob, out var chargingOldSkillId))
+                {
+                    if (string.Equals(chargingOldSkillId, normalizedSkillId, StringComparison.Ordinal))
+                        return;
+                }
+
+                TrySetClientMobAttackTarget(mob, targetUserId, attackDir, forceRetarget: true);
+                TryWakeMobForForcedSimulation(mob);
+                TryResetQueuedOldSkillIfMatches(mob, normalizedSkillId);
+
+                if (!TryExecuteClientOldSkillNativeLike(oldSkill, data))
+                {
+                    try { oldSkill.prepare(data); } catch { }
+                }
             }
             catch
             {
@@ -3092,58 +3169,65 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             ClientMobState target;
             var forcedDir = 0;
             var useForcedDir = false;
+            var preserveLocalMotion = false;
             lock (Sync)
             {
                 if (!clientMobTargets.TryGetValue(localIndex, out target))
                     return;
 
                 var nowTick = Stopwatch.GetTimestamp();
-                if (IsClientAttackUnlockActiveLocked(localIndex, nowTick) &&
+                var attackUnlock = IsClientAttackUnlockActiveLocked(localIndex, nowTick);
+                if (attackUnlock &&
                     TryGetClientForcedDirLocked(localIndex, nowTick, out var attackDir))
                 {
                     forcedDir = NormalizeDir(attackDir);
                     useForcedDir = forcedDir != 0;
                 }
+
+                preserveLocalMotion = attackUnlock && ShouldPreserveClientAttackMotion(self);
             }
 
-            var currentX = GetWorldX(self);
-            var currentY = GetWorldY(self);
-            var lerpedX = currentX + (target.X - currentX) * ClientInterpolationAlpha;
-            var lerpedY = ClientSyncVerticalPosition
-                ? currentY + (target.Y - currentY) * ClientInterpolationAlpha
-                : currentY;
+            if (!preserveLocalMotion)
+            {
+                var currentX = GetWorldX(self);
+                var currentY = GetWorldY(self);
+                var lerpedX = currentX + (target.X - currentX) * ClientInterpolationAlpha;
+                var lerpedY = ClientSyncVerticalPosition
+                    ? currentY + (target.Y - currentY) * ClientInterpolationAlpha
+                    : currentY;
 
-            try
-            {
-                if (ClientSyncVerticalPosition)
-                    self.setPosPixel(lerpedX, lerpedY);
-                else
-                    SetWorldXKeepingY(self, lerpedX);
-            }
-            catch
-            {
-                if (self.spr != null)
+                try
                 {
-                    self.spr.x = lerpedX;
                     if (ClientSyncVerticalPosition)
-                        self.spr.y = lerpedY;
+                        self.setPosPixel(lerpedX, lerpedY);
+                    else
+                        SetWorldXKeepingY(self, lerpedX);
                 }
-            }
-
-            try
-            {
-                self.dx = 0;
-                self.bdx = 0;
-                if (ClientSyncVerticalPosition)
+                catch
                 {
-                    self.dy = 0;
-                    self.bdy = 0;
-                    self.fallStartY = lerpedY;
+                    if (self.spr != null)
+                    {
+                        self.spr.x = lerpedX;
+                        if (ClientSyncVerticalPosition)
+                            self.spr.y = lerpedY;
+                    }
                 }
-                self.hasGravity = true;
-            }
-            catch
-            {
+
+                try
+                {
+                    self.dx = 0;
+                    self.bdx = 0;
+                    if (ClientSyncVerticalPosition)
+                    {
+                        self.dy = 0;
+                        self.bdy = 0;
+                        self.fallStartY = lerpedY;
+                    }
+                    self.hasGravity = true;
+                }
+                catch
+                {
+                }
             }
 
             if (useForcedDir)
@@ -3156,6 +3240,29 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             ApplyAuthoritativeLifeState(self, target.Life, target.MaxLife);
+        }
+
+        private static bool ShouldPreserveClientAttackMotion(Mob mob)
+        {
+            if (mob == null)
+                return false;
+
+            if (HasLocalQueuedOrChargingSkill(mob))
+                return true;
+
+            try
+            {
+                var motion =
+                    System.Math.Abs(mob.dx) +
+                    System.Math.Abs(mob.bdx) +
+                    System.Math.Abs(mob.dy) +
+                    System.Math.Abs(mob.bdy);
+                return motion > 0.02;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static void ApplyAuthoritativeLifeState(Mob mob, int targetLife, int targetMaxLife)
