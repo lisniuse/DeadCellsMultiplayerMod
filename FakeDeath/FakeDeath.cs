@@ -555,6 +555,7 @@ namespace DeadCellsMultiplayerMod
 
             ResetAllDownedGameOverState();
             _localFakeDead = true;
+            _localExitPenaltyApplied = false;
             _localFakeDeadStartedTicks = Stopwatch.GetTimestamp();
             _localDownedX = hero.spr?.x ?? 0;
             _localDownedY = hero.spr?.y ?? 0;
@@ -688,6 +689,7 @@ namespace DeadCellsMultiplayerMod
             ResetAllDownedGameOverState();
             var hero = me;
             _localFakeDead = false;
+            _localExitPenaltyApplied = false;
             _localFakeDeadStartedTicks = 0;
             _nextDownedStateSendTicks = 0;
             _nextReviveAttemptTicks = 0;
@@ -733,6 +735,82 @@ namespace DeadCellsMultiplayerMod
             }
 
             SendLocalDownedState(net, isDowned: false, force: true);
+        }
+
+        private void ApplyLocalDownedExitPenaltyIfNeededCore()
+        {
+            if (!_localFakeDead || _localExitPenaltyApplied || me == null)
+                return;
+
+            _localExitPenaltyApplied = true;
+            var hero = me;
+
+            try { hero.spdComboKills = 0; } catch { }
+            try { hero.perfectKillsCount = 0; } catch { }
+            try { hero.goldCombo = 0; } catch { }
+
+            try
+            {
+                var data = hero._level?.game?.data;
+                if (data != null)
+                {
+                    data.killCount = 0;
+                    data.corruptedHealingKillCount = 0;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                bool noStats = true;
+                hero.tryToSubstractMoney(int.MaxValue, Ref<bool>.From(ref noStats));
+            }
+            catch
+            {
+                try
+                {
+                    var data = hero._level?.game?.data;
+                    if (data != null)
+                        data.money = 0;
+                    hero.hudSetMoney(0);
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                var inventory = hero.inventory;
+                if (inventory != null)
+                {
+                    inventory.removeAll("BrutalityUp".AsHaxeString());
+                    inventory.removeAll("SurvivalUp".AsHaxeString());
+                    inventory.removeAll("TacticUp".AsHaxeString());
+                }
+            }
+            catch
+            {
+            }
+
+            try { hero.computeTiers(); } catch { }
+
+            try
+            {
+                var data = hero._level?.game?.data;
+                if (data != null)
+                {
+                    data.money = 0;
+                    data.brutalityTier = hero.brutalityTier;
+                    data.survivalTier = hero.survivalTier;
+                    data.tacticTier = hero.tacticTier;
+                }
+            }
+            catch
+            {
+            }
         }
 
         private void ProcessReviveHold(NetNode net)
@@ -1027,6 +1105,7 @@ namespace DeadCellsMultiplayerMod
             ResetAllDownedGameOverState();
             var wasFakeDead = _localFakeDead;
             _localFakeDead = false;
+            _localExitPenaltyApplied = false;
             _localFakeDeadStartedTicks = 0;
             StopLocalDeadCine();
             _localDownedX = 0;

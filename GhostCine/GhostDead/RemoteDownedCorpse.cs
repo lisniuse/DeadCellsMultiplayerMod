@@ -319,120 +319,18 @@ namespace DeadCellsMultiplayerMod
 
         private void EnsureHomunculus()
         {
-            var corpse = _corpse;
-            if (corpse == null || corpse.destroyed)
-            {
-                DisposeHomunculus();
-                return;
-            }
-
-            if (!IsCorpseStabilized(corpse))
-                return;
-
-            var hom = _homunculus;
-            if (hom != null)
-            {
-                try
-                {
-                    if (!hom.destroyed)
-                    {
-                        ApplyTargetToHomunculus();
-                        return;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
-            CreateHomunculus(corpse);
+            // Remote downed visual is corpse-only.
+            DisposeHomunculus();
         }
 
         private void CreateHomunculus(HeroDeadCorpse corpse)
         {
-            if (corpse == null || corpse.destroyed)
-                return;
-
-            try
-            {
-                var level = corpse._level ?? _templateHero?._level;
-                if (level == null)
-                    return;
-
-                var hom = new Homunculus(level, corpse.cx, corpse.cy, forCinematic: false, attachedToHero: false, null);
-                ModEntry.RegisterRemoteFakeDeathHomunculus(hom);
-                hom.init();
-                hom.initGfx();
-                try { hom.hasMoveSounds = false; } catch { }
-                RemoveFromHomunculusSkillEntityList(hom);
-                try { hom.dash(_targetDir != 0 ? _targetDir : 1); } catch { }
-                DisableRemoteHomunculusController(hom);
-
-                _homunculus = hom;
-                _hasHomunculusPose = false;
-                _hasHeadAnimTarget = false;
-                _headAnimTarget = null;
-                ApplyTargetToHomunculus();
-            }
-            catch
-            {
-                _homunculus = null;
-            }
+            _homunculus = null;
         }
 
         private void ApplyTargetToHomunculus()
         {
-            var hom = _homunculus;
-            if (hom == null)
-                return;
-
-            try
-            {
-                if (hom.destroyed)
-                    return;
-            }
-            catch
-            {
-                return;
-            }
-
-            var x = _hasHeadTarget ? _headTargetX : _targetX;
-            var y = _hasHeadTarget ? _headTargetY : (_targetY - 24.0);
-            var dir = _targetDir != 0 ? _targetDir : 1;
-            x = Math.Round(x);
-            y = Math.Round(y);
-
-            if (_hasHomunculusPose && IsIdleLikeHomunculusAnim(_headAnimTarget))
-            {
-                var dy = y - _lastHomunculusY;
-                if (Math.Abs(dy) <= HomunculusIdleYSnapTolerancePx)
-                    y = _lastHomunculusY;
-            }
-
-            var poseChanged = !_hasHomunculusPose ||
-                              Math.Abs(_lastHomunculusX - x) > 0.5 ||
-                              Math.Abs(_lastHomunculusY - y) > 0.5 ||
-                              _lastHomunculusDir != dir;
-
-            if (poseChanged)
-            {
-                try { hom.dir = dir; } catch { }
-                try { hom.setPosPixel(x, y); } catch { }
-                _hasHomunculusPose = true;
-                _lastHomunculusX = x;
-                _lastHomunculusY = y;
-                _lastHomunculusDir = dir;
-            }
-            ApplyTargetAnimToHomunculus(hom);
-            try { hom.isOutOfGame = false; } catch { }
-            try { hom.lastOutOfGame = false; } catch { }
-            try { hom.isOnScreen = true; } catch { }
-            try
-            {
-                if (hom.onScreenRecent < 1200.0)
-                    hom.onScreenRecent = 1200.0;
-            }
-            catch { }
+            // No-op: head entity is disabled.
         }
 
         private void ApplyTargetAnimToHomunculus(Homunculus hom)

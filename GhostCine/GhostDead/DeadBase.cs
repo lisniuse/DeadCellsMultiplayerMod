@@ -76,30 +76,8 @@ namespace DeadCellsMultiplayerMod
 
         private void EnsureHomunculus()
         {
-            var corpse = _corpse;
-            if (corpse == null || corpse.destroyed)
-            {
-                DisposeHomunculus();
-                return;
-            }
-
-            if (!IsCorpseStabilized(corpse))
-                return;
-
-            var hom = _homunculus;
-            if (hom != null)
-            {
-                try
-                {
-                    if (!hom.destroyed)
-                        return;
-                }
-                catch
-                {
-                }
-            }
-
-            CreateHomunculus(corpse);
+            // Fake-death flow no longer uses Homunculus.
+            DisposeHomunculus();
         }
 
         private void CreateCorpse()
@@ -143,79 +121,17 @@ namespace DeadCellsMultiplayerMod
 
         private void CreateHomunculus(HeroDeadCorpse corpse)
         {
-            if (corpse == null || corpse.destroyed)
-                return;
-
-            try
-            {
-                var level = corpse._level ?? _hero?._level;
-                if (level == null)
-                    return;
-
-                var sourceSkill = GetHomunculusSkill(_hero);
-                var hom = new Homunculus(level, corpse.cx, corpse.cy, forCinematic: false, attachedToHero: false, sourceSkill);
-                hom.init();
-                hom.initGfx();
-                try { hom.hasMoveSounds = false; } catch { }
-                try { hom.dash(_hero != null && _hero.dir < 0 ? -1 : 1); } catch { }
-                try { hom.controlsToMe(); } catch { }
-
-                try
-                {
-                    var px = corpse.get_targetSprPosX();
-                    var py = corpse.get_targetSprPosY() - 24.0;
-                    hom.setPosPixel(px, py);
-                }
-                catch
-                {
-                }
-
-                _homunculus = hom;
-                MaintainLocalHomunculusControl();
-            }
-            catch
-            {
-                _homunculus = null;
-            }
+            _homunculus = null;
         }
 
         private bool HasLiveHomunculus()
         {
-            var hom = _homunculus;
-            if (hom == null)
-                return false;
-
-            try { return !hom.destroyed; }
-            catch { return false; }
+            return false;
         }
 
         private void MaintainLocalHomunculusControl()
         {
-            var hom = _homunculus;
-            if (hom == null)
-                return;
-
-            try
-            {
-                if (hom.destroyed)
-                    return;
-            }
-            catch
-            {
-                return;
-            }
-
-            try
-            {
-                var game = dc.pr.Game.Class.ME;
-                if (game != null && ReferenceEquals(game.curCine, this))
-                    game.curCine = null;
-            }
-            catch
-            {
-            }
-
-            try { hom.controlsToMe(); } catch { }
+            // No-op: local fake-death should not create/control Homunculus.
         }
 
         private static dc.tool.mainSkills.Homunculus? GetHomunculusSkill(Hero? hero)
@@ -305,88 +221,19 @@ namespace DeadCellsMultiplayerMod
 
         public bool TryGetHomunculusPixelPosition(out double x, out double y)
         {
-            x = 0;
-            y = 0;
-
-            var hom = _homunculus;
-            if (hom == null)
-                return false;
-
-            try
-            {
-                if (hom.destroyed)
-                    return false;
-            }
-            catch
-            {
-                return false;
-            }
-
-                x = hom.spr.x;
-                y = hom.spr.y - 20;
+            // Keep network/revive logic compatible by mirroring corpse position
+            // when fake-death head is disabled.
+            if (TryGetCorpsePixelPosition(out x, out y))
                 return true;
 
+            x = 0;
+            y = 0;
+            return false;
         }
 
         public bool TryGetHomunculusAnim(out string? anim)
         {
             anim = null;
-
-            var hom = _homunculus;
-            if (hom == null)
-                return false;
-
-            try
-            {
-                if (hom.destroyed)
-                    return false;
-            }
-            catch
-            {
-                return false;
-            }
-
-            try
-            {
-                var spr = hom.spr;
-                var animManager = spr?.get_anim();
-                if (animManager != null)
-                {
-                    dynamic am = animManager;
-                    dynamic stack = am.stack;
-                    if (stack != null)
-                    {
-                        int len = stack.length;
-                        if (len > 0)
-                        {
-                            dynamic top = ((object[])stack.array)[len - 1];
-                            var group = top?.group?.ToString();
-                            if (!string.IsNullOrWhiteSpace(group))
-                            {
-                                anim = group;
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                var group = hom.spr?.groupName?.ToString();
-                if (!string.IsNullOrWhiteSpace(group))
-                {
-                    anim = group;
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-
             return false;
         }
 
@@ -618,17 +465,6 @@ namespace DeadCellsMultiplayerMod
         {
             if (_hero == null || _hero.destroyed)
                 return;
-            if (_homunculus != null)
-            {
-                try
-                {
-                    if (!_homunculus.destroyed)
-                        return;
-                }
-                catch
-                {
-                }
-            }
 
             try
             {

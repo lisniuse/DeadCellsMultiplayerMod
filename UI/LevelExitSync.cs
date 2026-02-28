@@ -211,6 +211,18 @@ public class LevelExitSync :
             TriggerExitTransition(nearestExit, hero, null);
         }
 
+        if (ModEntry.IsLocalPlayerDowned())
+        {
+            var autoDoorKey = ResolveAutoFollowDoorKey(net);
+            if (!string.IsNullOrWhiteSpace(autoDoorKey) &&
+                !string.Equals(_transitionDoorKey, autoDoorKey, StringComparison.Ordinal))
+            {
+                var autoExit = FindExitByDoorKey(currentLevel, autoDoorKey);
+                if (autoExit != null)
+                    TriggerExitTransition(autoExit, hero, null);
+            }
+        }
+
         UpdateExitPointer();
     }
 
@@ -218,6 +230,9 @@ public class LevelExitSync :
     {
         if (exit == null || hero == null)
             return;
+
+        if (ModEntry.IsLocalPlayerDowned())
+            ModEntry.ApplyLocalDownedExitPenaltyIfNeeded();
 
         _transitionDoorKey = BuildDoorKey(exit.cx, exit.cy);
         _suppressDoorActivateHook = true;
@@ -379,6 +394,8 @@ public class LevelExitSync :
         {
             if (state.UserId <= 0)
                 continue;
+            if (IsPlayerDownedForExit(state.UserId, net.id))
+                continue;
             if (!state.Pressed || !state.InsideCircle)
                 continue;
             if (!string.Equals(state.DoorKey, doorKey, StringComparison.Ordinal))
@@ -394,10 +411,13 @@ public class LevelExitSync :
         if (string.IsNullOrWhiteSpace(doorKey))
             return 0;
 
+        var localId = GameMenu.NetRef?.id ?? 0;
         var ready = 0;
         foreach (var state in _playerStates.Values)
         {
             if (state.UserId <= 0)
+                continue;
+            if (IsPlayerDownedForExit(state.UserId, localId))
                 continue;
             if (!state.Pressed || !state.InsideCircle)
                 continue;
@@ -411,20 +431,84 @@ public class LevelExitSync :
 
     private int GetExpectedPlayerCount(NetNode net)
     {
-        var expected = System.Math.Max(1, _activePlayerIds.Count);
-        expected = System.Math.Max(expected, _playerStates.Count);
+        var localId = net.id;
+        var expected = 0;
+
+        foreach (var userId in _activePlayerIds)
+        {
+            if (userId <= 0)
+                continue;
+            if (IsPlayerDownedForExit(userId, localId))
+                continue;
+            expected++;
+        }
+
+        var aliveStates = 0;
+        foreach (var state in _playerStates.Values)
+        {
+            if (state.UserId <= 0)
+                continue;
+            if (IsPlayerDownedForExit(state.UserId, localId))
+                continue;
+            aliveStates++;
+        }
+        if (aliveStates > expected)
+            expected = aliveStates;
+
         if (net.IsHost)
         {
             var hostExpected = 1 + NetNode.ConnectedClientCount;
+            if (localId > 0 && IsPlayerDownedForExit(localId, localId))
+                hostExpected--;
+
+            foreach (var userId in _activePlayerIds)
+            {
+                if (userId <= 0 || userId == localId)
+                    continue;
+                if (IsPlayerDownedForExit(userId, localId))
+                    hostExpected--;
+            }
+
+            if (hostExpected < 0)
+                hostExpected = 0;
             if (hostExpected > expected)
                 expected = hostExpected;
         }
-        else if (net.IsAlive)
-        {
-            // Client is connected to host even when snapshots are late.
-            expected = System.Math.Max(expected, 2);
-        }
+
+        if (expected <= 0 && localId > 0 && !IsPlayerDownedForExit(localId, localId))
+            expected = 1;
+
         return System.Math.Max(1, expected);
+    }
+
+    private string ResolveAutoFollowDoorKey(NetNode net)
+    {
+        foreach (var state in _playerStates.Values)
+        {
+            if (state.UserId <= 0)
+                continue;
+            if (IsPlayerDownedForExit(state.UserId, net.id))
+                continue;
+            if (!state.Pressed || !state.InsideCircle)
+                continue;
+            if (string.IsNullOrWhiteSpace(state.DoorKey))
+                continue;
+            if (AreAllPlayersReadyForDoor(state.DoorKey, net))
+                return state.DoorKey;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsPlayerDownedForExit(int userId, int localId)
+    {
+        if (userId <= 0)
+            return false;
+
+        if (localId > 0 && userId == localId)
+            return ModEntry.IsLocalPlayerDowned();
+
+        return ModEntry.IsRemotePlayerDowned(userId);
     }
 
     private void PushReachedExitMessage(int userId, Exit? exit, NetNode net)

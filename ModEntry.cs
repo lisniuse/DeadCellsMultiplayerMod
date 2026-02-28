@@ -104,6 +104,7 @@ namespace DeadCellsMultiplayerMod
         public InventItem inventItem;
         private bool _inventorySyncGuard;
         private bool _localFakeDead;
+        private bool _localExitPenaltyApplied;
         private long _localFakeDeadStartedTicks;
         private DeadBase? _localDeadCine;
         private double _localDownedX;
@@ -202,6 +203,11 @@ namespace DeadCellsMultiplayerMod
         internal static bool IsLocalPlayerDowned()
         {
             return Instance != null && Instance._localFakeDead;
+        }
+
+        internal static void ApplyLocalDownedExitPenaltyIfNeeded()
+        {
+            Instance?.ApplyLocalDownedExitPenaltyIfNeededCore();
         }
 
         internal static bool IsRemotePlayerDowned(int userId)
