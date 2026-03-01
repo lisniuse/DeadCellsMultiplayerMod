@@ -771,7 +771,6 @@ namespace DeadCellsMultiplayerMod
             if (hom == null)
                 return;
 
-            ModEntry.UnregisterRemoteFakeDeathHomunculus(hom);
             try
             {
                 if (!hom.destroyed)
