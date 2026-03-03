@@ -139,7 +139,8 @@ internal static class KingWeaponHooks
            sec > 0 &&
            sec <= SuppressLocalHeroSkillLockMaxSeconds &&
            ModEntry.me != null &&
-           ReferenceEquals(self, ModEntry.me))
+           ReferenceEquals(self, ModEntry.me) &&
+           !ShouldBypassKingContextControlSuppression(self))
             return;
         orig(self, sec);
     }
@@ -147,6 +148,46 @@ internal static class KingWeaponHooks
     private static void Hook_Hero_unlockControls(Hook_Hero.orig_unlockControls orig, Hero self)
     {
         orig(self);
+    }
+
+    private static bool ShouldBypassKingContextControlSuppression(Hero? hero)
+    {
+        if(hero == null)
+            return false;
+
+        dc.pr.Game game;
+        try
+        {
+            game = hero._level?.game ?? dc.pr.Game.Class.ME;
+        }
+        catch
+        {
+            game = null!;
+        }
+
+        if(game == null)
+            return false;
+
+        try
+        {
+            if(game._pauseAfterFrames > 0)
+                return true;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var cine = game.curCine;
+            if(cine != null && !cine.destroyed)
+                return true;
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     private static void Hook_Hero_addKillCount(Hook_Hero.orig_addKillCount orig, Hero self, Mob mob)
