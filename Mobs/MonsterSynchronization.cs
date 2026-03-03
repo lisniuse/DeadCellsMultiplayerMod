@@ -30,6 +30,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static readonly object Sync = new();
         private static readonly List<Mob> trackedMobs = new();
+        private static readonly Dictionary<Mob, int> trackedMobIndices = new(ReferenceEqualityComparer.Instance);
 
         private static readonly Dictionary<int, ClientMobState> clientMobTargets = new();
         private static readonly Dictionary<int, long> clientAttackUnlockUntilTick = new();
@@ -44,6 +45,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly Dictionary<int, long> clientLastSentAffectTickBySyncId = new();
         private static readonly Dictionary<int, ClientDrawSentState> clientLastSentDrawStateBySyncId = new();
         private static readonly Dictionary<int, TimedStringPayload> clientLastAppliedHostAffectPayloadBySyncId = new();
+        private static readonly Dictionary<int, TimedStringPayload> clientLastAppliedAnimPayloadByLocalIndex = new();
+        private static readonly Dictionary<int, double> clientLastAnimationApplyFrameByLocalIndex = new();
+        private static readonly Dictionary<string, ParsedAnimPayload> parsedAnimPayloadCache = new(StringComparer.Ordinal);
         private static readonly Dictionary<int, string> hostMobTypeBySyncId = new();
         private static readonly Dictionary<int, HostMobSentState> hostLastSentMobStatesBySyncId = new();
         private static readonly Dictionary<int, CachedHostMobPayload> hostCachedPayloadBySyncId = new();
@@ -67,19 +71,21 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double ClientMobDrawSendRateHz = 30.0;
         private const double ClientStateSendRateHz = 30.0;
         private const double HostStateSendRateHz = 30.0;
-        private const double ClientMobDrawMinRateHz = 8.0;
-        private const double ClientStateMinRateHz = 8.0;
-        private const double HostStateMinRateHz = 12.0;
-        private const int AdaptiveRateStartMobCount = 24;
-        private const int AdaptiveRateEndMobCount = 120;
+        private const double ClientMobDrawMinRateHz = 10.0;
+        private const double ClientStateMinRateHz = 12.0;
+        private const double HostStateMinRateHz = 18.0;
+        private const int AdaptiveRateStartMobCount = 32;
+        private const int AdaptiveRateEndMobCount = 160;
         private const double HostPayloadRefreshBaseSeconds = 0.18;
         private const double HostPayloadRefreshMaxSeconds = 0.45;
         private const double ClientAffectSampleBaseSeconds = 0.10;
         private const double ClientAffectSampleMaxSeconds = 0.28;
         private const double ClientAffectResendBaseSeconds = ClientAffectSyncSeconds;
         private const double ClientAffectResendMaxSeconds = ClientAffectSyncSeconds;
+        private const double ClientAnimPayloadRefreshSeconds = 0.30;
+        private const int ParsedAnimPayloadCacheLimit = 512;
         private const double ClientDrawKeepAliveSeconds = 0.9;
-        private const double ClientInterpolationAlpha = 0.7;
+        private const double ClientInterpolationAlpha = 0.62;
         private const double ClientAiLockSeconds = 0.3;
         private const double ClientAttackUnlockSeconds = 2.2;
         private const double ClientAttackForcedDirSeconds = 0.22;
@@ -317,7 +323,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (FindTrackedMobIndexLocked(mob) >= 0)
                     return;
 
-                trackedMobs.Add(mob);
+                AddTrackedMobLocked(mob);
             }
         }
 
@@ -1173,14 +1179,45 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 foreach (var mob in buffer)
                 {
                     if (mob != null)
-                        trackedMobs.Add(mob);
+                        AddTrackedMobLocked(mob);
                 }
+            }
+        }
+
+        private static int AddTrackedMobLocked(Mob mob)
+        {
+            if (mob == null)
+                return -1;
+
+            if (trackedMobIndices.TryGetValue(mob, out var existingIndex))
+            {
+                if (existingIndex >= 0 && existingIndex < trackedMobs.Count && ReferenceEquals(trackedMobs[existingIndex], mob))
+                    return existingIndex;
+
+                trackedMobIndices.Remove(mob);
+            }
+
+            trackedMobs.Add(mob);
+            var addedIndex = trackedMobs.Count - 1;
+            trackedMobIndices[mob] = addedIndex;
+            return addedIndex;
+        }
+
+        private static void RebuildTrackedMobIndicesLocked()
+        {
+            trackedMobIndices.Clear();
+            for (int i = 0; i < trackedMobs.Count; i++)
+            {
+                var mob = trackedMobs[i];
+                if (mob != null)
+                    trackedMobIndices[mob] = i;
             }
         }
 
         private static void ResetMobTrackingLocked()
         {
             trackedMobs.Clear();
+            trackedMobIndices.Clear();
             clientMobTargets.Clear();
             clientAttackUnlockUntilTick.Clear();
             clientAttackForcedDir.Clear();
@@ -1195,6 +1232,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             clientLastSentAffectTickBySyncId.Clear();
             clientLastSentDrawStateBySyncId.Clear();
             clientLastAppliedHostAffectPayloadBySyncId.Clear();
+            clientLastAppliedAnimPayloadByLocalIndex.Clear();
+            clientLastAnimationApplyFrameByLocalIndex.Clear();
+            parsedAnimPayloadCache.Clear();
             hostMobTypeBySyncId.Clear();
             hostLastSentMobStatesBySyncId.Clear();
             hostCachedPayloadBySyncId.Clear();
@@ -1255,6 +1295,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             SyncMobIdRegistry.RemoveMob(mob);
             trackedMobs.RemoveAt(index);
             ShiftIndicesAfterRemovalLocked(index);
+            RebuildTrackedMobIndicesLocked();
         }
 
         private static void ShiftIndicesAfterRemovalLocked(int deletedIndex)
@@ -1269,6 +1310,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             ShiftDictionaryKeysLocked(clientLastReportedMobLife, deletedIndex);
             ShiftDictionaryKeysLocked(clientLastMobHitReportTick, deletedIndex);
             ShiftDictionaryKeysLocked(hostQueuedOldSkillMarkers, deletedIndex);
+            ShiftDictionaryKeysLocked(clientLastAppliedAnimPayloadByLocalIndex, deletedIndex);
+            ShiftDictionaryKeysLocked(clientLastAnimationApplyFrameByLocalIndex, deletedIndex);
         }
 
         private static void ShiftDictionaryKeysLocked<T>(Dictionary<int, T> dict, int deletedIndex)
@@ -1294,6 +1337,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (mob == null || trackedMobs.Count == 0)
                 return -1;
 
+            if (trackedMobIndices.TryGetValue(mob, out var directIndex))
+            {
+                if (directIndex >= 0 && directIndex < trackedMobs.Count && ReferenceEquals(trackedMobs[directIndex], mob))
+                    return directIndex;
+
+                trackedMobIndices.Remove(mob);
+            }
+
             var hasTargetSyncId = TryGetMobSyncId(mob, out var targetSyncId);
 
             for (int i = 0; i < trackedMobs.Count; i++)
@@ -1303,7 +1354,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     continue;
 
                 if (ReferenceEquals(candidate, mob))
+                {
+                    trackedMobIndices[mob] = i;
                     return i;
+                }
 
                 try
                 {
@@ -1410,7 +1464,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     return;
 
                 if (mob != null)
-                    trackedMobs.Add(mob);
+                    AddTrackedMobLocked(mob);
             }
         }
 
@@ -1454,8 +1508,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (localIndex >= 0)
                 return localIndex;
 
-            trackedMobs.Add(mob);
-            return trackedMobs.Count - 1;
+            return AddTrackedMobLocked(mob);
         }
 
         private static int ResolveLocalIndexForIncomingStateLocked(NetNode.MobStateSnapshot state, HashSet<int>? reservedLocalIndices)
@@ -2466,12 +2519,53 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return true;
         }
 
-        private static void ApplyAnimPayload(Mob mob, string? payload)
+        private static bool TryGetParsedAnimPayloadCached(string payload, out ParsedAnimPayload parsed)
+        {
+            parsed = default;
+            if (string.IsNullOrWhiteSpace(payload))
+                return false;
+
+            lock (Sync)
+            {
+                if (parsedAnimPayloadCache.TryGetValue(payload, out parsed))
+                    return true;
+            }
+
+            if (!TryParseAnimPayload(payload, out parsed))
+                return false;
+
+            lock (Sync)
+            {
+                if (parsedAnimPayloadCache.Count >= ParsedAnimPayloadCacheLimit)
+                    parsedAnimPayloadCache.Clear();
+
+                parsedAnimPayloadCache[payload] = parsed;
+            }
+
+            return true;
+        }
+
+        private static void ApplyAnimPayload(int localIndex, Mob mob, string? payload)
         {
             if (mob == null || mob.life <= 0 || mob.destroyed)
                 return;
 
-            if (!TryParseAnimPayload(payload, out var parsed))
+            var safePayload = payload ?? string.Empty;
+            var nowTick = Stopwatch.GetTimestamp();
+            var refreshTicks = (long)(Stopwatch.Frequency * ClientAnimPayloadRefreshSeconds);
+            lock (Sync)
+            {
+                if (clientLastAppliedAnimPayloadByLocalIndex.TryGetValue(localIndex, out var lastApplied) &&
+                    string.Equals(lastApplied.Payload, safePayload, StringComparison.Ordinal) &&
+                    nowTick - lastApplied.Tick < refreshTicks)
+                {
+                    return;
+                }
+
+                clientLastAppliedAnimPayloadByLocalIndex[localIndex] = new TimedStringPayload(safePayload, nowTick);
+            }
+
+            if (!TryGetParsedAnimPayloadCached(safePayload, out var parsed))
                 return;
 
             var spr = mob.spr;
@@ -3649,6 +3743,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var forcedDir = 0;
             var useForcedDir = false;
             var attackUnlock = false;
+            var shouldApplyAnimThisFrame = true;
             lock (Sync)
             {
                 if (!clientMobTargets.TryGetValue(localIndex, out target))
@@ -3661,6 +3756,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     forcedDir = NormalizeDir(attackDir);
                     useForcedDir = forcedDir != 0;
                 }
+
+                shouldApplyAnimThisFrame = ShouldApplyClientAnimationForFrameLocked(self, localIndex);
             }
 
             if (useForcedDir)
@@ -3675,7 +3772,37 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (attackUnlock && HasLocalQueuedOrChargingSkill(self))
                 return;
 
-            ApplyAnimPayload(self, target.AnimPayload);
+            if (!shouldApplyAnimThisFrame)
+                return;
+
+            ApplyAnimPayload(localIndex, self, target.AnimPayload);
+        }
+
+        private static bool ShouldApplyClientAnimationForFrameLocked(Mob mob, int localIndex)
+        {
+            if (mob == null)
+                return true;
+
+            try
+            {
+                var level = mob._level ?? currentLevel;
+                if (level == null)
+                    return true;
+
+                var frame = level.ftime;
+                if (clientLastAnimationApplyFrameByLocalIndex.TryGetValue(localIndex, out var lastFrame) &&
+                    lastFrame == frame)
+                {
+                    return false;
+                }
+
+                clientLastAnimationApplyFrameByLocalIndex[localIndex] = frame;
+                return true;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static bool HasLocalQueuedOrChargingSkill(Mob mob)
