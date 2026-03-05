@@ -226,8 +226,9 @@ public sealed class NetNode : IDisposable
         public readonly int MaxLife;
         public readonly string AnimPayload;
         public readonly string Type;
+        public readonly string StatePayload;
 
-        public MobStateSnapshot(int index, double x, double y, int dir, int life, int maxLife, string animPayload, string type)
+        public MobStateSnapshot(int index, double x, double y, int dir, int life, int maxLife, string animPayload, string type, string statePayload = "")
         {
             Index = index;
             X = x;
@@ -237,6 +238,7 @@ public sealed class NetNode : IDisposable
             MaxLife = maxLife;
             AnimPayload = animPayload ?? string.Empty;
             Type = type ?? string.Empty;
+            StatePayload = statePayload ?? string.Empty;
         }
     }
 
@@ -343,14 +345,24 @@ public sealed class NetNode : IDisposable
         public readonly double X;
         public readonly double Y;
         public readonly string LevelId;
+        public readonly bool HasHeadPosition;
+        public readonly double HeadX;
+        public readonly double HeadY;
+        public readonly bool HasHeadAnim;
+        public readonly string? HeadAnim;
 
-        public PlayerDownState(int userId, bool isDowned, double x, double y, string levelId)
+        public PlayerDownState(int userId, bool isDowned, double x, double y, string levelId, bool hasHeadPosition = false, double headX = 0, double headY = 0, bool hasHeadAnim = false, string? headAnim = null)
         {
             UserId = userId;
             IsDowned = isDowned;
             X = x;
             Y = y;
             LevelId = levelId ?? string.Empty;
+            HasHeadPosition = hasHeadPosition;
+            HeadX = headX;
+            HeadY = headY;
+            HasHeadAnim = hasHeadAnim;
+            HeadAnim = hasHeadAnim ? (headAnim ?? string.Empty) : null;
         }
     }
 
@@ -416,6 +428,8 @@ public sealed class NetNode : IDisposable
     private readonly object _hostCacheSync = new();
     private int? _cachedHostSeed;
     private int? _cachedHostBossRune;
+    private int? _cachedHostSerializerSeq;
+    private int? _cachedHostSerializerUid;
     private string? _cachedHostCountersPayload;
     private string? _cachedHostBlueprintsPayload;
     private string? _cachedHostLevelGraphPayload;
@@ -533,6 +547,8 @@ public sealed class NetNode : IDisposable
                 {
                     int? cachedBossRune;
                     int? cachedSeed;
+                    int? cachedSerializerSeq;
+                    int? cachedSerializerUid;
                     string? cachedCountersPayload;
                     string? cachedBlueprintsPayload;
                     string? cachedLevelGraphPayload;
@@ -540,10 +556,15 @@ public sealed class NetNode : IDisposable
                     {
                         cachedBossRune = _cachedHostBossRune;
                         cachedSeed = _cachedHostSeed;
+                        cachedSerializerSeq = _cachedHostSerializerSeq;
+                        cachedSerializerUid = _cachedHostSerializerUid;
                         cachedCountersPayload = _cachedHostCountersPayload;
                         cachedBlueprintsPayload = _cachedHostBlueprintsPayload;
                         cachedLevelGraphPayload = _cachedHostLevelGraphPayload;
                     }
+
+                    if (cachedSerializerSeq.HasValue && cachedSerializerUid.HasValue)
+                        await SendLineToClientSafe(connection, $"HXSYNC|{cachedSerializerSeq.Value}|{cachedSerializerUid.Value}\n").ConfigureAwait(false);
 
                     if (cachedBossRune.HasValue)
                         await SendLineToClientSafe(connection, $"BOSSRUNE|{cachedBossRune.Value}\n").ConfigureAwait(false);
@@ -1281,14 +1302,19 @@ public sealed class NetNode : IDisposable
 
         if (line.StartsWith("MOBSTATE|", StringComparison.OrdinalIgnoreCase))
         {
-            if (_role == NetRole.Host)
-                return true;
-
             var payload = line["MOBSTATE|".Length..];
             var parsedStates = ParseMobStatesPayload(payload);
             lock (_sync)
             {
-                _pendingMobStates = parsedStates;
+                if (_role == NetRole.Host)
+                {
+                    if (parsedStates.Count > 0)
+                        _pendingMobStates.AddRange(parsedStates);
+                }
+                else
+                {
+                    _pendingMobStates = parsedStates;
+                }
                 _hasRemote = true;
             }
             return true;
@@ -1768,8 +1794,9 @@ public sealed class NetNode : IDisposable
                 continue;
             var animPayload = parts[6];
             var type = parts.Length > 7 ? parts[7] : string.Empty;
+            var statePayload = parts.Length > 8 ? parts[8] : string.Empty;
 
-            states.Add(new MobStateSnapshot(index, x, y, dir, life, maxLife, animPayload, type));
+            states.Add(new MobStateSnapshot(index, x, y, dir, life, maxLife, animPayload, type, statePayload));
         }
 
         return states;
@@ -1999,7 +2026,31 @@ public sealed class NetNode : IDisposable
         if (levelId.Length == 0)
             levelId = string.Empty;
 
-        state = new PlayerDownState(parsedUserId, isDowned, x, y, levelId);
+        var hasHeadPosition = false;
+        var headX = 0d;
+        var headY = 0d;
+        var hasHeadAnim = false;
+        string? headAnim = null;
+        if (parts.Length >= 7 &&
+            double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedHeadX) &&
+            double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedHeadY))
+        {
+            hasHeadPosition = true;
+            headX = parsedHeadX;
+            headY = parsedHeadY;
+
+            if (parts.Length >= 8)
+            {
+                var parsedAnim = (parts[7] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(parsedAnim))
+                {
+                    hasHeadAnim = true;
+                    headAnim = parsedAnim;
+                }
+            }
+        }
+
+        state = new PlayerDownState(parsedUserId, isDowned, x, y, levelId, hasHeadPosition, headX, headY, hasHeadAnim, headAnim);
         return true;
     }
 
@@ -2181,6 +2232,8 @@ public sealed class NetNode : IDisposable
                 sb.Append(state.AnimPayload ?? string.Empty);
                 sb.Append(',');
                 sb.Append(state.Type ?? string.Empty);
+                sb.Append(',');
+                sb.Append(state.StatePayload ?? string.Empty);
             }
         }
         sb.Append('\n');
@@ -2259,6 +2312,24 @@ public sealed class NetNode : IDisposable
             .Replace("|", "/", StringComparison.Ordinal)
             .Replace("\r", string.Empty, StringComparison.Ordinal)
             .Replace("\n", string.Empty, StringComparison.Ordinal);
+        var safeHeadAnim = (state.HeadAnim ?? string.Empty)
+            .Replace("|", "/", StringComparison.Ordinal)
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal);
+
+        if (state.HasHeadPosition)
+        {
+            if (state.HasHeadAnim && !string.IsNullOrWhiteSpace(safeHeadAnim))
+            {
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"PDOWN|{state.UserId}|{(state.IsDowned ? 1 : 0)}|{state.X}|{state.Y}|{safeLevelId}|{state.HeadX}|{state.HeadY}|{safeHeadAnim}\n");
+            }
+
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"PDOWN|{state.UserId}|{(state.IsDowned ? 1 : 0)}|{state.X}|{state.Y}|{safeLevelId}|{state.HeadX}|{state.HeadY}\n");
+        }
 
         return string.Create(
             CultureInfo.InvariantCulture,
@@ -2399,6 +2470,11 @@ public sealed class NetNode : IDisposable
     {
         if (_role != NetRole.Host)
             return;
+        lock (_hostCacheSync)
+        {
+            _cachedHostSerializerSeq = seq;
+            _cachedHostSerializerUid = uid;
+        }
         if (!HasAnyConnection())
             return;
 
@@ -2721,14 +2797,16 @@ public sealed class NetNode : IDisposable
         _log.Information("[NetNode] Sent hero death");
     }
 
-    public void SendPlayerDownState(bool isDowned, double x, double y, string? levelId)
+    public void SendPlayerDownState(bool isDowned, double x, double y, string? levelId, double? headX = null, double? headY = null, string? headAnim = null)
     {
         if (!HasAnyConnection())
             return;
         if (ID <= 0)
             return;
 
-        var state = new PlayerDownState(ID, isDowned, x, y, levelId ?? string.Empty);
+        var hasHead = isDowned && headX.HasValue && headY.HasValue;
+        var hasAnim = hasHead && !string.IsNullOrWhiteSpace(headAnim);
+        var state = new PlayerDownState(ID, isDowned, x, y, levelId ?? string.Empty, hasHead, headX ?? 0, headY ?? 0, hasAnim, headAnim);
         var line = BuildPlayerDownLine(state);
         _ = SendLineSafe(line);
     }
@@ -2747,7 +2825,7 @@ public sealed class NetNode : IDisposable
 
     public void SendMobStates(IReadOnlyList<MobStateSnapshot> states)
     {
-        if (_role != NetRole.Host)
+        if (_role != NetRole.Host && _role != NetRole.Client)
             return;
         if (!HasAnyConnection())
             return;
@@ -3273,8 +3351,11 @@ public sealed class NetNode : IDisposable
         {
             _cachedHostSeed = null;
             _cachedHostBossRune = null;
+            _cachedHostSerializerSeq = null;
+            _cachedHostSerializerUid = null;
             _cachedHostCountersPayload = null;
             _cachedHostBlueprintsPayload = null;
+            _cachedHostLevelGraphPayload = null;
         }
         lock (_sync)
         {

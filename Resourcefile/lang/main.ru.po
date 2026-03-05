@@ -217,5 +217,8 @@ msgstr "{0} пал!"
 msgid "Hold R to restore"
 msgstr "Удерживайте R, чтобы поднять"
 
+msgid "Hold to revive."
+msgstr "Удерживайте, чтобы воскресить."
+
 msgid "Game Over"
 msgstr "Игра окончена"

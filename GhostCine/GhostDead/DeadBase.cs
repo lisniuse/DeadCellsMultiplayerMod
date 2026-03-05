@@ -8,7 +8,9 @@ namespace DeadCellsMultiplayerMod
     {
         private readonly Hero _hero;
         private HeroDeadCorpse? _corpse;
+        private Homunculus? _homunculus;
         private bool _lethalFallStarted;
+        private bool _cineSuppressed;
         private bool _hadHeroVisibleState;
         private bool _heroWasVisible;
         private bool _hadHeroHeadBlackState;
@@ -22,6 +24,7 @@ namespace DeadCellsMultiplayerMod
             CaptureHeroVisibility();
             HideHero();
             CreateCorpse();
+            SuppressCineEffects();
             EnsureViewportTracksHero(immediate: true);
         }
 
@@ -35,12 +38,21 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
+            SuppressCineEffects();
+
+            var hasLiveHomunculus = HasLiveHomunculus();
+
             try { _hero.cancelVelocities(); } catch { }
-            try { _hero.lockControlsS(0.25); } catch { }
+            if (!hasLiveHomunculus)
+            {
+                try { _hero.lockControlsS(0.25); } catch { }
+            }
             try { _hero.cancelSkillControlLock(); } catch { }
 
             HideHero();
             EnsureCorpse();
+            EnsureHomunculus();
+            MaintainLocalHomunculusControl();
             EnsureCorpseFalling();
             EnsureViewportTracksHero(immediate: false);
         }
@@ -48,7 +60,9 @@ namespace DeadCellsMultiplayerMod
         public override void onDispose()
         {
             base.onDispose();
+            RestoreCineState();
             DisposeCorpse();
+            DisposeHomunculus();
             RestoreHeroVisibility();
             EnsureViewportTracksHero(immediate: true);
         }
@@ -60,9 +74,16 @@ namespace DeadCellsMultiplayerMod
                 CreateCorpse();
         }
 
+        private void EnsureHomunculus()
+        {
+            // Fake-death flow no longer uses Homunculus.
+            DisposeHomunculus();
+        }
+
         private void CreateCorpse()
         {
             DisposeCorpse();
+            DisposeHomunculus();
 
             try
             {
@@ -84,6 +105,7 @@ namespace DeadCellsMultiplayerMod
             if (corpse == null || corpse.destroyed)
                 return;
 
+            KeepCorpseActive(corpse);
             EnsureLethalFallStarted();
         }
 
@@ -95,6 +117,65 @@ namespace DeadCellsMultiplayerMod
 
             _lethalFallStarted = true;
             try { corpse.startLethalFall(); } catch { }
+        }
+
+        private void CreateHomunculus(HeroDeadCorpse corpse)
+        {
+            _homunculus = null;
+        }
+
+        private bool HasLiveHomunculus()
+        {
+            return false;
+        }
+
+        private void MaintainLocalHomunculusControl()
+        {
+            // No-op: local fake-death should not create/control Homunculus.
+        }
+
+        private static dc.tool.mainSkills.Homunculus? GetHomunculusSkill(Hero? hero)
+        {
+            if (hero == null)
+                return null;
+
+            try
+            {
+                var manager = hero.mainSkillsManager;
+                if (manager == null)
+                    return null;
+
+                return manager.getMainSkill(dc.tool.mainSkills.Homunculus.Class) as dc.tool.mainSkills.Homunculus;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void KeepCorpseActive(HeroDeadCorpse corpse)
+        {
+            if (corpse == null || corpse.destroyed)
+                return;
+
+            var wasOutOfGame = false;
+            try { wasOutOfGame = corpse.isOutOfGame; } catch { }
+
+            try { corpse.isOnScreen = true; } catch { }
+            try
+            {
+                if (corpse.onScreenRecent < 1200.0)
+                    corpse.onScreenRecent = 1200.0;
+            }
+            catch { }
+
+            try { corpse.lastOutOfGame = false; } catch { }
+            try { corpse.isOutOfGame = false; } catch { }
+
+            if (!wasOutOfGame)
+                return;
+
+            try { corpse.onOutOfGameChange(); } catch { }
         }
 
         public bool TryGetCorpsePixelPosition(out double x, out double y)
@@ -136,6 +217,39 @@ namespace DeadCellsMultiplayerMod
             {
                 return false;
             }
+        }
+
+        public bool TryGetHomunculusPixelPosition(out double x, out double y)
+        {
+            // Keep network/revive logic compatible by mirroring corpse position
+            // when fake-death head is disabled.
+            if (TryGetCorpsePixelPosition(out x, out y))
+                return true;
+
+            x = 0;
+            y = 0;
+            return false;
+        }
+
+        public bool TryGetHomunculusAnim(out string? anim)
+        {
+            anim = null;
+            return false;
+        }
+
+        public bool IsHomunculusNearCorpse(double maxDistancePx)
+        {
+            if (maxDistancePx <= 0)
+                return false;
+
+            if (!TryGetCorpsePixelPosition(out var corpseX, out var corpseY))
+                return false;
+            if (!TryGetHomunculusPixelPosition(out var headX, out var headY))
+                return false;
+
+            var dx = headX - corpseX;
+            var dy = headY - corpseY;
+            return dx * dx + dy * dy <= maxDistancePx * maxDistancePx;
         }
 
         public bool IsCorpseInLethalFall()
@@ -185,6 +299,166 @@ namespace DeadCellsMultiplayerMod
         {
             try { _hero.visible = false; } catch { }
             SetHeroHeadVisible(false);
+        }
+
+        private void SuppressCineEffects()
+        {
+            if (_cineSuppressed)
+            {
+                TryKeepHudVisibleWhenAllowed();
+                return;
+            }
+
+            try { disableBars(); } catch { }
+            try { bars = 0.0; } catch { }
+
+            try
+            {
+                var top = topBar;
+                if (top != null)
+                    top.set_visible(false);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var bottom = bottomBar;
+                if (bottom != null)
+                    bottom.set_visible(false);
+            }
+            catch
+            {
+            }
+
+            // Dead player should keep normal HUD visible during fake-death state,
+            // but do not override pause/full-map/UI-hidden states.
+            TryKeepHudVisibleWhenAllowed();
+            _cineSuppressed = true;
+        }
+
+        private static void TryKeepHudVisibleWhenAllowed()
+        {
+            try
+            {
+                var game = dc.pr.Game.Class.ME;
+                if (game == null)
+                    return;
+
+                try
+                {
+                    if (game.paused)
+                        return;
+                }
+                catch
+                {
+                }
+
+                if (ShouldRespectMenuHiddenHud(game))
+                    return;
+
+                try
+                {
+                    var console = dc.ui.Console.Class.ME;
+                    if (console != null && console.flags.exists(dc.ui.Console.Class.HIDE_UI))
+                        return;
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    dynamic hudDyn = game.hud;
+                    if (hudDyn != null)
+                    {
+                        dynamic mini = hudDyn.minimap;
+                        if (mini != null && mini.isFullscreen)
+                            return;
+                    }
+                }
+                catch
+                {
+                }
+
+                try { game.hud?.show(null); } catch { }
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool ShouldRespectMenuHiddenHud(dc.pr.Game game)
+        {
+            if (game == null)
+                return false;
+
+            try
+            {
+                if (game._pauseAfterFrames > 0)
+                    return true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var cine = game.curCine;
+                if (cine != null && !cine.destroyed)
+                {
+                    var t = cine.GetType().Name;
+                    if (!string.IsNullOrEmpty(t))
+                    {
+                        if (t.IndexOf("Pause", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            t.IndexOf("Menu", StringComparison.OrdinalIgnoreCase) >= 0)
+                            return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                dynamic g = game;
+                var maybeMenu = g.pauseMenu ?? g.menu ?? g.curMenu ?? g.inventoryMenu ?? g.modal;
+                if (maybeMenu != null)
+                {
+                    try
+                    {
+                        if (!(bool)maybeMenu.destroyed)
+                            return true;
+                    }
+                    catch
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private void RestoreCineState()
+        {
+            var game = dc.pr.Game.Class.ME;
+            if (game == null)
+                return;
+
+            try
+            {
+                if (ReferenceEquals(game.curCine, this))
+                    game.curCine = null;
+            }
+            catch
+            {
+            }
         }
 
         private void EnsureViewportTracksHero(bool immediate)
@@ -281,6 +555,42 @@ namespace DeadCellsMultiplayerMod
             catch { }
 
             try { corpse.dispose(); } catch { }
+        }
+
+        private void DisposeHomunculus()
+        {
+            var hom = _homunculus;
+            _homunculus = null;
+            if (hom == null)
+                return;
+
+            RemoveFromHomunculusSkillEntityList(hom);
+            try
+            {
+                if (!hom.destroyed)
+                    hom.destroy();
+            }
+            catch
+            {
+            }
+
+            try { hom.dispose(); } catch { }
+        }
+
+        private static void RemoveFromHomunculusSkillEntityList(Homunculus hom)
+        {
+            if (hom == null)
+                return;
+
+            try
+            {
+                var bucketObj = hom._level?.entitiesByClass?.get(17969);
+                if (bucketObj is dc.hl.types.ArrayObj bucket)
+                    bucket.remove(hom);
+            }
+            catch
+            {
+            }
         }
     }
 }

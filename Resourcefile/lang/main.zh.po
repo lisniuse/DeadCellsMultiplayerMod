@@ -217,5 +217,8 @@ msgstr "{0} 倒下了！"
 msgid "Hold R to restore"
 msgstr "按住 R 进行救援"
 
+msgid "Hold to revive."
+msgstr "按住以复活。"
+
 msgid "Game Over"
 msgstr "游戏结束"

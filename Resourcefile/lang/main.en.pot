@@ -217,5 +217,8 @@ msgstr ""
 msgid "Hold R to restore"
 msgstr ""
 
+msgid "Hold to revive."
+msgstr ""
+
 msgid "Game Over"
 msgstr ""

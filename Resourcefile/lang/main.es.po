@@ -49,5 +49,8 @@ msgstr "¡{0} cayó!"
 msgid "Hold R to restore"
 msgstr "Mantén R para restaurar"
 
+msgid "Hold to revive."
+msgstr "Mantén para revivir."
+
 msgid "Game Over"
 msgstr "Fin del juego"

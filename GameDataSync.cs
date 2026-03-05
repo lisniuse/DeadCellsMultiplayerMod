@@ -10,6 +10,7 @@ using ModCore.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -23,6 +24,7 @@ namespace DeadCellsMultiplayerMod
     {
         static Serilog.ILogger _log;
         static public int Seed;
+        private static readonly bool EnableStoryManagerSync = false;
 
         static public virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_ _isTwitch;
         static public bool _isCustom;
@@ -40,8 +42,23 @@ namespace DeadCellsMultiplayerMod
         private static bool _hasRemoteCounters;
         private static bool _hasRemoteBlueprints;
         private static bool _origStoryCaptured;
+        private static bool _origStoryWasNull;
         private static StoryManager? _origStory;
         private static StringMap? _origCounters;
+        private static readonly Dictionary<string, int> _origCountersSnapshot = new(StringComparer.Ordinal);
+        private static readonly Dictionary<int, int> _origNpcProgressSnapshot = new();
+        private static readonly Dictionary<string, int> _origLoreRoomRunIdsSnapshot = new(StringComparer.Ordinal);
+        private static readonly HashSet<string> _origVisitedLoreRoomsSnapshot = new(StringComparer.Ordinal);
+        private static readonly List<int> _origPlannedLoresSnapshot = new();
+        private static int _origStoryDataVersion;
+        private static bool _sessionStoryCaptured;
+        private static bool _sessionStoryWasNull;
+        private static readonly Dictionary<string, int> _sessionCountersSnapshot = new(StringComparer.Ordinal);
+        private static readonly Dictionary<int, int> _sessionNpcProgressSnapshot = new();
+        private static readonly Dictionary<string, int> _sessionLoreRoomRunIdsSnapshot = new(StringComparer.Ordinal);
+        private static readonly HashSet<string> _sessionVisitedLoreRoomsSnapshot = new(StringComparer.Ordinal);
+        private static readonly List<int> _sessionPlannedLoresSnapshot = new();
+        private static int _sessionStoryDataVersion;
         private static bool _origItemMetaCaptured;
         private static ItemMetaManager? _origItemMeta;
         private static ArrayObj? _origItemProgress;
@@ -58,6 +75,17 @@ namespace DeadCellsMultiplayerMod
         private static int _remoteSerializerSeq;
         private static int _remoteSerializerUid;
         private static bool _hasRemoteSerializerSync;
+        private static bool _hasRemoteSerializerValues;
+        private static bool _localSerializerCaptured;
+        private static int _localSerializerSeq;
+        private static int _localSerializerUid;
+        private static readonly Dictionary<string, int> _remoteCountersSnapshot = new(StringComparer.Ordinal);
+        private static readonly Dictionary<int, int> _remoteNpcProgressSnapshot = new();
+        private static readonly Dictionary<string, int> _remoteLoreRoomRunIdsSnapshot = new(StringComparer.Ordinal);
+        private static readonly HashSet<string> _remoteVisitedLoreRoomsSnapshot = new(StringComparer.Ordinal);
+        private static readonly HashSet<int> _remotePlannedLoresSnapshot = new();
+        private static int _remoteStoryDataVersion;
+        private static bool _hasRemoteStoryDataVersion;
 
         public GameDataSync(Serilog.ILogger log)
         {
@@ -96,9 +124,6 @@ namespace DeadCellsMultiplayerMod
             }
             else if (net != null)
             {
-                TryApplyRemoteSerializerSync();
-                if (!string.IsNullOrEmpty(_remoteCountersPayload))
-                    ReceiveCounters(_remoteCountersPayload, self);
                 if (!string.IsNullOrEmpty(_remoteBlueprintsPayload))
                     ReceiveBlueprints(_remoteBlueprintsPayload, self);
                 if (GameMenu.TryGetRemoteSeed(out var remoteSeed))
@@ -122,9 +147,17 @@ namespace DeadCellsMultiplayerMod
             self.pickDeathItem();
             SendHeroSkin(self, net);
             SendHeroHeadSkin(self, net);
-            SendCounters(self, net);
-            SendBlueprints(self, net);
+            if (net != null && net.IsHost)
+            {
+                SendCounters(self, net);
+                SendBlueprints(self, net);
+            }
             orig(self, lvl, isTwitch, isCustom, mode, gdata);
+
+            if (net != null && net.IsHost)
+                SendHostStorySync(self, net);
+            else if (net != null && !string.IsNullOrEmpty(_remoteCountersPayload))
+                ReceiveCounters(_remoteCountersPayload, self);
         }
 
         public static void ReceiveBlueprints(string payload, User? target = null)
@@ -294,15 +327,7 @@ namespace DeadCellsMultiplayerMod
             var swapped = false;
             if (_hasRemoteCounters && _origStoryCaptured)
             {
-                if (_origStory == null)
-                {
-                    user.story = null;
-                }
-                else
-                {
-                    _origStory.counters = _origCounters;
-                    user.story = _origStory;
-                }
+                RestoreOriginalStory(user, preserveLocalProgress: true);
                 swapped = true;
             }
 
@@ -336,15 +361,7 @@ namespace DeadCellsMultiplayerMod
             var restored = false;
             if (_origStoryCaptured)
             {
-                if (_origStory == null)
-                {
-                    user.story = null;
-                }
-                else
-                {
-                    _origStory.counters = _origCounters;
-                    user.story = _origStory;
-                }
+                RestoreOriginalStory(user, preserveLocalProgress: false);
                 restored = true;
             }
 
@@ -377,13 +394,33 @@ namespace DeadCellsMultiplayerMod
                 _hasRemoteCounters = false;
                 _hasRemoteBlueprints = false;
                 _hasRemoteBossRune = false;
+                _remoteCountersSnapshot.Clear();
+                _remoteNpcProgressSnapshot.Clear();
+                _remoteLoreRoomRunIdsSnapshot.Clear();
+                _remoteVisitedLoreRoomsSnapshot.Clear();
+                _remotePlannedLoresSnapshot.Clear();
+                _remoteStoryDataVersion = 0;
+                _hasRemoteStoryDataVersion = false;
+                _hasRemoteSerializerSync = false;
+                _hasRemoteSerializerValues = false;
+                _remoteSerializerSeq = 0;
+                _remoteSerializerUid = 0;
                 lock (_bossRuneLock)
                 {
                     _remoteBossRune = null;
                 }
+                RestoreLocalSerializerSyncIfCaptured();
                 _origStoryCaptured = false;
+                _origStoryWasNull = false;
                 _origStory = null;
                 _origCounters = null;
+                _origCountersSnapshot.Clear();
+                _origNpcProgressSnapshot.Clear();
+                _origLoreRoomRunIdsSnapshot.Clear();
+                _origVisitedLoreRoomsSnapshot.Clear();
+                _origPlannedLoresSnapshot.Clear();
+                _origStoryDataVersion = 0;
+                ClearSessionStory();
                 _origItemMetaCaptured = false;
                 _origItemMeta = null;
                 _origItemProgress = null;
@@ -396,13 +433,40 @@ namespace DeadCellsMultiplayerMod
             return restored;
         }
 
-        public static void CaptureOriginalUserData(User user)
+        public static void CaptureOriginalUserData(User user, bool allowReplaceWhenBetter = false)
         {
-            if (!_origStoryCaptured)
+            if (EnableStoryManagerSync)
             {
-                _origStoryCaptured = true;
-                _origStory = user.story;
-                _origCounters = user.story?.counters;
+                var shouldCaptureOriginalStory = !_origStoryCaptured;
+                if (!shouldCaptureOriginalStory &&
+                    allowReplaceWhenBetter &&
+                    !HasAnyStorySnapshotData(
+                        _origCountersSnapshot,
+                        _origNpcProgressSnapshot,
+                        _origLoreRoomRunIdsSnapshot,
+                        _origVisitedLoreRoomsSnapshot,
+                        _origPlannedLoresSnapshot,
+                        _origStoryDataVersion) &&
+                    HasAnyUserStoryData(user))
+                {
+                    shouldCaptureOriginalStory = true;
+                }
+
+                if (shouldCaptureOriginalStory)
+                {
+                    _origStoryCaptured = true;
+                    _origStory = user.story;
+                    _origCounters = user.story?.counters;
+                    CaptureStorySnapshot(
+                        user,
+                        _origCountersSnapshot,
+                        _origNpcProgressSnapshot,
+                        _origLoreRoomRunIdsSnapshot,
+                        _origVisitedLoreRoomsSnapshot,
+                        _origPlannedLoresSnapshot,
+                        out _origStoryWasNull,
+                        out _origStoryDataVersion);
+                }
             }
 
             if (!_origItemMetaCaptured)
@@ -424,9 +488,49 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        public static void CaptureSessionStory(User user)
+        {
+            if (!EnableStoryManagerSync || user == null)
+                return;
+
+            _sessionStoryCaptured = true;
+            CaptureStorySnapshot(
+                user,
+                _sessionCountersSnapshot,
+                _sessionNpcProgressSnapshot,
+                _sessionLoreRoomRunIdsSnapshot,
+                _sessionVisitedLoreRoomsSnapshot,
+                _sessionPlannedLoresSnapshot,
+                out _sessionStoryWasNull,
+                out _sessionStoryDataVersion);
+        }
+
+        public static void RestoreSessionStory(User user)
+        {
+            if (!EnableStoryManagerSync || !_sessionStoryCaptured || user == null)
+                return;
+
+            if (_sessionStoryWasNull && _sessionCountersSnapshot.Count == 0 && _sessionNpcProgressSnapshot.Count == 0 && _sessionStoryDataVersion == 0)
+            {
+                ClearUserStoryState(user);
+                ClearSessionStory();
+                return;
+            }
+
+            ApplyStoryState(
+                user,
+                _sessionCountersSnapshot,
+                _sessionNpcProgressSnapshot,
+                _sessionStoryDataVersion,
+                _sessionLoreRoomRunIdsSnapshot,
+                _sessionVisitedLoreRoomsSnapshot,
+                _sessionPlannedLoresSnapshot);
+            ClearSessionStory();
+        }
+
         public static void RestoreRemoteUserData(User user)
         {
-            if (!string.IsNullOrEmpty(_remoteCountersPayload))
+            if (EnableStoryManagerSync && !string.IsNullOrEmpty(_remoteCountersPayload))
                 ReceiveCounters(_remoteCountersPayload, user);
             if (!string.IsNullOrEmpty(_remoteBlueprintsPayload))
                 ReceiveBlueprints(_remoteBlueprintsPayload, user);
@@ -526,6 +630,7 @@ namespace DeadCellsMultiplayerMod
                 _remoteSerializerSeq = seq;
                 _remoteSerializerUid = uid;
                 _hasRemoteSerializerSync = true;
+                _hasRemoteSerializerValues = true;
             }
         }
 
@@ -549,13 +654,67 @@ namespace DeadCellsMultiplayerMod
                 if (serializerClass == null)
                     return false;
 
+                if (!_localSerializerCaptured)
+                {
+                    _localSerializerSeq = serializerClass.SEQ;
+                    _localSerializerUid = serializerClass.UID;
+                    _localSerializerCaptured = true;
+                }
+
                 serializerClass.SEQ = seq;
                 serializerClass.UID = uid;
+                _hasRemoteSerializerValues = true;
                 return true;
             }
             catch
             {
                 return false;
+            }
+        }
+
+        public static bool SwapToLocalSerializerSync()
+        {
+            if (!_localSerializerCaptured)
+                return false;
+
+            try
+            {
+                var serializerClass = dc.hxbit.Serializer.Class;
+                if (serializerClass == null)
+                    return false;
+
+                if (serializerClass.SEQ == _localSerializerSeq &&
+                    serializerClass.UID == _localSerializerUid)
+                {
+                    return false;
+                }
+
+                serializerClass.SEQ = _localSerializerSeq;
+                serializerClass.UID = _localSerializerUid;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static void RestoreRemoteSerializerSync()
+        {
+            if (!_hasRemoteSerializerValues)
+                return;
+
+            try
+            {
+                var serializerClass = dc.hxbit.Serializer.Class;
+                if (serializerClass == null)
+                    return;
+
+                serializerClass.SEQ = _remoteSerializerSeq;
+                serializerClass.UID = _remoteSerializerUid;
+            }
+            catch
+            {
             }
         }
 
@@ -580,77 +739,90 @@ namespace DeadCellsMultiplayerMod
         public static void ReceiveCounters(string payload, User? target = null)
         {
             _remoteCountersPayload = payload;
+            if (!EnableStoryManagerSync)
+            {
+                _hasRemoteCounters = false;
+                return;
+            }
+
             if (string.IsNullOrEmpty(payload))
                 return;
 
             void apply(User user)
             {
+                var counters = new Dictionary<string, int>(StringComparer.Ordinal);
+                var npcProgress = new Dictionary<int, int>();
+                var loreRoomRunIds = new Dictionary<string, int>(StringComparer.Ordinal);
+                var visitedLoreRooms = new HashSet<string>(StringComparer.Ordinal);
+                var plannedLores = new List<int>();
+                int? storyDataVersion = null;
+                var hasExtendedStoryPayload = TryParseCountersPayloadV4(
+                    payload,
+                    counters,
+                    npcProgress,
+                    loreRoomRunIds,
+                    visitedLoreRooms,
+                    plannedLores,
+                    out storyDataVersion);
+                if (!hasExtendedStoryPayload &&
+                    !TryParseCountersPayloadV3(payload, counters, npcProgress, out storyDataVersion))
+                {
+                    ParseLegacyCountersPayload(payload, counters);
+                }
+
+                if (!HasAnyIncomingStoryData(counters, npcProgress, loreRoomRunIds, visitedLoreRooms, plannedLores, storyDataVersion) &&
+                    HasAnyUserStoryData(user))
+                {
+                    _log?.Warning("[NetMod] Ignoring empty story counters payload to avoid wiping local story state");
+                    return;
+                }
+
                 CaptureOriginalUserData(user);
-                var story = user.story ?? new StoryManager();
-                var map = new StringMap();
-                var key = new StringBuilder();
-                var value = new StringBuilder();
-                var inKey = true;
-                var escaped = false;
-
-                for (var i = 0; i < payload.Length; i++)
+                if (!hasExtendedStoryPayload)
                 {
-                    var c = payload[i];
-                    if (escaped)
-                    {
-                        if (inKey)
-                            key.Append(c);
-                        else
-                            value.Append(c);
-                        escaped = false;
-                        continue;
-                    }
-
-                    if (c == '\\')
-                    {
-                        escaped = true;
-                        continue;
-                    }
-
-                    if (inKey && c == '=')
-                    {
-                        inKey = false;
-                        continue;
-                    }
-
-                    if (!inKey && c == '|')
-                    {
-                        if (key.Length > 0)
-                        {
-                            var keyText = key.ToString();
-                            var valueText = value.ToString();
-                            if (!int.TryParse(valueText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
-                                parsed = 0;
-                            map.set(keyText.AsHaxeString(), parsed);
-                        }
-                        key.Clear();
-                        value.Clear();
-                        inKey = true;
-                        continue;
-                    }
-
-                    if (inKey)
-                        key.Append(c);
-                    else
-                        value.Append(c);
+                    loreRoomRunIds.Clear();
+                    CopyStoryStringIntMapToDictionary(user.story?.loreRoomRunIds, loreRoomRunIds);
+                    visitedLoreRooms.Clear();
+                    CopyStoryVisitedLoreRoomsToSet(user.story?.visitedLoreRooms, visitedLoreRooms);
+                    plannedLores.Clear();
+                    CopyStoryPlannedLoresToList(user.story?.plannedLores, plannedLores);
                 }
 
-                if (key.Length > 0)
+                var storyDataVersionToApply = storyDataVersion ?? (user.story?.storyDataVersion ?? 0);
+                ApplyStoryState(
+                    user,
+                    counters,
+                    npcProgress,
+                    storyDataVersionToApply,
+                    loreRoomRunIds,
+                    visitedLoreRooms,
+                    plannedLores);
+
+                _remoteCountersSnapshot.Clear();
+                foreach (var kv in counters)
+                    _remoteCountersSnapshot[kv.Key] = kv.Value;
+
+                _remoteNpcProgressSnapshot.Clear();
+                foreach (var kv in npcProgress)
+                    _remoteNpcProgressSnapshot[kv.Key] = kv.Value;
+
+                _remoteLoreRoomRunIdsSnapshot.Clear();
+                _remoteVisitedLoreRoomsSnapshot.Clear();
+                _remotePlannedLoresSnapshot.Clear();
+                if (hasExtendedStoryPayload)
                 {
-                    var keyText = key.ToString();
-                    var valueText = value.ToString();
-                    if (!int.TryParse(valueText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
-                        parsed = 0;
-                    map.set(keyText.AsHaxeString(), parsed);
+                    foreach (var kv in loreRoomRunIds)
+                        _remoteLoreRoomRunIdsSnapshot[kv.Key] = kv.Value;
+
+                    foreach (var key in visitedLoreRooms)
+                        _remoteVisitedLoreRoomsSnapshot.Add(key);
+
+                    for (var i = 0; i < plannedLores.Count; i++)
+                        _remotePlannedLoresSnapshot.Add(plannedLores[i]);
                 }
 
-                story.counters = map;
-                user.story = story;
+                _hasRemoteStoryDataVersion = storyDataVersion.HasValue;
+                _remoteStoryDataVersion = storyDataVersion ?? 0;
                 _hasRemoteCounters = true;
             }
 
@@ -676,15 +848,15 @@ namespace DeadCellsMultiplayerMod
 
         private static void SendCounters(User user, NetNode? net)
         {
-            if (user == null)
+            if (!EnableStoryManagerSync || user == null)
                 return;
 
             var map = user.story?.counters;
             var builder = new StringBuilder();
+            builder.Append("V4");
             if (map != null)
             {
                 var keys = map.keys();
-                var first = true;
                 while (keys.hasNext.Invoke())
                 {
                     var key = keys.next.Invoke();
@@ -694,19 +866,128 @@ namespace DeadCellsMultiplayerMod
                     if (string.IsNullOrWhiteSpace(keyText))
                         continue;
                     var value = ToInt(map.get(key));
-                    if (!first)
-                        builder.Append('|');
-                    builder.Append(keyText.Replace("\\", "\\\\").Replace("|", "\\|").Replace("=", "\\="));
-                    builder.Append('=');
+                    builder.Append("|C:");
+                    builder.Append(EncodeToken(keyText));
+                    builder.Append(':');
                     builder.Append(value.ToString(CultureInfo.InvariantCulture));
-                    first = false;
                 }
             }
+
+            var npcProgress = user.story?.npcProgresses;
+            if (npcProgress != null)
+            {
+                var npcKeys = npcProgress.keys();
+                while (npcKeys.hasNext.Invoke())
+                {
+                    var npcObj = npcKeys.next.Invoke();
+                    if (npcObj is not NpcId npcId)
+                        continue;
+
+                    var value = ToInt(npcProgress.get(npcObj));
+                    builder.Append("|N:");
+                    builder.Append(((int)npcId.Index).ToString(CultureInfo.InvariantCulture));
+                    builder.Append(':');
+                    builder.Append(value.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+
+            var loreRoomRunIds = user.story?.loreRoomRunIds;
+            if (loreRoomRunIds != null)
+            {
+                try
+                {
+                    dynamic keys = loreRoomRunIds.keys.Invoke();
+                    while (keys.hasNext.Invoke())
+                    {
+                        var keyObj = keys.next.Invoke();
+                        if (keyObj == null)
+                            continue;
+
+                        var key = keyObj.ToString();
+                        if (string.IsNullOrWhiteSpace(key))
+                            continue;
+
+                        var value = ToInt(loreRoomRunIds.get.Invoke(keyObj));
+                        builder.Append("|L:");
+                        builder.Append(EncodeToken(key));
+                        builder.Append(':');
+                        builder.Append(value.ToString(CultureInfo.InvariantCulture));
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            var visitedLoreRooms = user.story?.visitedLoreRooms;
+            if (visitedLoreRooms != null)
+            {
+                try
+                {
+                    dynamic keys = visitedLoreRooms.keys.Invoke();
+                    while (keys.hasNext.Invoke())
+                    {
+                        var keyObj = keys.next.Invoke();
+                        if (keyObj == null)
+                            continue;
+
+                        var key = keyObj.ToString();
+                        if (string.IsNullOrWhiteSpace(key))
+                            continue;
+
+                        var raw = visitedLoreRooms.get.Invoke(keyObj);
+                        var visited = raw is bool b ? b : ToInt(raw) != 0;
+                        if (!visited)
+                            continue;
+
+                        builder.Append("|V:");
+                        builder.Append(EncodeToken(key));
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            var plannedLores = user.story?.plannedLores;
+            if (plannedLores != null)
+            {
+                var seenPlanned = new HashSet<int>();
+                for (var i = 0; i < plannedLores.length; i++)
+                {
+                    int planned;
+                    try
+                    {
+                        planned = ToInt(plannedLores.getDyn(i));
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (!seenPlanned.Add(planned))
+                        continue;
+
+                    builder.Append("|P:");
+                    builder.Append(planned.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+
+            builder.Append("|S:");
+            builder.Append((user.story?.storyDataVersion ?? 0).ToString(CultureInfo.InvariantCulture));
 
             var payload = builder.ToString();
             HostCountersPayload = payload;
             if (net != null && net.IsAlive)
                 net.SendCounters(payload);
+        }
+
+        public static void SendHostStorySync(User user, NetNode? net)
+        {
+            if (user == null || net == null || !net.IsHost)
+                return;
+
+            SendCounters(user, net);
         }
 
 
@@ -943,6 +1224,810 @@ namespace DeadCellsMultiplayerMod
             if (bool.TryParse(value, out var parsed))
                 return parsed;
             return fallback;
+        }
+
+        private static void RestoreLocalSerializerSyncIfCaptured()
+        {
+            if (!_localSerializerCaptured)
+                return;
+
+            try
+            {
+                var serializerClass = dc.hxbit.Serializer.Class;
+                if (serializerClass == null)
+                    return;
+
+                serializerClass.SEQ = _localSerializerSeq;
+                serializerClass.UID = _localSerializerUid;
+            }
+            catch
+            {
+            }
+        }
+
+        private static void ClearSessionStory()
+        {
+            _sessionStoryCaptured = false;
+            _sessionStoryWasNull = false;
+            _sessionCountersSnapshot.Clear();
+            _sessionNpcProgressSnapshot.Clear();
+            _sessionLoreRoomRunIdsSnapshot.Clear();
+            _sessionVisitedLoreRoomsSnapshot.Clear();
+            _sessionPlannedLoresSnapshot.Clear();
+            _sessionStoryDataVersion = 0;
+        }
+
+        private static void RestoreOriginalStory(User user, bool preserveLocalProgress)
+        {
+            var currentStory = user.story;
+            Dictionary<string, int> countersToApply;
+            Dictionary<int, int> npcProgressToApply;
+            Dictionary<string, int> loreRoomRunIdsToApply;
+            HashSet<string> visitedLoreRoomsToApply;
+            List<int> plannedLoresToApply;
+            int storyDataVersionToApply;
+            if (preserveLocalProgress)
+            {
+                countersToApply = MergeCountersWithLocalProgress(currentStory);
+                npcProgressToApply = MergeNpcProgressWithLocalProgress(currentStory);
+                loreRoomRunIdsToApply = MergeLoreRoomRunIdsWithLocalProgress(currentStory);
+                visitedLoreRoomsToApply = MergeVisitedLoreRoomsWithLocalProgress(currentStory);
+                plannedLoresToApply = MergePlannedLoresWithLocalProgress(currentStory);
+                storyDataVersionToApply = MergeStoryDataVersion(currentStory);
+            }
+            else
+            {
+                countersToApply = new Dictionary<string, int>(_origCountersSnapshot, StringComparer.Ordinal);
+                npcProgressToApply = new Dictionary<int, int>(_origNpcProgressSnapshot);
+                loreRoomRunIdsToApply = new Dictionary<string, int>(_origLoreRoomRunIdsSnapshot, StringComparer.Ordinal);
+                visitedLoreRoomsToApply = new HashSet<string>(_origVisitedLoreRoomsSnapshot, StringComparer.Ordinal);
+                plannedLoresToApply = new List<int>(_origPlannedLoresSnapshot);
+                storyDataVersionToApply = _origStoryDataVersion;
+            }
+
+            if (_origStoryWasNull &&
+                countersToApply.Count == 0 &&
+                npcProgressToApply.Count == 0 &&
+                loreRoomRunIdsToApply.Count == 0 &&
+                visitedLoreRoomsToApply.Count == 0 &&
+                plannedLoresToApply.Count == 0 &&
+                storyDataVersionToApply == 0)
+            {
+                ClearUserStoryState(user);
+                return;
+            }
+
+            ApplyStoryState(
+                user,
+                countersToApply,
+                npcProgressToApply,
+                storyDataVersionToApply,
+                loreRoomRunIdsToApply,
+                visitedLoreRoomsToApply,
+                plannedLoresToApply);
+        }
+
+        private static Dictionary<string, int> MergeCountersWithLocalProgress(StoryManager? currentStory)
+        {
+            var merged = new Dictionary<string, int>(_origCountersSnapshot, StringComparer.Ordinal);
+            var currentCounters = new Dictionary<string, int>(StringComparer.Ordinal);
+            CopyCountersToDictionary(currentStory?.counters, currentCounters);
+            foreach (var kv in currentCounters)
+            {
+                if (!_remoteCountersSnapshot.TryGetValue(kv.Key, out var remoteValue) || remoteValue != kv.Value)
+                    merged[kv.Key] = kv.Value;
+            }
+
+            return merged;
+        }
+
+        private static Dictionary<int, int> MergeNpcProgressWithLocalProgress(StoryManager? currentStory)
+        {
+            var merged = new Dictionary<int, int>(_origNpcProgressSnapshot);
+            var currentNpcProgress = new Dictionary<int, int>();
+            CopyNpcProgressToDictionary(currentStory?.npcProgresses, currentNpcProgress);
+            foreach (var kv in currentNpcProgress)
+            {
+                if (!_remoteNpcProgressSnapshot.TryGetValue(kv.Key, out var remoteValue) || remoteValue != kv.Value)
+                    merged[kv.Key] = kv.Value;
+            }
+
+            return merged;
+        }
+
+        private static int MergeStoryDataVersion(StoryManager? currentStory)
+        {
+            var merged = _origStoryDataVersion;
+            var current = currentStory?.storyDataVersion ?? merged;
+            if (!_hasRemoteStoryDataVersion || current != _remoteStoryDataVersion)
+                merged = current;
+            return merged;
+        }
+
+        private static Dictionary<string, int> MergeLoreRoomRunIdsWithLocalProgress(StoryManager? currentStory)
+        {
+            var merged = new Dictionary<string, int>(_origLoreRoomRunIdsSnapshot, StringComparer.Ordinal);
+            var currentLore = new Dictionary<string, int>(StringComparer.Ordinal);
+            CopyStoryStringIntMapToDictionary(currentStory?.loreRoomRunIds, currentLore);
+            foreach (var kv in currentLore)
+            {
+                if (!_remoteLoreRoomRunIdsSnapshot.TryGetValue(kv.Key, out var remoteValue) || remoteValue != kv.Value)
+                    merged[kv.Key] = kv.Value;
+            }
+
+            return merged;
+        }
+
+        private static HashSet<string> MergeVisitedLoreRoomsWithLocalProgress(StoryManager? currentStory)
+        {
+            var merged = new HashSet<string>(_origVisitedLoreRoomsSnapshot, StringComparer.Ordinal);
+            var currentVisited = new HashSet<string>(StringComparer.Ordinal);
+            CopyStoryVisitedLoreRoomsToSet(currentStory?.visitedLoreRooms, currentVisited);
+            foreach (var key in currentVisited)
+            {
+                if (!_remoteVisitedLoreRoomsSnapshot.Contains(key))
+                    merged.Add(key);
+            }
+
+            return merged;
+        }
+
+        private static List<int> MergePlannedLoresWithLocalProgress(StoryManager? currentStory)
+        {
+            var mergedSet = new HashSet<int>(_origPlannedLoresSnapshot);
+            var currentPlanned = new List<int>();
+            CopyStoryPlannedLoresToList(currentStory?.plannedLores, currentPlanned);
+            for (var i = 0; i < currentPlanned.Count; i++)
+            {
+                var planned = currentPlanned[i];
+                if (!_remotePlannedLoresSnapshot.Contains(planned))
+                    mergedSet.Add(planned);
+            }
+
+            var merged = new List<int>(mergedSet);
+            merged.Sort();
+            return merged;
+        }
+
+        private static bool TryParseCountersPayloadV4(
+            string payload,
+            Dictionary<string, int> counters,
+            Dictionary<int, int> npcProgress,
+            Dictionary<string, int> loreRoomRunIds,
+            HashSet<string> visitedLoreRooms,
+            List<int> plannedLores,
+            out int? storyDataVersion)
+        {
+            int? parsedStoryDataVersion = null;
+            var isV4 = payload.Equals("V4", StringComparison.Ordinal) ||
+                       payload.StartsWith("V4|", StringComparison.Ordinal);
+            if (!isV4)
+            {
+                storyDataVersion = null;
+                return false;
+            }
+
+            var plannedSet = new HashSet<int>();
+            ForEachEscapedToken(payload, token =>
+            {
+                if (string.IsNullOrWhiteSpace(token) || token.Equals("V4", StringComparison.Ordinal))
+                    return;
+
+                if (token.StartsWith("C:", StringComparison.Ordinal))
+                {
+                    var parts = token.Split(':', 3);
+                    if (parts.Length < 3)
+                        return;
+
+                    var key = DecodeToken(parts[1]);
+                    if (string.IsNullOrWhiteSpace(key))
+                        return;
+
+                    counters[key] = ParseInt(parts[2], 0);
+                    return;
+                }
+
+                if (token.StartsWith("N:", StringComparison.Ordinal))
+                {
+                    var parts = token.Split(':', 3);
+                    if (parts.Length < 3)
+                        return;
+
+                    if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var npcIndex))
+                        return;
+
+                    npcProgress[npcIndex] = ParseInt(parts[2], 0);
+                    return;
+                }
+
+                if (token.StartsWith("L:", StringComparison.Ordinal))
+                {
+                    var parts = token.Split(':', 3);
+                    if (parts.Length < 3)
+                        return;
+
+                    var key = DecodeToken(parts[1]);
+                    if (string.IsNullOrWhiteSpace(key))
+                        return;
+
+                    loreRoomRunIds[key] = ParseInt(parts[2], 0);
+                    return;
+                }
+
+                if (token.StartsWith("V:", StringComparison.Ordinal))
+                {
+                    var key = DecodeToken(token[2..]);
+                    if (string.IsNullOrWhiteSpace(key))
+                        return;
+
+                    visitedLoreRooms.Add(key);
+                    return;
+                }
+
+                if (token.StartsWith("P:", StringComparison.Ordinal))
+                {
+                    if (int.TryParse(token[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var planned))
+                    {
+                        if (plannedSet.Add(planned))
+                            plannedLores.Add(planned);
+                    }
+                    return;
+                }
+
+                if (token.StartsWith("S:", StringComparison.Ordinal))
+                {
+                    if (int.TryParse(token[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                        parsedStoryDataVersion = parsed;
+                    return;
+                }
+            });
+
+            storyDataVersion = parsedStoryDataVersion;
+            return true;
+        }
+
+        private static bool TryParseCountersPayloadV3(
+            string payload,
+            Dictionary<string, int> counters,
+            Dictionary<int, int> npcProgress,
+            out int? storyDataVersion)
+        {
+            int? parsedStoryDataVersion = null;
+            var isV3 = payload.Equals("V3", StringComparison.Ordinal) ||
+                       payload.StartsWith("V3|", StringComparison.Ordinal);
+            if (!isV3)
+            {
+                storyDataVersion = null;
+                return false;
+            }
+
+            ForEachEscapedToken(payload, token =>
+            {
+                if (string.IsNullOrWhiteSpace(token) || token.Equals("V3", StringComparison.Ordinal))
+                    return;
+
+                if (token.StartsWith("C:", StringComparison.Ordinal))
+                {
+                    var parts = token.Split(':', 3);
+                    if (parts.Length < 3)
+                        return;
+
+                    var key = DecodeToken(parts[1]);
+                    if (string.IsNullOrWhiteSpace(key))
+                        return;
+
+                    counters[key] = ParseInt(parts[2], 0);
+                    return;
+                }
+
+                if (token.StartsWith("N:", StringComparison.Ordinal))
+                {
+                    var parts = token.Split(':', 3);
+                    if (parts.Length < 3)
+                        return;
+
+                    if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var npcIndex))
+                        return;
+
+                    npcProgress[npcIndex] = ParseInt(parts[2], 0);
+                    return;
+                }
+
+                if (token.StartsWith("S:", StringComparison.Ordinal))
+                {
+                    if (int.TryParse(token[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                        parsedStoryDataVersion = parsed;
+                    return;
+                }
+            });
+
+            storyDataVersion = parsedStoryDataVersion;
+            return true;
+        }
+
+        private static void ParseLegacyCountersPayload(string payload, Dictionary<string, int> counters)
+        {
+            var key = new StringBuilder();
+            var value = new StringBuilder();
+            var inKey = true;
+            var escaped = false;
+
+            void commitPair()
+            {
+                if (key.Length <= 0)
+                    return;
+
+                var keyText = key.ToString();
+                var valueText = value.ToString();
+                counters[keyText] = ParseInt(valueText, 0);
+            }
+
+            for (var i = 0; i < payload.Length; i++)
+            {
+                var c = payload[i];
+                if (escaped)
+                {
+                    if (inKey)
+                        key.Append(c);
+                    else
+                        value.Append(c);
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (inKey && c == '=')
+                {
+                    inKey = false;
+                    continue;
+                }
+
+                if (!inKey && c == '|')
+                {
+                    commitPair();
+                    key.Clear();
+                    value.Clear();
+                    inKey = true;
+                    continue;
+                }
+
+                if (inKey)
+                    key.Append(c);
+                else
+                    value.Append(c);
+            }
+
+            commitPair();
+        }
+
+        private static void CaptureStorySnapshot(
+            User user,
+            Dictionary<string, int> countersTarget,
+            Dictionary<int, int> npcProgressTarget,
+            Dictionary<string, int> loreRoomRunIdsTarget,
+            HashSet<string> visitedLoreRoomsTarget,
+            List<int> plannedLoresTarget,
+            out bool storyWasNull,
+            out int storyDataVersion)
+        {
+            countersTarget.Clear();
+            npcProgressTarget.Clear();
+            loreRoomRunIdsTarget.Clear();
+            visitedLoreRoomsTarget.Clear();
+            plannedLoresTarget.Clear();
+
+            var story = user.story;
+            storyWasNull = story == null;
+            if (story != null)
+            {
+                CopyCountersToDictionary(story.counters, countersTarget);
+                CopyNpcProgressToDictionary(story.npcProgresses, npcProgressTarget);
+                CopyStoryStringIntMapToDictionary(story.loreRoomRunIds, loreRoomRunIdsTarget);
+                CopyStoryVisitedLoreRoomsToSet(story.visitedLoreRooms, visitedLoreRoomsTarget);
+                CopyStoryPlannedLoresToList(story.plannedLores, plannedLoresTarget);
+                storyDataVersion = story.storyDataVersion;
+                return;
+            }
+
+            storyDataVersion = 0;
+            CopyCountersToDictionary(user.counters, countersTarget);
+            CopyNpcProgressToDictionary(user.npcs, npcProgressTarget);
+            if (countersTarget.Count > 0 || npcProgressTarget.Count > 0)
+                storyWasNull = false;
+        }
+
+        private static bool HasAnyIncomingStoryData(
+            Dictionary<string, int> counters,
+            Dictionary<int, int> npcProgress,
+            Dictionary<string, int> loreRoomRunIds,
+            HashSet<string> visitedLoreRooms,
+            List<int> plannedLores,
+            int? storyDataVersion)
+        {
+            return counters.Count > 0 ||
+                   npcProgress.Count > 0 ||
+                   loreRoomRunIds.Count > 0 ||
+                   visitedLoreRooms.Count > 0 ||
+                   plannedLores.Count > 0 ||
+                   (storyDataVersion ?? 0) != 0;
+        }
+
+        private static bool HasAnyStorySnapshotData(
+            Dictionary<string, int> counters,
+            Dictionary<int, int> npcProgress,
+            Dictionary<string, int> loreRoomRunIds,
+            HashSet<string> visitedLoreRooms,
+            List<int> plannedLores,
+            int storyDataVersion)
+        {
+            return counters.Count > 0 ||
+                   npcProgress.Count > 0 ||
+                   loreRoomRunIds.Count > 0 ||
+                   visitedLoreRooms.Count > 0 ||
+                   plannedLores.Count > 0 ||
+                   storyDataVersion != 0;
+        }
+
+        private static bool HasAnyUserStoryData(User user)
+        {
+            if (HasAnyStoryData(user.story))
+                return true;
+
+            var legacyCounters = new Dictionary<string, int>(StringComparer.Ordinal);
+            CopyCountersToDictionary(user.counters, legacyCounters);
+            if (legacyCounters.Count > 0)
+                return true;
+
+            var legacyNpcProgress = new Dictionary<int, int>();
+            CopyNpcProgressToDictionary(user.npcs, legacyNpcProgress);
+            return legacyNpcProgress.Count > 0;
+        }
+
+        private static bool HasAnyStoryData(StoryManager? story)
+        {
+            if (story == null)
+                return false;
+
+            if (story.storyDataVersion != 0)
+                return true;
+
+            var counters = new Dictionary<string, int>(StringComparer.Ordinal);
+            CopyCountersToDictionary(story.counters, counters);
+            if (counters.Count > 0)
+                return true;
+
+            var npcProgress = new Dictionary<int, int>();
+            CopyNpcProgressToDictionary(story.npcProgresses, npcProgress);
+            if (npcProgress.Count > 0)
+                return true;
+
+            var loreRoomRunIds = new Dictionary<string, int>(StringComparer.Ordinal);
+            CopyStoryStringIntMapToDictionary(story.loreRoomRunIds, loreRoomRunIds);
+            if (loreRoomRunIds.Count > 0)
+                return true;
+
+            var visitedLoreRooms = new HashSet<string>(StringComparer.Ordinal);
+            CopyStoryVisitedLoreRoomsToSet(story.visitedLoreRooms, visitedLoreRooms);
+            if (visitedLoreRooms.Count > 0)
+                return true;
+
+            var plannedLores = new List<int>();
+            CopyStoryPlannedLoresToList(story.plannedLores, plannedLores);
+            return plannedLores.Count > 0;
+        }
+
+        private static void CopyCountersToDictionary(StringMap? map, Dictionary<string, int> target)
+        {
+            target.Clear();
+            if (map == null)
+                return;
+
+            try
+            {
+                var keys = map.keys();
+                while (keys.hasNext.Invoke())
+                {
+                    var key = keys.next.Invoke();
+                    if (key == null)
+                        continue;
+
+                    var keyText = key.ToString();
+                    if (string.IsNullOrWhiteSpace(keyText))
+                        continue;
+
+                    target[keyText] = ToInt(map.get(key));
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void CopyNpcProgressToDictionary(EnumValueMap? map, Dictionary<int, int> target)
+        {
+            target.Clear();
+            if (map == null)
+                return;
+
+            try
+            {
+                var keys = map.keys();
+                while (keys.hasNext.Invoke())
+                {
+                    var key = keys.next.Invoke();
+                    if (key is not NpcId npcId)
+                        continue;
+
+                    target[(int)npcId.Index] = ToInt(map.get(key));
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void CopyStoryStringIntMapToDictionary(virtual_exists_get_iterator_keys_remove_set_toString_? map, Dictionary<string, int> target)
+        {
+            target.Clear();
+            if (map == null)
+                return;
+
+            try
+            {
+                dynamic keys = map.keys.Invoke();
+                while (keys.hasNext.Invoke())
+                {
+                    var keyObj = keys.next.Invoke();
+                    if (keyObj == null)
+                        continue;
+
+                    var key = keyObj.ToString();
+                    if (string.IsNullOrWhiteSpace(key))
+                        continue;
+
+                    target[key] = ToInt(map.get.Invoke(keyObj));
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void CopyStoryVisitedLoreRoomsToSet(virtual_exists_get_iterator_keys_remove_set_toString_? map, HashSet<string> target)
+        {
+            target.Clear();
+            if (map == null)
+                return;
+
+            try
+            {
+                dynamic keys = map.keys.Invoke();
+                while (keys.hasNext.Invoke())
+                {
+                    var keyObj = keys.next.Invoke();
+                    if (keyObj == null)
+                        continue;
+
+                    var key = keyObj.ToString();
+                    if (string.IsNullOrWhiteSpace(key))
+                        continue;
+
+                    var raw = map.get.Invoke(keyObj);
+                    var visited = raw is bool b ? b : ToInt(raw) != 0;
+                    if (visited)
+                        target.Add(key);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void CopyStoryPlannedLoresToList(ArrayBytes_Int? source, List<int> target)
+        {
+            target.Clear();
+            if (source == null)
+                return;
+
+            var seen = new HashSet<int>();
+            for (var i = 0; i < source.length; i++)
+            {
+                int planned;
+                try
+                {
+                    planned = ToInt(source.getDyn(i));
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (seen.Add(planned))
+                    target.Add(planned);
+            }
+        }
+
+        private static StringMap BuildCountersMap(Dictionary<string, int> values)
+        {
+            var map = new StringMap();
+            foreach (var kv in values)
+                map.set(kv.Key.AsHaxeString(), kv.Value);
+            return map;
+        }
+
+        private static EnumValueMap BuildNpcProgressMap(Dictionary<int, int> values)
+        {
+            var map = new EnumValueMap();
+            foreach (var kv in values)
+            {
+                var npcId = CreateNpcIdFromIndex(kv.Key);
+                if (npcId == null)
+                    continue;
+
+                map.set(npcId, kv.Value);
+            }
+            return map;
+        }
+
+        private static void ApplyStoryStringIntMap(virtual_exists_get_iterator_keys_remove_set_toString_? map, Dictionary<string, int> values)
+        {
+            if (map == null)
+                return;
+
+            try
+            {
+                var keysToRemove = new List<object>();
+                dynamic keys = map.keys.Invoke();
+                while (keys.hasNext.Invoke())
+                {
+                    var keyObj = keys.next.Invoke();
+                    if (keyObj != null)
+                        keysToRemove.Add(keyObj);
+                }
+
+                for (var i = 0; i < keysToRemove.Count; i++)
+                {
+                    try { map.remove.Invoke(keysToRemove[i]); } catch { }
+                }
+            }
+            catch
+            {
+            }
+
+            foreach (var kv in values)
+            {
+                try
+                {
+                    map.set.Invoke(kv.Key.AsHaxeString(), kv.Value);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static void ApplyStoryVisitedLoreRoomsMap(virtual_exists_get_iterator_keys_remove_set_toString_? map, HashSet<string> values)
+        {
+            if (map == null)
+                return;
+
+            try
+            {
+                var keysToRemove = new List<object>();
+                dynamic keys = map.keys.Invoke();
+                while (keys.hasNext.Invoke())
+                {
+                    var keyObj = keys.next.Invoke();
+                    if (keyObj != null)
+                        keysToRemove.Add(keyObj);
+                }
+
+                for (var i = 0; i < keysToRemove.Count; i++)
+                {
+                    try { map.remove.Invoke(keysToRemove[i]); } catch { }
+                }
+            }
+            catch
+            {
+            }
+
+            foreach (var key in values)
+            {
+                try
+                {
+                    map.set.Invoke(key.AsHaxeString(), 1);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static ArrayBytes_Int BuildStoryPlannedLoresArray(List<int> values)
+        {
+            var arr = new ArrayBytes_Int();
+            var seen = new HashSet<int>();
+            for (var i = 0; i < values.Count; i++)
+            {
+                var planned = values[i];
+                if (!seen.Add(planned))
+                    continue;
+
+                try
+                {
+                    arr.push(planned);
+                }
+                catch
+                {
+                    try
+                    {
+                        arr.pushDyn(planned);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return arr;
+        }
+
+        private static void ApplyStoryState(
+            User user,
+            Dictionary<string, int> counters,
+            Dictionary<int, int> npcProgress,
+            int storyDataVersion,
+            Dictionary<string, int> loreRoomRunIds,
+            HashSet<string> visitedLoreRooms,
+            List<int> plannedLores)
+        {
+            user.story = BuildStoryManager(
+                counters,
+                npcProgress,
+                storyDataVersion,
+                loreRoomRunIds,
+                visitedLoreRooms,
+                plannedLores);
+            user.counters = BuildCountersMap(counters);
+            user.npcs = BuildNpcProgressMap(npcProgress);
+        }
+
+        private static void ClearUserStoryState(User user)
+        {
+            user.story = null;
+            user.counters = new StringMap();
+            user.npcs = new EnumValueMap();
+        }
+
+        private static StoryManager BuildStoryManager(
+            Dictionary<string, int> counters,
+            Dictionary<int, int> npcProgress,
+            int storyDataVersion,
+            Dictionary<string, int> loreRoomRunIds,
+            HashSet<string> visitedLoreRooms,
+            List<int> plannedLores)
+        {
+            var story = new StoryManager();
+            try
+            {
+                story.onReload();
+            }
+            catch
+            {
+            }
+
+            story.counters = BuildCountersMap(counters);
+            story.npcProgresses = BuildNpcProgressMap(npcProgress);
+            ApplyStoryStringIntMap(story.loreRoomRunIds, loreRoomRunIds);
+            ApplyStoryVisitedLoreRoomsMap(story.visitedLoreRooms, visitedLoreRooms);
+            story.plannedLores = BuildStoryPlannedLoresArray(plannedLores);
+            story.storyDataVersion = storyDataVersion;
+            return story;
         }
 
         private static ArrayObj? CloneItemProgress(ArrayObj? source)
@@ -1322,53 +2407,10 @@ namespace DeadCellsMultiplayerMod
             if (node == null || genData == null)
                 return;
 
-            try
-            {
-                var dst = node.genData;
-                if (dst == null)
-                    return;
-
-                var reflect = dc._Reflect.Class as dc._Reflect;
-                if (reflect == null)
-                    return;
-
-                void SetIfPresent(string fieldName, object? value)
-                {
-                    if (value == null)
-                        return;
-
-                    try
-                    {
-                        var hxField = fieldName.AsHaxeString();
-                        if (!reflect.hasField.Invoke(dst, hxField))
-                            return;
-                        reflect.setField.Invoke(dst, hxField, value);
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                if (genData.SpecificBiome != null)
-                    SetIfPresent("specificBiome", genData.SpecificBiome.AsHaxeString());
-                if (genData.ZDoorLock.HasValue)
-                    SetIfPresent("zDoorLock", genData.ZDoorLock.Value);
-                if (genData.ForcePauseTimer.HasValue)
-                    SetIfPresent("forcePauseTimer", genData.ForcePauseTimer.Value);
-                if (genData.ShouldBeFlipped.HasValue)
-                    SetIfPresent("shouldBeFlipped", genData.ShouldBeFlipped.Value);
-                if (genData.GenSubTeleportTo.HasValue)
-                    SetIfPresent("subTeleportTo", genData.GenSubTeleportTo.Value);
-                if (genData.ZDoorType != null)
-                {
-                    var zDoorType = CreateZDoorTypeFromSync(genData.ZDoorType);
-                    if (zDoorType is not null)
-                        SetIfPresent("zDoorType", zDoorType);
-                }
-            }
-            catch
-            {
-            }
+            // WARNING:
+            // Mutating RoomNode.genData from C# (even via Reflect) can corrupt HL objects and later
+            // explode as unrelated casts like "tool.InventItem -> level.LevelMap".
+            // Keep genData sync capture for diagnostics, but do not apply it here until a native-safe path exists.
         }
 
         private static bool ApplyLevelGraph(LevelStruct target, LevelGraphSync sync, out RoomNode? rebuiltRoot, out string reason)

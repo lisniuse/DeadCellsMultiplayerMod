@@ -14,6 +14,7 @@ namespace DeadCellsMultiplayerMod
         private readonly GhostKing _ghost;
         private readonly dc.GameCinematic? _previousCine;
         private HeroDeadCorpse? _corpse;
+        private Homunculus? _homunculus;
         private bool _hadGhostVisibleState;
         private bool _ghostWasVisible;
         private bool _hadTemplateHeroVisibleState;
@@ -26,10 +27,21 @@ namespace DeadCellsMultiplayerMod
         private double _targetX;
         private double _targetY;
         private int _targetDir;
+        private bool _hasHeadTarget;
+        private double _headTargetX;
+        private double _headTargetY;
+        private bool _hasHomunculusPose;
+        private double _lastHomunculusX;
+        private double _lastHomunculusY;
+        private int _lastHomunculusDir;
+        private bool _hasHeadAnimTarget;
+        private string? _headAnimTarget;
         private string? _interactionLabelText;
+        private LightTip? _interactionLightTip;
         private Pointer? _corpsePointer;
         private const int CorpseMarkerColor = 0xED6a1F;
         private const int PointerFxSuppressionKey = 188743680;
+        private const double HomunculusIdleYSnapTolerancePx = 2.0;
 
         public RemoteDownedCorpse(Hero templateHero, GhostKing ghost, double x, double y, int dir, dc.GameCinematic? previousCine)
         {
@@ -48,7 +60,7 @@ namespace DeadCellsMultiplayerMod
             EnsureViewportTracksTemplateHero(immediate: true);
         }
 
-        public void UpdateTarget(double x, double y, int dir)
+        public void UpdateTarget(double x, double y, int dir, double? headX = null, double? headY = null, string? headAnim = null)
         {
             var normalizedDir = ResolveTargetDir(dir);
             var changed = !_hasTarget ||
@@ -60,9 +72,32 @@ namespace DeadCellsMultiplayerMod
             _targetY = y;
             _targetDir = normalizedDir;
             _hasTarget = true;
+            if (headX.HasValue && headY.HasValue)
+            {
+                _headTargetX = headX.Value;
+                _headTargetY = headY.Value;
+                _hasHeadTarget = true;
+            }
+            else
+            {
+                _headTargetX = x;
+                _headTargetY = y;
+                _hasHeadTarget = false;
+            }
+            if (!string.IsNullOrWhiteSpace(headAnim))
+            {
+                _headAnimTarget = headAnim.Trim();
+                _hasHeadAnimTarget = true;
+            }
+            else
+            {
+                _headAnimTarget = null;
+                _hasHeadAnimTarget = false;
+            }
 
             if (changed)
                 ApplyTargetToCorpse(forceStartFall: true);
+            ApplyTargetToHomunculus();
         }
 
         public void SetInteractionLabel(string? text)
@@ -110,6 +145,7 @@ namespace DeadCellsMultiplayerMod
 
             HideGhost();
             EnsureCorpse();
+            EnsureHomunculus();
             EnsureTemplateHeroVisible();
             EnsureViewportTracksTemplateHero(immediate: false);
         }
@@ -119,6 +155,7 @@ namespace DeadCellsMultiplayerMod
             base.onDispose();
             RestoreCineState();
             DisposeCorpse();
+            DisposeHomunculus();
             RestoreGhostVisibility();
             RestoreTemplateHeroVisibility();
             EnsureViewportTracksTemplateHero(immediate: true);
@@ -133,14 +170,17 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
+            KeepCorpseActive(corpse);
             ApplyTargetToCorpse(forceStartFall: false);
             EnsureLethalFallStarted();
+            ApplyTargetToHomunculus();
             EnsureCorpsePointer();
         }
 
         private void CreateCorpse()
         {
             DisposeCorpse();
+            DisposeHomunculus();
 
             try
             {
@@ -151,6 +191,7 @@ namespace DeadCellsMultiplayerMod
                 _corpse = corpse;
                 _lethalFallStarted = false;
                 ApplyTargetToCorpse(forceStartFall: true);
+                ApplyTargetToHomunculus();
                 ApplyInteractionLabel();
                 EnsureCorpsePointer();
                 EnsureTemplateHeroVisible();
@@ -274,6 +315,144 @@ namespace DeadCellsMultiplayerMod
 
             _lethalFallStarted = true;
             try { corpse.startLethalFall(); } catch { }
+        }
+
+        private void EnsureHomunculus()
+        {
+            // Remote downed visual is corpse-only.
+            DisposeHomunculus();
+        }
+
+        private void CreateHomunculus(HeroDeadCorpse corpse)
+        {
+            _homunculus = null;
+        }
+
+        private void ApplyTargetToHomunculus()
+        {
+            // No-op: head entity is disabled.
+        }
+
+        private void ApplyTargetAnimToHomunculus(Homunculus hom)
+        {
+            if (hom == null || !_hasHeadAnimTarget || string.IsNullOrWhiteSpace(_headAnimTarget))
+                return;
+
+            try
+            {
+                var spr = hom.spr;
+                var animManager = spr?.get_anim();
+                if (animManager == null)
+                    return;
+
+                var target = _headAnimTarget!;
+                var current = string.Empty;
+                try
+                {
+                    dynamic am = animManager;
+                    dynamic stack = am.stack;
+                    if (stack != null)
+                    {
+                        int len = stack.length;
+                        if (len > 0)
+                        {
+                            dynamic top = ((object[])stack.array)[len - 1];
+                            current = top?.group?.ToString() ?? string.Empty;
+                        }
+                    }
+                }
+                catch
+                {
+                    current = spr?.groupName?.ToString() ?? string.Empty;
+                }
+
+                if (!string.Equals(current, target, StringComparison.Ordinal))
+                    animManager.play(target.AsHaxeString(), null, null).loop(null);
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool IsIdleLikeHomunculusAnim(string? anim)
+        {
+            if (string.IsNullOrWhiteSpace(anim))
+                return false;
+
+            return anim.IndexOf("idle", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static void DisableRemoteHomunculusController(Homunculus hom)
+        {
+            if (hom == null)
+                return;
+
+            try
+            {
+                var heroCtrl = hom._level?.game?.hero?.controller;
+                var ctrl = hom.controller;
+                if (ctrl != null && !ReferenceEquals(ctrl, heroCtrl))
+                    ctrl.manualLock = true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var game = hom._level?.game;
+                var hero = game?.hero;
+                if (hero != null)
+                {
+                    try { hero.controller.manualLock = false; } catch { }
+                    try { game.curCine = null; } catch { }
+                    try { hom._level?.viewport?.track(hero, null); } catch { }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void RemoveFromHomunculusSkillEntityList(Homunculus hom)
+        {
+            if (hom == null)
+                return;
+
+            try
+            {
+                var bucketObj = hom._level?.entitiesByClass?.get(17969);
+                if (bucketObj is dc.hl.types.ArrayObj bucket)
+                    bucket.remove(hom);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void KeepCorpseActive(HeroDeadCorpse corpse)
+        {
+            if (corpse == null || corpse.destroyed)
+                return;
+
+            var wasOutOfGame = false;
+            try { wasOutOfGame = corpse.isOutOfGame; } catch { }
+
+            try { corpse.isOnScreen = true; } catch { }
+            try
+            {
+                if (corpse.onScreenRecent < 1200.0)
+                    corpse.onScreenRecent = 1200.0;
+            }
+            catch { }
+
+            try { corpse.lastOutOfGame = false; } catch { }
+            try { corpse.isOutOfGame = false; } catch { }
+
+            if (!wasOutOfGame)
+                return;
+
+            try { corpse.onOutOfGameChange(); } catch { }
         }
 
         private void SuppressCineEffects()
@@ -414,17 +593,35 @@ namespace DeadCellsMultiplayerMod
             if (corpse == null || corpse.destroyed)
                 return;
 
+            ClearInteractionLightTip();
+
             try
             {
-                var textColor = 0xFFFFFF;
                 if (string.IsNullOrEmpty(_interactionLabelText))
-                    corpse.setGameplayLabel(null, Ref<int>.From(ref textColor));
-                else
-                    corpse.setGameplayLabel(_interactionLabelText.AsHaxeString(), Ref<int>.From(ref textColor));
+                    return;
+
+                var tip = corpse.createLightTip(null);
+                if (tip == null)
+                    return;
+
+                tip.addActivate(_interactionLabelText.AsHaxeString(), null, null);
+                _interactionLightTip = tip;
             }
             catch
             {
+                _interactionLightTip = null;
             }
+        }
+
+        private void ClearInteractionLightTip()
+        {
+            _interactionLightTip = null;
+
+            var corpse = _corpse;
+            if (corpse == null || corpse.destroyed)
+                return;
+
+            try { corpse.removeLightTip(); } catch { }
         }
 
         private void EnsureViewportTracksTemplateHero(bool immediate)
@@ -543,6 +740,7 @@ namespace DeadCellsMultiplayerMod
 
         private void DisposeCorpse()
         {
+            ClearInteractionLightTip();
             ClearCorpsePointer();
 
             var corpse = _corpse;
@@ -561,6 +759,28 @@ namespace DeadCellsMultiplayerMod
             }
 
             try { corpse.dispose(); } catch { }
+        }
+
+        private void DisposeHomunculus()
+        {
+            var hom = _homunculus;
+            _homunculus = null;
+            _hasHomunculusPose = false;
+            _hasHeadAnimTarget = false;
+            _headAnimTarget = null;
+            if (hom == null)
+                return;
+
+            try
+            {
+                if (!hom.destroyed)
+                    hom.destroy();
+            }
+            catch
+            {
+            }
+
+            try { hom.dispose(); } catch { }
         }
     }
 }

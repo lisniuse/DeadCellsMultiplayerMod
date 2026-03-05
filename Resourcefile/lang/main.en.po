@@ -51,5 +51,8 @@ msgstr "{0} fell!"
 msgid "Hold R to restore"
 msgstr "Hold R to restore"
 
+msgid "Hold to revive."
+msgstr "Hold to revive."
+
 msgid "Game Over"
 msgstr "Game Over"

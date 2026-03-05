@@ -104,6 +104,7 @@ namespace DeadCellsMultiplayerMod
         public InventItem inventItem;
         private bool _inventorySyncGuard;
         private bool _localFakeDead;
+        private bool _localExitPenaltyApplied;
         private long _localFakeDeadStartedTicks;
         private DeadBase? _localDeadCine;
         private double _localDownedX;
@@ -122,11 +123,13 @@ namespace DeadCellsMultiplayerMod
         private const int ReviveInteractKey = 82; // R
         private const double ReviveAttemptCooldownSeconds = 0.2;
         private const double ReviveHoldSeconds = 0.7;
+        private const double ReviveHomunculusBodyMaxDistancePx = 64.0;
         private const double DownedStateResendSeconds = 0.4;
+        private const double DownedHeadStateResendSeconds = 1.0 / 30.0;
         private const double DownedGhostBodyYOffsetPx = 40.0;
         private const double LocalReviveBodyYOffsetPx = 0.5;
         private const double PostRevivePositionLockSeconds = 0.0;
-        private const string ReviveHintText = "Hold R to restore";
+        private const string ReviveHintText = "Hold to revive.";
         private string _lastDoorMarkerLevelId = string.Empty;
         private int _lastDoorMarkerToken = int.MinValue;
         private string _localLastDoorMarkerLevelId = string.Empty;
@@ -137,6 +140,11 @@ namespace DeadCellsMultiplayerMod
             public int UserId;
             public double X;
             public double Y;
+            public bool HasHeadPosition;
+            public double HeadX;
+            public double HeadY;
+            public bool HasHeadAnim;
+            public string HeadAnim = string.Empty;
             public string LevelId = string.Empty;
             public long UpdatedAtTicks;
         }
@@ -195,6 +203,11 @@ namespace DeadCellsMultiplayerMod
         internal static bool IsLocalPlayerDowned()
         {
             return Instance != null && Instance._localFakeDead;
+        }
+
+        internal static void ApplyLocalDownedExitPenaltyIfNeeded()
+        {
+            Instance?.ApplyLocalDownedExitPenaltyIfNeededCore();
         }
 
         internal static bool IsRemotePlayerDowned(int userId)
@@ -320,9 +333,9 @@ namespace DeadCellsMultiplayerMod
             Hook_Hero.wakeup += hook_hero_wakeup;
             Hook_Hero.onLevelChanged += hook_level_changed;
             Hook_User.newGame += GameDataSync.user_hook_new_game;
-            Hook_User.prepareSave += Hook_User_prepareSave;
-            Hook_User.serialize += Hook_User_serialize;
             Hook_User.unserialize += Hook_User_unserialize;
+            Hook_Game.onDispose += Hook_Game_onDispose;
+            Hook__Save.save += Hook__Save_save;
             Hook_AnimManager.play += Hook_AnimManager_play;
             Hook_MiniMap.track += Hook_MiniMap_track;
             Hook__LevelStruct.get += Hook__LevelStruct_get;
@@ -331,6 +344,7 @@ namespace DeadCellsMultiplayerMod
             Hook_Game.pause += Hook_Game_pause;
             Hook_Hero.kill += Hook_Hero_kill;
             Hook_Hero.onDie += Hook_Hero_onDie;
+            Hook_Hero.checkCursedWeaponHit += Hook_Hero_checkCursedWeaponHit;
             Hook_Hero.startDeathCine += Hook_Hero_startDeathCine;
             Hook_Hero.onHeroDie += Hook_Hero_onHeroDie;
             Hook_ZDoor.onActivate += Hook_ZDoor_onActivate;
@@ -484,50 +498,73 @@ namespace DeadCellsMultiplayerMod
             orig(self);
         }
 
-        private bool Hook_User_prepareSave(Hook_User.orig_prepareSave orig, User self)
-        {
-            if (_netRole == NetRole.Client)
-            {
-                var swapped = GameDataSync.SwapToOriginalUserData(self);
-                try
-                {
-                    return orig(self);
-                }
-                finally
-                {
-                    if (swapped)
-                        GameDataSync.RestoreRemoteUserData(self);
-                }
-            }
-
-            return orig(self);
-        }
-
-        private void Hook_User_serialize(Hook_User.orig_serialize orig, User self, dc.hxbit.Serializer __ctx)
-        {
-            if (_netRole == NetRole.Client)
-            {
-                var swapped = GameDataSync.SwapToOriginalUserData(self);
-                try
-                {
-                    orig(self, __ctx);
-                }
-                finally
-                {
-                    if (swapped)
-                        GameDataSync.RestoreRemoteUserData(self);
-                }
-                return;
-            }
-
-            orig(self, __ctx);
-        }
-
         private void Hook_User_unserialize(Hook_User.orig_unserialize orig, User self, dc.hxbit.Serializer v)
         {
             orig(self, v);
             if (_netRole == NetRole.Client)
-                GameDataSync.CaptureOriginalUserData(self);
+                GameDataSync.CaptureOriginalUserData(self, allowReplaceWhenBetter: true);
+        }
+
+        private void Hook_Game_onDispose(Hook_Game.orig_onDispose orig, dc.pr.Game self)
+        {
+            if (_netRole == NetRole.Client)
+            {
+                var user = self?.user;
+                if (user != null)
+                    GameDataSync.SwapToOriginalUserData(user);
+                GameDataSync.SwapToLocalSerializerSync();
+            }
+
+            orig(self);
+        }
+
+        private void Hook__Save_save(Hook__Save.orig_save orig, User u, bool onlyGameData)
+        {
+            if (_netRole == NetRole.Host)
+            {
+                orig(u, onlyGameData);
+                if (u != null)
+                    GameDataSync.SendHostStorySync(u, _net);
+                return;
+            }
+
+            if (_netRole == NetRole.Client)
+            {
+                if (u != null)
+                {
+                    GameDataSync.CaptureSessionStory(u);
+                    GameDataSync.CaptureOriginalUserData(u, allowReplaceWhenBetter: true);
+                }
+
+                var swapped = u != null && GameDataSync.RestoreOriginalUserState(u, clearRemote: false);
+                var serializerSwapped = GameDataSync.SwapToLocalSerializerSync();
+                if (!swapped && u != null && _net != null && _net.IsAlive)
+                {
+                    Logger.Warning("[NetMod] Skipping client save: local snapshot is unavailable, preventing host progress overwrite");
+                    if (serializerSwapped)
+                        GameDataSync.RestoreRemoteSerializerSync();
+                    GameDataSync.RestoreRemoteUserData(u);
+                    GameDataSync.RestoreSessionStory(u);
+                    return;
+                }
+
+                try
+                {
+                    orig(u, onlyGameData);
+                }
+                finally
+                {
+                    if (serializerSwapped)
+                        GameDataSync.RestoreRemoteSerializerSync();
+                    if (u != null)
+                        GameDataSync.RestoreRemoteUserData(u);
+                    if (u != null)
+                        GameDataSync.RestoreSessionStory(u);
+                }
+                return;
+            }
+
+            orig(u, onlyGameData);
         }
 
         private void Hook_Viewport_bumpDir(Hook_Viewport.orig_bumpDir orig, Viewport self, int dir, double? pow)
@@ -596,7 +633,8 @@ namespace DeadCellsMultiplayerMod
 
         private void Hook_Game_pause(Hook_Game.orig_pause orig, dc.pr.Game self)
         {
-            orig(self);
+            // don't change that
+            return; 
         }
 
 
@@ -767,6 +805,7 @@ namespace DeadCellsMultiplayerMod
             try { me._targetable = true; } catch { }
             SendLevel(levelId);
             orig(self, oldLevel);
+            try { _net?.ClearMobSyncQueues(); } catch { }
             EnsureHeroVisibilityAfterRoomChange(me);
             if (_netRole == NetRole.None) return;
             var net = _net;
@@ -1848,6 +1887,15 @@ namespace DeadCellsMultiplayerMod
             try
             {
                 _net?.Dispose();
+                try
+                {
+                    var main = dc.Main.Class.ME;
+                    if (main?.user != null)
+                        GameDataSync.RestoreOriginalUserState(main.user, true);
+                }
+                catch
+                {
+                }
                 ResetFakeDeathState(unlockLocalHero: true, sendNetworkUpState: false);
                 ResetLocalSkinSendCache();
                 ResetDoorMarkerState();
