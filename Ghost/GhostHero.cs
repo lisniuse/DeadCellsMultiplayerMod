@@ -196,7 +196,11 @@ namespace DeadCellsMultiplayerMod
 
         public void UpdateLabels()
         {
-            if (_labels.Count == 0) return;
+            if (_labels.Count == 0) 
+            {
+                _log.Debug($"{_labels.Count}");
+                return;
+            } 
             var targetScale = GetNicknameScale();
             List<Entity>? toRemove = null;
             foreach (var pair in _labels)
