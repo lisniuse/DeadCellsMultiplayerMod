@@ -22,6 +22,9 @@ namespace DeadCellsMultiplayerMod
         public const string EnvHostSteamId = "DCCM_STEAM_P2P_HOST_STEAM_ID";
         public const string EnvCommandPipe = "DCCM_STEAM_P2P_COMMAND_PIPE";
         public const string EnvEventPipe = "DCCM_STEAM_P2P_EVENT_PIPE";
+        public const string EnvHostPort = "DCCM_STEAM_P2P_HOST_PORT";
+        public const string EnvHostIp = "DCCM_STEAM_P2P_HOST_IP";
+        public const string EnvDebugP2P = "DCCM_STEAM_P2P_DEBUG";
 
         // Reuse SteamConnect bootstrap error path to capture startup failures before pipes are ready.
         public const string EnvBootstrapResponsePath = "DCCM_STEAM_CONNECT_RESPONSE_PATH";
@@ -55,9 +58,13 @@ namespace DeadCellsMultiplayerMod
         private readonly object _commandSync = new();
         private readonly ConcurrentQueue<SteamP2PWorkerPacket> _packets = new();
         private readonly ConcurrentQueue<string> _warnings = new();
+        private readonly ConcurrentQueue<ulong> _sessionFailSteamIds = new();
         private readonly CancellationTokenSource _readerCts = new();
         private readonly Task _readerTask;
         private volatile bool _disposed;
+
+        internal SteamConnect.HostLobbyResult? HostLobbyResult { get; }
+        internal ulong LocalSteamId { get; }
 
         private SteamP2PWorkerBridge(
             Process process,
@@ -65,7 +72,9 @@ namespace DeadCellsMultiplayerMod
             NamedPipeServerStream eventPipe,
             StreamWriter commandWriter,
             StreamReader eventReader,
-            string bootstrapResponsePath)
+            string bootstrapResponsePath,
+            SteamConnect.HostLobbyResult? hostLobbyResult,
+            ulong localSteamId)
         {
             _process = process;
             _commandPipe = commandPipe;
@@ -73,6 +82,8 @@ namespace DeadCellsMultiplayerMod
             _commandWriter = commandWriter;
             _eventReader = eventReader;
             _bootstrapResponsePath = bootstrapResponsePath;
+            HostLobbyResult = hostLobbyResult;
+            LocalSteamId = localSteamId;
             _readerTask = Task.Run(() => EventReaderLoop(_readerCts.Token));
         }
 
@@ -94,7 +105,7 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
-        public static bool TryStart(NetRole role, CSteamID hostSteamId, out SteamP2PWorkerBridge? bridge, out string error)
+        public static bool TryStart(NetRole role, CSteamID hostSteamId, int hostPort, string? hostIp, out SteamP2PWorkerBridge? bridge, out string error)
         {
             bridge = null;
             error = "Steam P2P worker failed to start";
@@ -132,6 +143,11 @@ namespace DeadCellsMultiplayerMod
                 startInfo.Environment[SteamP2PWorkerEnvironment.EnvCommandPipe] = commandPipeName;
                 startInfo.Environment[SteamP2PWorkerEnvironment.EnvEventPipe] = eventPipeName;
                 startInfo.Environment[SteamP2PWorkerEnvironment.EnvBootstrapResponsePath] = responsePath;
+                if (role == NetRole.Host && hostPort > 0)
+                {
+                    startInfo.Environment[SteamP2PWorkerEnvironment.EnvHostPort] = hostPort.ToString(CultureInfo.InvariantCulture);
+                    startInfo.Environment[SteamP2PWorkerEnvironment.EnvHostIp] = hostIp ?? string.Empty;
+                }
 
                 var assemblyPath = typeof(SteamP2PWorkerBridge).Assembly.Location;
                 if (string.IsNullOrWhiteSpace(assemblyPath))
@@ -176,7 +192,20 @@ namespace DeadCellsMultiplayerMod
                     return false;
                 }
 
-                bridge = new SteamP2PWorkerBridge(process, commandPipe, eventPipe, commandWriter, eventReader, responsePath);
+                SteamConnect.HostLobbyResult? hostLobbyResult = null;
+                if (role == NetRole.Host && ready.LobbyId != 0UL)
+                {
+                    hostLobbyResult = new SteamConnect.HostLobbyResult
+                    {
+                        Success = true,
+                        LobbyId = ready.LobbyId,
+                        HostIp = ready.HostIp ?? string.Empty,
+                        HostPort = ready.HostPort,
+                        PersonaName = ready.PersonaName ?? string.Empty
+                    };
+                }
+
+                bridge = new SteamP2PWorkerBridge(process, commandPipe, eventPipe, commandWriter, eventReader, responsePath, hostLobbyResult, ready.SteamId);
                 commandPipe = null;
                 eventPipe = null;
                 commandWriter = null;
@@ -269,6 +298,12 @@ namespace DeadCellsMultiplayerMod
         {
             return _warnings.TryDequeue(out warning!);
         }
+
+        public bool TryReadSessionFail(out ulong steamId)
+        {
+            return _sessionFailSteamIds.TryDequeue(out steamId);
+        }
+
         public void Dispose()
         {
             if (_disposed)
@@ -366,6 +401,13 @@ namespace DeadCellsMultiplayerMod
 
                         var payload = Encoding.UTF8.GetString(bytes);
                         _packets.Enqueue(new SteamP2PWorkerPacket(evt.SteamId, evt.Channel, payload));
+                        continue;
+                    }
+
+                    if (string.Equals(evt.Type, WorkerEventTypes.SessionFail, StringComparison.Ordinal))
+                    {
+                        if (evt.SteamId != 0UL)
+                            _sessionFailSteamIds.Enqueue(evt.SteamId);
                         continue;
                     }
 
@@ -619,6 +661,39 @@ namespace DeadCellsMultiplayerMod
                 if (!SteamAPI.Init())
                     throw new InvalidOperationException("Steam API init failed in Steam P2P worker");
 
+                var sessionFailQueue = new ConcurrentQueue<WorkerEvent>();
+                using var p2pFailCallback = Callback<P2PSessionConnectFail_t>.Create(data =>
+                {
+                    sessionFailQueue.Enqueue(new WorkerEvent
+                    {
+                        Type = WorkerEventTypes.SessionFail,
+                        Success = false,
+                        SteamId = data.m_steamIDRemote.m_SteamID,
+                        Error = ((EP2PSessionError)data.m_eP2PSessionError).ToString()
+                    });
+                });
+
+                var p2pDebugQueue = new ConcurrentQueue<string>();
+                var p2pDebug = string.Equals(Environment.GetEnvironmentVariable(SteamP2PWorkerEnvironment.EnvDebugP2P), "1", StringComparison.Ordinal);
+
+                // Must accept P2P session requests before ReadP2PPacket can receive data.
+                using var p2pSessionRequestCallback = Callback<P2PSessionRequest_t>.Create(data =>
+                {
+                    var remote = data.m_steamIDRemote;
+                    var isHost = string.Equals(roleText, "host", StringComparison.OrdinalIgnoreCase);
+                    var accepted = false;
+                    if (isHost)
+                    {
+                        try { SteamNetworking.AcceptP2PSessionWithUser(remote); accepted = true; } catch { }
+                    }
+                    else if (hostSteamId != 0UL && remote.m_SteamID == hostSteamId)
+                    {
+                        try { SteamNetworking.AcceptP2PSessionWithUser(remote); accepted = true; } catch { }
+                    }
+                    if (accepted && p2pDebug)
+                        p2pDebugQueue.Enqueue($"P2P accept: role={roleText} remote={remote.m_SteamID}");
+                });
+
                 try
                 {
                     using var commandPipe = new NamedPipeClientStream(".", commandPipeName, PipeDirection.In, PipeOptions.Asynchronous);
@@ -644,31 +719,82 @@ namespace DeadCellsMultiplayerMod
                     var localSteamId = 0UL;
                     try { localSteamId = SteamUser.GetSteamID().m_SteamID; } catch { }
 
-                    WriteEvent(eventWriter, new WorkerEvent
+                    var readyEvt = new WorkerEvent
                     {
                         Type = WorkerEventTypes.Ready,
                         Success = true,
                         Error = string.Empty,
                         SteamId = localSteamId
-                    });
+                    };
 
-                    if (!string.IsNullOrWhiteSpace(bootstrapResponsePath))
+                    ulong hostLobbyId = 0UL;
+                    if (string.Equals(roleText, "host", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var hostPortRaw = Environment.GetEnvironmentVariable(SteamP2PWorkerEnvironment.EnvHostPort);
+                        var hostIp = Environment.GetEnvironmentVariable(SteamP2PWorkerEnvironment.EnvHostIp) ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(hostPortRaw) && int.TryParse(hostPortRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var hostPort) && hostPort > 0)
+                        {
+                            if (SteamConnect.TryCreateLobbyForP2PHost(hostPort, hostIp, out var lobby))
+                            {
+                                hostLobbyId = lobby.LobbyId;
+                                readyEvt.LobbyId = lobby.LobbyId;
+                                readyEvt.LobbyCode = SteamConnect.BuildLobbyCodeFromLobbyId(lobby.LobbyId);
+                                readyEvt.HostIp = lobby.HostIp;
+                                readyEvt.HostPort = lobby.HostPort;
+                                readyEvt.PersonaName = lobby.PersonaName;
+                            }
+                            else
+                            {
+                                readyEvt.Success = false;
+                                readyEvt.Error = lobby.Error ?? "Lobby creation failed";
+                            }
+                        }
+                    }
+
+                    WriteEvent(eventWriter, readyEvt);
+
+                    if (readyEvt.Success && !string.IsNullOrWhiteSpace(bootstrapResponsePath))
                         TryWriteBootstrapResponse(bootstrapResponsePath, true, string.Empty);
 
-                    var receiveBuffer = new byte[SteamMinReceiveBufferBytes];
-                    var running = true;
+                    var receiveBuffer = readyEvt.Success ? new byte[SteamMinReceiveBufferBytes] : Array.Empty<byte>();
+                    var running = readyEvt.Success;
                     while (running)
                     {
                         var hadWork = false;
 
+                        try
+                        {
+                            SteamAPI.RunCallbacks();
+                        }
+                        catch (Exception ex)
+                        {
+                            WriteEvent(eventWriter, new WorkerEvent
+                            {
+                                Type = WorkerEventTypes.Warning,
+                                Error = $"Steam callbacks error: {ex.Message}"
+                            });
+                        }
+
                         while (commands.TryDequeue(out var command))
                         {
                             hadWork = true;
-                            if (!HandleCommand(command, eventWriter, roleText, hostSteamId, ref running))
+                            if (!HandleCommand(command, eventWriter, roleText, hostSteamId, hostLobbyId, ref running))
                                 continue;
                         }
 
-                        if (DrainIncomingPackets(eventWriter, ref receiveBuffer))
+                        while (sessionFailQueue.TryDequeue(out var failEvt))
+                        {
+                            hadWork = true;
+                            WriteEvent(eventWriter, failEvt);
+                        }
+
+                        while (p2pDebugQueue.TryDequeue(out var dbg))
+                        {
+                            hadWork = true;
+                            WriteEvent(eventWriter, new WorkerEvent { Type = WorkerEventTypes.Warning, Error = dbg });
+                        }
+
+                        if (DrainIncomingPackets(eventWriter, ref receiveBuffer, p2pDebug))
                             hadWork = true;
 
                         try
@@ -752,6 +878,7 @@ namespace DeadCellsMultiplayerMod
             StreamWriter eventWriter,
             string roleText,
             ulong hostSteamId,
+            ulong hostLobbyId,
             ref bool running)
         {
             if (command == null || string.IsNullOrWhiteSpace(command.Type))
@@ -759,6 +886,10 @@ namespace DeadCellsMultiplayerMod
 
             if (string.Equals(command.Type, WorkerCommandTypes.Stop, StringComparison.Ordinal))
             {
+                if (hostLobbyId != 0UL)
+                {
+                    try { SteamMatchmaking.LeaveLobby(new CSteamID(hostLobbyId)); } catch { }
+                }
                 running = false;
                 return true;
             }
@@ -768,6 +899,11 @@ namespace DeadCellsMultiplayerMod
                 if (command.SteamId != 0UL)
                 {
                     try { SteamNetworking.CloseP2PSessionWithUser(new CSteamID(command.SteamId)); } catch { }
+                    for (var i = 0; i < 3; i++)
+                    {
+                        try { SteamAPI.RunCallbacks(); } catch { }
+                        Thread.Sleep(10);
+                    }
                 }
                 return true;
             }
@@ -836,7 +972,7 @@ namespace DeadCellsMultiplayerMod
             return true;
         }
 
-        private static bool DrainIncomingPackets(StreamWriter eventWriter, ref byte[] receiveBuffer)
+        private static bool DrainIncomingPackets(StreamWriter eventWriter, ref byte[] receiveBuffer, bool debug = false)
         {
             var hadPackets = false;
 
@@ -868,6 +1004,9 @@ namespace DeadCellsMultiplayerMod
                             continue;
 
                         try { SteamNetworking.AcceptP2PSessionWithUser(remoteSteamId); } catch { }
+
+                        if (debug)
+                            WriteEvent(eventWriter, new WorkerEvent { Type = WorkerEventTypes.Warning, Error = $"P2P packet: ch={channel} size={bytesRead} from={remoteSteamId.m_SteamID}" });
 
                         var payloadBase64 = Convert.ToBase64String(receiveBuffer, 0, (int)bytesRead);
                         WriteEvent(eventWriter, new WorkerEvent

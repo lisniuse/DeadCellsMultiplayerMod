@@ -961,11 +961,11 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
-            var listenerPort = NetRef.ListenerEndpoint?.Port ?? _mpPort;
-            if (!SteamConnect.TryCreateHostLobby(listenerPort, out var lobby))
+            var lobby = NetRef.HostLobbyResult;
+            if (lobby == null || !lobby.Success)
             {
                 StopNetworkFromMenu();
-                _log?.Warning("[NetMod][SteamWorkerError] {Error}", lobby.Error);
+                _log?.Warning("[NetMod][SteamWorkerError] {Error}", lobby?.Error ?? "Lobby creation failed");
                 ShowConnectionErrorPopup(
                     screen,
                     GetText.Instance.GetString("Steam host failed"),
@@ -1034,6 +1034,10 @@ namespace DeadCellsMultiplayerMod
                 _mpIp = endpoint.Address.ToString();
                 _mpPort = endpoint.Port;
                 SaveConfig();
+            }
+            else if (join.HostSteamId != 0UL)
+            {
+                _log?.Information("[NetMod][Steam] Using P2P-only join (no direct IP, hostSteamId={HostSteamId})", join.HostSteamId);
             }
             _steamLobbyId = join.LobbyId;
             _steamLobbyCode = SteamConnect.BuildLobbyCodeFromLobbyId(_steamLobbyId);
@@ -1110,7 +1114,7 @@ namespace DeadCellsMultiplayerMod
                 if (role == NetRole.Host)
                 {
                     if (_menuTransport == ConnectionTransport.Steam)
-                        ModEntry.Instance.StartSteamHostFromMenu();
+                        ModEntry.Instance.StartSteamHostFromMenu(_mpPort);
                     else
                         ModEntry.Instance.StartHostFromMenu(_mpIp, _mpPort);
                     _waitingForHost = false;
@@ -1180,7 +1184,7 @@ namespace DeadCellsMultiplayerMod
 
             if (_menuTransport == ConnectionTransport.Steam)
             {
-                ModEntry.Instance.StartSteamHostFromMenu();
+                ModEntry.Instance.StartSteamHostFromMenu(_mpPort);
             }
             else
             {

@@ -1853,9 +1853,9 @@ namespace DeadCellsMultiplayerMod
             StartClientWithEndpoint(ep);
         }
 
-        public void StartSteamHostFromMenu()
+        public void StartSteamHostFromMenu(int hostPort)
         {
-            StartHostWithSteamTransport();
+            StartHostWithSteamTransport(hostPort);
         }
 
         public void StartSteamClientFromMenu(ulong hostSteamId)
@@ -1929,11 +1929,11 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
-        private void StartHostWithSteamTransport()
+        private void StartHostWithSteamTransport(int hostPort)
         {
             try
             {
-                StartHostCore(() => _net = NetNode.CreateSteamHost(Logger));
+                StartHostCore(() => _net = NetNode.CreateSteamHost(Logger, hostPort));
                 Logger.Information("[NetMod] Host started with Steam P2P transport");
             }
             catch (Exception ex)
@@ -1969,12 +1969,12 @@ namespace DeadCellsMultiplayerMod
                 if (roleBeforeStop == NetRole.Client)
                 {
                     Logger.Information("[NetMod] Disconnecting client from host...");
-                    _net?.SendControlAndFlush("BYE", 260);
+                    _net?.SendControlAndFlush("BYE", 500);
                 }
                 else if (roleBeforeStop == NetRole.Host)
                 {
                     Logger.Information("[NetMod] Disposing host server...");
-                    _net?.SendControlAndFlush("KICK", 320);
+                    _net?.SendControlAndFlush("KICK", 500);
                 }
 
                 _net?.Dispose();

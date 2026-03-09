@@ -17,6 +17,11 @@ namespace DeadCellsMultiplayerMod
         public ulong SteamId { get; set; }
         public int Channel { get; set; }
         public string Payload { get; set; } = string.Empty;
+        public ulong LobbyId { get; set; }
+        public string LobbyCode { get; set; } = string.Empty;
+        public string HostIp { get; set; } = string.Empty;
+        public int HostPort { get; set; }
+        public string PersonaName { get; set; } = string.Empty;
     }
 
     internal static class WorkerCommandTypes
@@ -30,6 +35,7 @@ namespace DeadCellsMultiplayerMod
     {
         public const string Ready = "ready";
         public const string Packet = "packet";
+        public const string SessionFail = "sessionFail";
         public const string Warning = "warn";
         public const string Error = "error";
     }
