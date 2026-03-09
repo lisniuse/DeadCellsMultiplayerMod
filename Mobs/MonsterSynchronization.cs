@@ -294,6 +294,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!IsSyncMob(mob))
                 return;
 
+            ScaleMobHpForMultiplayer(mob);
+
             TryGetMobSyncId(mob, out _);
 
             lock (Sync)
@@ -4199,6 +4201,36 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             catch
             {
                 return false;
+            }
+        }
+
+        /// <summary>Scale mob HP for multiplayer: +0.5 per player for regular mobs, +2 per player for bosses.</summary>
+        private static void ScaleMobHpForMultiplayer(Mob mob)
+        {
+            if (mob == null)
+                return;
+
+            var net = GameMenu.NetRef;
+            var playerCount = (net != null && net.IsAlive) ? (1 + NetNode.ConnectedClientCount) : 1;
+            if (playerCount <= 1)
+                return;
+
+            try
+            {
+                var maxLife = System.Math.Max(1, mob.maxLife);
+                var life = mob.life;
+                var mult = IsBossMob(mob)
+                    ? (1 + (playerCount - 1) * 2)   // bosses: 1p=1x, 2p=2x, 3p=3x
+                    : (1 + (playerCount - 1) * 0.5); // regular: 1p=1x, 2p=1.5x, 3p=2x
+
+                var newMaxLife = System.Math.Max(1, (int)System.Math.Round(maxLife * mult));
+                var newLife = System.Math.Clamp((int)System.Math.Round(life * mult), 0, newMaxLife);
+                mob.maxLife = newMaxLife;
+                mob.life = newLife;
+            }
+            catch
+            {
+                // ignore
             }
         }
     }
