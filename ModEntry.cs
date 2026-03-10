@@ -51,6 +51,9 @@ namespace DeadCellsMultiplayerMod
         private bool _ready;
         private static bool s_hooksInstalled;
         private static IDisposable? s_steamOverlayJoinCallback;
+        private static bool s_steamOverlayCallbackPending;
+        private static int s_steamOverlayCallbackRetryCount;
+        private const int SteamOverlayCallbackMaxRetries = 120;
         private NetRole _netRole = NetRole.None;
         public static NetNode? _net;
 
@@ -304,7 +307,54 @@ namespace DeadCellsMultiplayerMod
         {
             _ready = true;
             GameMenu.SetRole(NetRole.None);
-            TryRegisterSteamOverlayJoinCallback();
+            s_steamOverlayCallbackPending = true;
+            s_steamOverlayCallbackRetryCount = 0;
+            TryParseConnectLobbyFromCommandLine();
+        }
+
+        private static void TryParseConnectLobbyFromCommandLine()
+        {
+            try
+            {
+                var args = Environment.GetCommandLineArgs();
+                for (var i = 0; i < args.Length - 1; i++)
+                {
+                    if (string.Equals(args[i], "+connect_lobby", StringComparison.OrdinalIgnoreCase) &&
+                        ulong.TryParse(args[i + 1], out var lobbyId) && lobbyId > 0)
+                    {
+                        Instance?.Logger.Information("[NetMod][Steam] Launch parameter +connect_lobby detected lobbyId={LobbyId}", lobbyId);
+                        GameMenu.EnqueueMainThread(() => GameMenu.HandleSteamOverlayJoinRequest(lobbyId));
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Instance?.Logger.Debug(ex, "[NetMod] Failed to parse +connect_lobby from command line");
+            }
+        }
+
+        private static void TryDeferredSteamOverlayCallbackRegistration()
+        {
+            if (!s_steamOverlayCallbackPending || s_steamOverlayJoinCallback != null)
+                return;
+            if (s_steamOverlayCallbackRetryCount >= SteamOverlayCallbackMaxRetries)
+            {
+                s_steamOverlayCallbackPending = false;
+                Instance?.Logger.Warning("[NetMod] Steam overlay join callback registration gave up after {Count} retries", SteamOverlayCallbackMaxRetries);
+                return;
+            }
+            s_steamOverlayCallbackRetryCount++;
+            try
+            {
+                s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
+                s_steamOverlayCallbackPending = false;
+                Instance?.Logger.Information("[NetMod] Steam overlay join callback registered (attempt {Attempt})", s_steamOverlayCallbackRetryCount);
+            }
+            catch (Exception ex)
+            {
+                Instance?.Logger.Debug("[NetMod] Steam overlay join callback registration attempt {Attempt} failed: {Error}", s_steamOverlayCallbackRetryCount, ex.Message);
+            }
         }
 
         private static void TryRegisterSteamOverlayJoinCallback()
@@ -703,6 +753,11 @@ namespace DeadCellsMultiplayerMod
         private void hook_boot_update(Hook_Boot.orig_update orig, Boot self, double dt)
         {
             orig(self, dt);
+            if (_ready)
+            {
+                TryRunSteamCallbacks();
+                TryDeferredSteamOverlayCallbackRegistration();
+            }
             GameMenu.ProcessMainThreadQueue();
             GameMenu.HandleTextInputClipboardShortcuts();
             _ghost?.UpdateLabels();
@@ -890,6 +945,7 @@ namespace DeadCellsMultiplayerMod
         {
             if (!_ready) return;
             TryRunSteamCallbacks();
+            TryDeferredSteamOverlayCallbackRegistration();
             GameMenu.ProcessMainThreadQueue();
             GameMenu.TickMenu(dt);
             DetectAndSendBossCine();
@@ -2132,6 +2188,11 @@ namespace DeadCellsMultiplayerMod
 
         private void StartHostWithSteamTransport(int hostPort)
         {
+            if (!_ready)
+            {
+                Logger.Warning("[NetMod] Steam host start rejected: OnGameEndInit not yet run");
+                return;
+            }
             try
             {
                 StartHostCore(() => _net = NetNode.CreateSteamHost(Logger, hostPort));
@@ -2148,6 +2209,11 @@ namespace DeadCellsMultiplayerMod
 
         private void StartClientWithSteamTransport(ulong hostSteamId)
         {
+            if (!_ready)
+            {
+                Logger.Warning("[NetMod] Steam client start rejected: OnGameEndInit not yet run");
+                return;
+            }
             try
             {
                 StartClientCore(() => _net = NetNode.CreateSteamClient(Logger, hostSteamId));

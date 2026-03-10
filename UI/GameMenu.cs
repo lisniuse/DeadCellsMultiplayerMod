@@ -53,6 +53,7 @@ namespace DeadCellsMultiplayerMod
         private static ulong _steamLobbyId;
         private static string _steamLobbyCode = string.Empty;
         private static ulong _steamHostSteamId;
+        private static ulong? _pendingOverlayJoinLobbyId;
         private static bool _waitingForHost;
         internal const int ClientConnectMaxAttempts = 3;
         private static int _clientConnectAttempt;
@@ -588,6 +589,16 @@ namespace DeadCellsMultiplayerMod
             orig(self);
 
             EnsureMainMenuMultiplayerButton(self);
+            ProcessPendingOverlayJoinRequest(self);
+        }
+
+        private static void ProcessPendingOverlayJoinRequest(TitleScreen screen)
+        {
+            if (_pendingOverlayJoinLobbyId is not { } lobbyId)
+                return;
+            _pendingOverlayJoinLobbyId = null;
+            _log?.Information("[NetMod][Steam] Processing queued overlay join request (lobbyId={LobbyId})", lobbyId);
+            HandleSteamOverlayJoinRequest(lobbyId);
         }
 
         private static void TryDisconnectWhenReturningToMainMenu()
@@ -1018,7 +1029,8 @@ namespace DeadCellsMultiplayerMod
             var screen = GetTitleScreen();
             if (screen == null)
             {
-                _log?.Information("[NetMod][Steam] Overlay join request ignored: not at main menu (lobbyId={LobbyId})", lobbyId);
+                _pendingOverlayJoinLobbyId = lobbyId;
+                _log?.Information("[NetMod][Steam] Overlay join request queued: not at main menu (lobbyId={LobbyId})", lobbyId);
                 return;
             }
 
