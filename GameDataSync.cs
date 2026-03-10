@@ -267,8 +267,14 @@ namespace DeadCellsMultiplayerMod
                 try
                 {
                     var main = dc.Main.Class.ME;
-                    if (main?.user != null)
-                        apply(main.user);
+                    var user = main?.user;
+                    if (user != null)
+                    {
+                        apply(user);
+                        var net = GameMenu.NetRef;
+                        if (net != null && net.IsAlive && net.IsHost)
+                            SendBlueprints(user, net);
+                    }
                 }
                 catch
                 {
@@ -347,8 +353,8 @@ namespace DeadCellsMultiplayerMod
                 else
                 {
                     var meta = EnsureItemMeta(user, _origItemMeta ?? user.itemMeta);
-                    meta.itemProgress = EnsureArray(_origItemProgress);
-                    meta.permanentItems = EnsureArray(_origPermanentItems);
+                    meta.itemProgress = MergeItemProgressWithLocalProgress(meta.itemProgress);
+                    meta.permanentItems = MergePermanentItemsWithLocalProgress(meta.permanentItems);
                     user.itemMeta = meta;
                 }
                 swapped = true;
@@ -381,8 +387,8 @@ namespace DeadCellsMultiplayerMod
                 else
                 {
                     var meta = EnsureItemMeta(user, _origItemMeta ?? user.itemMeta);
-                    meta.itemProgress = EnsureArray(_origItemProgress);
-                    meta.permanentItems = EnsureArray(_origPermanentItems);
+                    meta.itemProgress = MergeItemProgressWithLocalProgress(meta.itemProgress);
+                    meta.permanentItems = MergePermanentItemsWithLocalProgress(meta.permanentItems);
                     user.itemMeta = meta;
                 }
                 restored = true;
@@ -1394,6 +1400,82 @@ namespace DeadCellsMultiplayerMod
             var merged = new List<int>(mergedSet);
             merged.Sort();
             return merged;
+        }
+
+        private static ArrayObj MergeItemProgressWithLocalProgress(ArrayObj? currentItemProgress)
+        {
+            var merged = new Dictionary<string, ItemProgress>(StringComparer.Ordinal);
+            var orig = _origItemProgress;
+            if (orig != null)
+            {
+                for (int i = 0; i < orig.length; i++)
+                {
+                    var p = orig.getDyn(i) as ItemProgress;
+                    if (p != null)
+                    {
+                        var id = p.itemId?.ToString();
+                        if (!string.IsNullOrWhiteSpace(id))
+                            merged[id] = p;
+                    }
+                }
+            }
+            if (currentItemProgress != null)
+            {
+                for (int i = 0; i < currentItemProgress.length; i++)
+                {
+                    var curr = currentItemProgress.getDyn(i) as ItemProgress;
+                    if (curr == null)
+                        continue;
+                    var id = curr.itemId?.ToString();
+                    if (string.IsNullOrWhiteSpace(id))
+                        continue;
+                    if (!merged.TryGetValue(id, out var origP) || origP == null)
+                    {
+                        merged[id] = curr;
+                        continue;
+                    }
+                    var currUnlocked = curr.unlocked;
+                    var currInvested = ToInt(curr.investedCells);
+                    var currIsNew = curr.isNew;
+                    var origUnlocked = origP.unlocked;
+                    var origInvested = ToInt(origP.investedCells);
+                    var origIsNew = origP.isNew;
+                    if (currUnlocked && !origUnlocked || currInvested > origInvested || currIsNew && !origIsNew)
+                        merged[id] = curr;
+                }
+            }
+            var arr = ArrayUtils.CreateDyn();
+            foreach (var p in merged.Values)
+                arr.array.pushDyn(p);
+            return (ArrayObj)arr.array;
+        }
+
+        private static ArrayObj MergePermanentItemsWithLocalProgress(ArrayObj? currentPermanentItems)
+        {
+            var merged = new HashSet<string>(StringComparer.Ordinal);
+            var orig = _origPermanentItems;
+            if (orig != null)
+            {
+                for (int i = 0; i < orig.length; i++)
+                {
+                    var id = orig.getDyn(i)?.ToString();
+                    if (!string.IsNullOrWhiteSpace(id))
+                        merged.Add(id);
+                }
+            }
+            if (currentPermanentItems != null)
+            {
+                for (int i = 0; i < currentPermanentItems.length; i++)
+                {
+                    var id = currentPermanentItems.getDyn(i)?.ToString();
+                    if (!string.IsNullOrWhiteSpace(id))
+                        merged.Add(id);
+                }
+            }
+            var arr = ArrayUtils.CreateDyn();
+            foreach (var id in merged)
+                arr.array.pushDyn(id.AsHaxeString());
+            return (ArrayObj)arr.array;
         }
 
         private static bool TryParseCountersPayloadV4(

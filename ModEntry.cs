@@ -584,6 +584,8 @@ namespace DeadCellsMultiplayerMod
                 {
                     GameDataSync.CaptureSessionStory(u);
                     GameDataSync.CaptureOriginalUserData(u, allowReplaceWhenBetter: true);
+                    if (_net != null && _net.IsAlive)
+                        GameDataSync.SendBlueprints(u, _net);
                 }
 
                 var swapped = u != null && GameDataSync.RestoreOriginalUserState(u, clearRemote: false);
