@@ -53,7 +53,7 @@ namespace DeadCellsMultiplayerMod
         private static IDisposable? s_steamOverlayJoinCallback;
         private static bool s_steamOverlayCallbackPending;
         private static int s_steamOverlayCallbackRetryCount;
-        private const int SteamOverlayCallbackMaxRetries = 120;
+        private const int SteamOverlayCallbackMaxRetries = 600;
         private NetRole _netRole = NetRole.None;
         public static NetNode? _net;
 
@@ -347,13 +347,31 @@ namespace DeadCellsMultiplayerMod
             s_steamOverlayCallbackRetryCount++;
             try
             {
+                SteamConnect.PrepareSteamNativePathForRuntime();
+                if (!SteamAPI.Init())
+                {
+                    if (s_steamOverlayCallbackRetryCount == 1 || s_steamOverlayCallbackRetryCount % 60 == 0)
+                        Instance?.Logger.Debug("[NetMod] Steam overlay: SteamAPI.Init()=false (attempt {Attempt}). Trying callback without Init (game may have Steam).", s_steamOverlayCallbackRetryCount);
+                    try
+                    {
+                        s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
+                        s_steamOverlayCallbackPending = false;
+                        Instance?.Logger.Information("[NetMod] Steam overlay join callback registered (game had Steam initialized)");
+                        return;
+                    }
+                    catch
+                    {
+                        return;
+                    }
+                }
                 s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
                 s_steamOverlayCallbackPending = false;
                 Instance?.Logger.Information("[NetMod] Steam overlay join callback registered (attempt {Attempt})", s_steamOverlayCallbackRetryCount);
             }
             catch (Exception ex)
             {
-                Instance?.Logger.Debug("[NetMod] Steam overlay join callback registration attempt {Attempt} failed: {Error}", s_steamOverlayCallbackRetryCount, ex.Message);
+                if (s_steamOverlayCallbackRetryCount == 1 || s_steamOverlayCallbackRetryCount % 60 == 0)
+                    Instance?.Logger.Debug("[NetMod] Steam overlay callback registration attempt {Attempt} failed: {Error}", s_steamOverlayCallbackRetryCount, ex.Message);
             }
         }
 
@@ -406,6 +424,8 @@ namespace DeadCellsMultiplayerMod
             InteractionSync interactionSync = new InteractionSync(this);
             ConnectionUI.Initialize(this);
             GameMenu.Initialize(Logger);
+            s_steamOverlayCallbackPending = true;
+            s_steamOverlayCallbackRetryCount = 0;
             EventSystem.BroadcastEvent<IOnAdvancedModuleInitializing, ModEntry>(this);
         }
 
@@ -744,11 +764,8 @@ namespace DeadCellsMultiplayerMod
         private void hook_boot_update(Hook_Boot.orig_update orig, Boot self, double dt)
         {
             orig(self, dt);
-            if (_ready)
-            {
-                TryRunSteamCallbacks();
-                TryDeferredSteamOverlayCallbackRegistration();
-            }
+            TryRunSteamCallbacks();
+            TryDeferredSteamOverlayCallbackRegistration();
             GameMenu.ProcessMainThreadQueue();
             GameMenu.HandleTextInputClipboardShortcuts();
             _ghost?.UpdateLabels();
