@@ -65,3 +65,15 @@ public readonly struct InterVineLadderEvent
         Y = y;
     }
 }
+
+public readonly struct InterTeleportEvent
+{
+    public readonly double X;
+    public readonly double Y;
+
+    public InterTeleportEvent(double x, double y)
+    {
+        X = x;
+        Y = y;
+    }
+}

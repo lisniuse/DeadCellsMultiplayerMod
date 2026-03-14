@@ -25,6 +25,7 @@ public class InteractionSync :
     private const double PlatePosTolerance = 8.0;
     private const double ChestPosTolerance = 16.0;
     private const double DoorPosTolerance = 16.0;
+    private const double TeleportPosTolerance = 48.0;
     private const double DoorProximityRadiusPx = 100.0;
     private static readonly double DoorProximityRadiusSq = DoorProximityRadiusPx * DoorProximityRadiusPx;
     private const int DoorCloseDelayMs = 1000;
@@ -36,6 +37,7 @@ public class InteractionSync :
     private bool _applyingRemoteChestEvents;
     private bool _applyingRemotePressurePlateEvents;
     private bool _applyingRemoteVineLadderEvents;
+    private bool _applyingRemoteTeleportEvents;
 
     public InteractionSync(ModEntry entry)
     {
@@ -57,6 +59,7 @@ public class InteractionSync :
         // Don't hook executeOn - it fires every frame when standing, causing infinite event flood
         Hook_TreasureChest.open += Hook_TreasureChest_open;
         Hook_VineLadder.activate += Hook_VineLadder_activate;
+        Hook_Teleport.open += Hook_Teleport_open;
     }
 
     private void Hook_Door_init(Hook_Door.orig_init orig, Door self)
@@ -160,6 +163,19 @@ public class InteractionSync :
         TrySendInteractEvent(self, (x, y) => GameMenu.NetRef!.SendInterVineLadder(x, y), "VineLadder");
     }
 
+    private void Hook_Teleport_open(Hook_Teleport.orig_open orig, Teleport self)
+    {
+        orig(self);
+        TrySendTeleportEvent(self);
+    }
+
+    private void TrySendTeleportEvent(Teleport self)
+    {
+        if (_applyingRemoteTeleportEvents)
+            return;
+        TrySendInteractEvent(self, (x, y) => GameMenu.NetRef!.SendInterTeleport(x, y), "Teleport");
+    }
+
     private static (double x, double y) GetEntityPixelPos(Entity e)
     {
         if (e?.spr == null)
@@ -229,6 +245,11 @@ public class InteractionSync :
         if (net.TryConsumeInterVineLadderEvents(out var vineLadderEvents))
         {
             ApplyRemoteVineLadderEvents(vineLadderEvents);
+        }
+
+        if (net.TryConsumeInterTeleportEvents(out var teleportEvents))
+        {
+            ApplyRemoteTeleportEvents(teleportEvents);
         }
 
         if (net.IsHost)
@@ -447,6 +468,41 @@ public class InteractionSync :
         }
     }
 
+    private void ApplyRemoteTeleportEvents(List<InterTeleportEvent> events)
+    {
+        var level = ModEntry.me?._level;
+        if (level?.entities == null || events == null || events.Count == 0)
+            return;
+
+        _applyingRemoteTeleportEvents = true;
+        try
+        {
+            foreach (var ev in events)
+            {
+                var teleport = FindTeleportByPos(level, ev.X, ev.Y);
+                if (teleport == null)
+                {
+                    _log.Debug("[InteractionSync] Teleport not found at x={X} y={Y}", ev.X, ev.Y);
+                    continue;
+                }
+
+                try
+                {
+                    teleport.open();
+                    _log.Debug("[InteractionSync] Teleport opened at x={X} y={Y}", ev.X, ev.Y);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "[InteractionSync] Apply teleport event failed x={X} y={Y}", ev.X, ev.Y);
+                }
+            }
+        }
+        finally
+        {
+            _applyingRemoteTeleportEvents = false;
+        }
+    }
+
     private void ApplyRemotePressurePlateEvents(List<InterPressurePlateEvent> events)
     {
         var level = ModEntry.me?._level;
@@ -526,6 +582,48 @@ public class InteractionSync :
     private static VineLadder? FindVineLadderByPos(Level level, double x, double y)
     {
         return FindInteractByPos<VineLadder>(level, x, y, PlatePosTolerance);
+    }
+
+    private Teleport? FindTeleportByPos(Level level, double x, double y)
+    {
+        var byPos = FindInteractByPos<Teleport>(level, x, y, TeleportPosTolerance);
+        if (byPos != null)
+            return byPos;
+        var nearest = FindNearestByPos<Teleport>(level, x, y, 200.0 * 200.0);
+        if (nearest != null)
+            return nearest;
+        return FindTeleportInTriggers(level, x, y);
+    }
+
+    private static Teleport? FindTeleportInTriggers(Level level, double x, double y)
+    {
+        try
+        {
+            var triggers = (level as dynamic)?.triggers;
+            if (triggers == null)
+                return null;
+            var len = (int)(triggers.length ?? 0);
+            Teleport? nearest = null;
+            double nearestSq = TeleportPosTolerance * TeleportPosTolerance * 4;
+            for (var i = 0; i < len; i++)
+            {
+                var t = triggers.getDyn(i) as Teleport;
+                if (t?.spr == null) continue;
+                var dx = t.spr.x - x;
+                var dy = t.spr.y - y;
+                var dSq = dx * dx + dy * dy;
+                if (dSq < nearestSq)
+                {
+                    nearestSq = dSq;
+                    nearest = t;
+                }
+            }
+            return nearest;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static PressurePlate? FindPressurePlateByPos(Level level, double x, double y)
