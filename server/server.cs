@@ -498,6 +498,7 @@ public sealed partial class NetNode : IDisposable
     private readonly List<InterElevatorEvent> _pendingInterElevatorEvents = new();
     private readonly List<InterPressurePlateEvent> _pendingInterPressurePlateEvents = new();
     private readonly List<InterTreasureChestEvent> _pendingInterTreasureChestEvents = new();
+    private readonly List<InterVineLadderEvent> _pendingInterVineLadderEvents = new();
     private int _primaryRemoteId;
 
     private readonly IPEndPoint _bindEp;   // host bind
@@ -1751,6 +1752,23 @@ public sealed partial class NetNode : IDisposable
             return true;
         }
 
+        if (line.StartsWith("INTERVINELADDER|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["INTERVINELADDER|".Length..];
+            if (TryParseInterVineLadderPayload(payload, out var ev))
+            {
+                lock (_sync)
+                {
+                    _pendingInterVineLadderEvents.Add(ev);
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = $"INTERVINELADDER|{ev.X.ToString(CultureInfo.InvariantCulture)}|{ev.Y.ToString(CultureInfo.InvariantCulture)}\n";
+            }
+            return true;
+        }
+
         if (line.StartsWith("MOBATK|", StringComparison.OrdinalIgnoreCase))
         {
             if (_role == NetRole.Host)
@@ -1901,6 +1919,7 @@ public sealed partial class NetNode : IDisposable
             _pendingInterElevatorEvents.Clear();
             _pendingInterPressurePlateEvents.Clear();
             _pendingInterTreasureChestEvents.Clear();
+            _pendingInterVineLadderEvents.Clear();
         }
         if (_useSteamTransport)
         {
@@ -2617,6 +2636,25 @@ public sealed partial class NetNode : IDisposable
             return false;
 
         ev = new InterTreasureChestEvent(x, y);
+        return true;
+    }
+
+    private static bool TryParseInterVineLadderPayload(string payload, out InterVineLadderEvent ev)
+    {
+        ev = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|');
+        if (parts.Length < 2)
+            return false;
+
+        if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            return false;
+        if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            return false;
+
+        ev = new InterVineLadderEvent(x, y);
         return true;
     }
 
@@ -3797,6 +3835,16 @@ public sealed partial class NetNode : IDisposable
         SendRaw($"INTERCHEST|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
     }
 
+    public void SendInterVineLadder(double x, double y)
+    {
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+
+        SendRaw($"INTERVINELADDER|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
+    }
+
     private void SendRaw(string payload)
     {
         var line = payload.EndsWith('\n') ? payload : payload + "\n";
@@ -4181,6 +4229,22 @@ public sealed partial class NetNode : IDisposable
 
             events = new List<InterTreasureChestEvent>(_pendingInterTreasureChestEvents);
             _pendingInterTreasureChestEvents.Clear();
+            return events.Count > 0;
+        }
+    }
+
+    public bool TryConsumeInterVineLadderEvents(out List<InterVineLadderEvent> events)
+    {
+        lock (_sync)
+        {
+            if (_pendingInterVineLadderEvents.Count == 0)
+            {
+                events = new List<InterVineLadderEvent>();
+                return false;
+            }
+
+            events = new List<InterVineLadderEvent>(_pendingInterVineLadderEvents);
+            _pendingInterVineLadderEvents.Clear();
             return events.Count > 0;
         }
     }

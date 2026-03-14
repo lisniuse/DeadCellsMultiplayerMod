@@ -35,6 +35,7 @@ public class InteractionSync :
     private bool _applyingRemoteDoorEvents;
     private bool _applyingRemoteChestEvents;
     private bool _applyingRemotePressurePlateEvents;
+    private bool _applyingRemoteVineLadderEvents;
 
     public InteractionSync(ModEntry entry)
     {
@@ -55,6 +56,7 @@ public class InteractionSync :
         Hook_PressurePlate.trigger += Hook_PressurePlate_trigger;
         // Don't hook executeOn - it fires every frame when standing, causing infinite event flood
         Hook_TreasureChest.open += Hook_TreasureChest_open;
+        Hook_VineLadder.activate += Hook_VineLadder_activate;
     }
 
     private void Hook_Door_init(Hook_Door.orig_init orig, Door self)
@@ -145,6 +147,19 @@ public class InteractionSync :
         TrySendInteractEvent(self, (x, y) => GameMenu.NetRef!.SendInterTreasureChest(x, y), "TreasureChest");
     }
 
+    private void Hook_VineLadder_activate(Hook_VineLadder.orig_activate orig, VineLadder self)
+    {
+        orig(self);
+        TrySendVineLadderEvent(self);
+    }
+
+    private void TrySendVineLadderEvent(VineLadder self)
+    {
+        if (_applyingRemoteVineLadderEvents)
+            return;
+        TrySendInteractEvent(self, (x, y) => GameMenu.NetRef!.SendInterVineLadder(x, y), "VineLadder");
+    }
+
     private static (double x, double y) GetEntityPixelPos(Entity e)
     {
         if (e?.spr == null)
@@ -209,6 +224,11 @@ public class InteractionSync :
         if (net.TryConsumeInterTreasureChestEvents(out var chestEvents))
         {
             ApplyRemoteTreasureChestEvents(chestEvents);
+        }
+
+        if (net.TryConsumeInterVineLadderEvents(out var vineLadderEvents))
+        {
+            ApplyRemoteVineLadderEvents(vineLadderEvents);
         }
 
         if (net.IsHost)
@@ -396,6 +416,37 @@ public class InteractionSync :
         }
     }
 
+    private void ApplyRemoteVineLadderEvents(List<InterVineLadderEvent> events)
+    {
+        var level = ModEntry.me?._level;
+        if (level?.entities == null || events == null || events.Count == 0)
+            return;
+
+        _applyingRemoteVineLadderEvents = true;
+        try
+        {
+            foreach (var ev in events)
+            {
+                var vineLadder = FindVineLadderByPos(level, ev.X, ev.Y);
+                if (vineLadder == null)
+                    continue;
+
+                try
+                {
+                    vineLadder.activate();
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "[InteractionSync] Apply vine ladder event failed x={X} y={Y}", ev.X, ev.Y);
+                }
+            }
+        }
+        finally
+        {
+            _applyingRemoteVineLadderEvents = false;
+        }
+    }
+
     private void ApplyRemotePressurePlateEvents(List<InterPressurePlateEvent> events)
     {
         var level = ModEntry.me?._level;
@@ -470,6 +521,11 @@ public class InteractionSync :
     private static Elevator? FindElevatorByPos(Level level, double x, double y)
     {
         return FindInteractByPos<Elevator>(level, x, y);
+    }
+
+    private static VineLadder? FindVineLadderByPos(Level level, double x, double y)
+    {
+        return FindInteractByPos<VineLadder>(level, x, y, PlatePosTolerance);
     }
 
     private static PressurePlate? FindPressurePlateByPos(Level level, double x, double y)

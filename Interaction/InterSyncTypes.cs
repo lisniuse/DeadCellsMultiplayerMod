@@ -53,3 +53,15 @@ public readonly struct InterTreasureChestEvent
         Y = y;
     }
 }
+
+public readonly struct InterVineLadderEvent
+{
+    public readonly double X;
+    public readonly double Y;
+
+    public InterVineLadderEvent(double x, double y)
+    {
+        X = x;
+        Y = y;
+    }
+}
