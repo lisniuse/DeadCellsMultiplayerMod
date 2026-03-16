@@ -118,22 +118,31 @@ namespace DeadCellsMultiplayerMod
             ModEntry.kingInitialized = false;
             ModEntry._ghost = null;
             var net = GameMenu.NetRef;
+            var shouldSynchronizeSeed = ShouldSynchronizeRunSeed(gdata);
 
             if (net == null || !net.IsAlive)
                 RestoreOriginalUserState(self, true);
 
             if (net != null && net.IsHost)
             {
-                Seed = GameMenu.ForceGenerateServerSeed("NewGame_hook");
+                if (shouldSynchronizeSeed)
+                    Seed = GameMenu.ForceGenerateServerSeed("NewGame_hook");
+                else
+                    Seed = lvl;
                 SendBossRune(self, net);
                 SendSerializerSync(net);
-                net.SendSeed(Seed);
+                if (shouldSynchronizeSeed)
+                    net.SendSeed(Seed);
             }
             else if (net != null)
             {
-                if (GameMenu.TryGetRemoteSeed(out var remoteSeed))
+                if (shouldSynchronizeSeed && GameMenu.TryGetRemoteSeed(out var remoteSeed))
                 {
                     Seed = remoteSeed;
+                }
+                else
+                {
+                    Seed = lvl;
                 }
                 if (TryGetRemoteBossRune(out var bossRune))
                 {
@@ -168,6 +177,11 @@ namespace DeadCellsMultiplayerMod
                 if (!string.IsNullOrEmpty(_remoteCountersPayload))
                     ReceiveCounters(_remoteCountersPayload, self);
             }
+        }
+
+        private static bool ShouldSynchronizeRunSeed(LaunchMode? launch)
+        {
+            return launch is LaunchMode.NewGame;
         }
 
         public static void ReceiveBlueprints(string payload, User? target = null)
