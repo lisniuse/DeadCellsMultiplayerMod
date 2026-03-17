@@ -4,6 +4,7 @@ using ModCore.Events.Interfaces.Game.Hero;
 using ModCore.Mods;
 using System.Diagnostics;
 using System.Net;
+using System.Threading;
 using dc.en;
 using dc.en.inter;
 using dc.pr;
@@ -54,6 +55,7 @@ namespace DeadCellsMultiplayerMod
         private static IDisposable? s_steamOverlayJoinCallback;
         private static IDisposable? s_steamRichPresenceJoinCallback;
         private static bool s_steamOverlayCallbackPending;
+        private static Timer? s_steamCallbackPumpTimer;
         private static int s_steamOverlayCallbackRetryCount;
         private const int SteamOverlayCallbackMaxRetries = 600;
         private NetRole _netRole = NetRole.None;
@@ -164,11 +166,13 @@ namespace DeadCellsMultiplayerMod
         {
             "BeholderPit", "Throne", "DeathArena", "DookuArena", "QueenArena", "Observatory",
             "SwampHeart", "CastleAlchemy", "LighthouseTop", "LighthouseBottom", "Giant",
-            "DookuCastle", "RichterCastle", "BossRushZone"
+            "DookuCastle", "RichterCastle", "BossRushZone", "Bridge", "TopClockTower"
         };
         private string? _lastBossCineSentLevelId;
         private long _lastBossCineSentTick;
         private const double BossCineSendCooldownSeconds = 2.0;
+        private readonly Dictionary<string, long> _pendingBossCineApplyByLevel = new(StringComparer.OrdinalIgnoreCase);
+        private const double BossCineApplyPendingTtlSeconds = 20.0;
 
 
         void IOnAfterLoadingCDB.OnAfterLoadingCDB(dc._Data_ cdb)
@@ -359,6 +363,7 @@ namespace DeadCellsMultiplayerMod
                         s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
                         s_steamRichPresenceJoinCallback = Callback<GameRichPresenceJoinRequested_t>.Create(OnGameRichPresenceJoinRequested);
                         s_steamOverlayCallbackPending = false;
+                        StartSteamCallbackPumpTimer();
                         Instance?.Logger.Information("[NetMod] Steam overlay join callbacks registered (game had Steam initialized)");
                         return;
                     }
@@ -372,6 +377,7 @@ namespace DeadCellsMultiplayerMod
                 s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
                 s_steamRichPresenceJoinCallback = Callback<GameRichPresenceJoinRequested_t>.Create(OnGameRichPresenceJoinRequested);
                 s_steamOverlayCallbackPending = false;
+                StartSteamCallbackPumpTimer();
                 Instance?.Logger.Information("[NetMod] Steam overlay join callbacks registered (attempt {Attempt})", s_steamOverlayCallbackRetryCount);
             }
             catch (Exception ex)
@@ -382,6 +388,16 @@ namespace DeadCellsMultiplayerMod
                     WriteOverlayCallbackFailedDiagnostics(ex);
                 }
             }
+        }
+
+        private static void WriteOverlayJoinDiagnostic(string callbackType, string data)
+        {
+            try
+            {
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dccm_overlay_join_fired.txt");
+                System.IO.File.WriteAllText(path, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z | {callbackType} | {data}");
+            }
+            catch { }
         }
 
         private static void WriteOverlayCallbackFailedDiagnostics(Exception ex)
@@ -420,16 +436,20 @@ namespace DeadCellsMultiplayerMod
 
         private static void OnGameLobbyJoinRequested(GameLobbyJoinRequested_t data)
         {
+            WriteOverlayJoinDiagnostic("GameLobbyJoinRequested_t", data.m_steamIDLobby.m_SteamID.ToString());
+            Instance?.Logger.Information("[NetMod][Steam] GameLobbyJoinRequested_t callback fired");
             var lobbyId = data.m_steamIDLobby.m_SteamID;
             if (lobbyId == 0UL)
                 return;
             Instance?.Logger.Information("[NetMod][Steam] Overlay lobby join requested lobbyId={LobbyId}", lobbyId);
-            GameMenu.EnqueueMainThread(() => GameMenu.HandleSteamOverlayJoinRequest(lobbyId));
+            EnqueueAndProcessOverlayJoin(lobbyId);
         }
 
         private static void OnGameRichPresenceJoinRequested(GameRichPresenceJoinRequested_t data)
         {
-            var connect = data.m_rgchConnect;
+            var connect = data.m_rgchConnect ?? string.Empty;
+            WriteOverlayJoinDiagnostic("GameRichPresenceJoinRequested_t", connect);
+            Instance?.Logger.Information("[NetMod][Steam] GameRichPresenceJoinRequested_t callback fired");
             if (string.IsNullOrWhiteSpace(connect))
             {
                 Instance?.Logger.Information("[NetMod][Steam] Rich Presence join requested but connect string is empty (host may not have set Rich Presence)");
@@ -442,6 +462,11 @@ namespace DeadCellsMultiplayerMod
                 Instance?.Logger.Warning("[NetMod][Steam] Could not parse lobby ID from connect string: {Connect}", connect);
                 return;
             }
+            EnqueueAndProcessOverlayJoin(lobbyId);
+        }
+
+        private static void EnqueueAndProcessOverlayJoin(ulong lobbyId)
+        {
             GameMenu.EnqueueMainThread(() => GameMenu.HandleSteamOverlayJoinRequest(lobbyId));
         }
 
@@ -479,6 +504,39 @@ namespace DeadCellsMultiplayerMod
         {
             TryRunSteamCallbacks();
             TryDeferredSteamOverlayCallbackRegistration();
+        }
+
+        /// <summary>
+        /// Background timer pumps Steam callbacks so overlay Join works even when game loop is paused (overlay open).
+        /// Callbacks run on timer thread; we EnqueueMainThread for game ops.
+        /// </summary>
+        private static void StartSteamCallbackPumpTimer()
+        {
+            if (s_steamCallbackPumpTimer != null)
+                return;
+            try
+            {
+                s_steamCallbackPumpTimer = new Timer(
+                    _ =>
+                    {
+                        try
+                        {
+                            SteamAPI.RunCallbacks();
+                        }
+                        catch
+                        {
+                            // Ignore - Steam may not be ready
+                        }
+                    },
+                    null,
+                    TimeSpan.FromMilliseconds(100),
+                    TimeSpan.FromMilliseconds(100));
+                Instance?.Logger.Debug("[NetMod] Steam callback pump timer started");
+            }
+            catch (Exception ex)
+            {
+                Instance?.Logger.Warning(ex, "[NetMod] Failed to start Steam callback pump timer");
+            }
         }
 
         public override void Initialize()
@@ -1085,23 +1143,65 @@ namespace DeadCellsMultiplayerMod
         private void ApplyReceivedBossCine()
         {
             var net = _net;
-            if (net == null || !net.TryConsumeBossCineLevelIds(out var levelIds) || levelIds.Count == 0)
-                return;
-
-            var currentLevelId = string.IsNullOrWhiteSpace(levelId) ? null : levelId.Trim();
-            if (string.IsNullOrEmpty(currentLevelId))
-                return;
-
-            foreach (var receivedLevelId in levelIds)
+            if (net == null || !net.IsAlive)
             {
-                if (!string.Equals(receivedLevelId, currentLevelId, StringComparison.OrdinalIgnoreCase))
+                _pendingBossCineApplyByLevel.Clear();
+                return;
+            }
+
+            if (net.TryConsumeBossCineLevelIds(out var levelIds) && levelIds.Count > 0)
+            {
+                var defaultExpiry = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossCineApplyPendingTtlSeconds);
+                for (int i = 0; i < levelIds.Count; i++)
+                {
+                    var receivedLevelId = levelIds[i];
+                    if (string.IsNullOrWhiteSpace(receivedLevelId))
+                        continue;
+
+                    var normalized = receivedLevelId.Trim();
+                    if (normalized.Length == 0)
+                        continue;
+
+                    var expiry = defaultExpiry;
+                    if (_pendingBossCineApplyByLevel.TryGetValue(normalized, out var oldExpiry) && oldExpiry > expiry)
+                        expiry = oldExpiry;
+
+                    _pendingBossCineApplyByLevel[normalized] = expiry;
+                }
+            }
+
+            if (_pendingBossCineApplyByLevel.Count == 0)
+                return;
+
+            var now = Stopwatch.GetTimestamp();
+            var currentLevelId = string.IsNullOrWhiteSpace(levelId) ? string.Empty : levelId.Trim();
+            List<string>? remove = null;
+            foreach (var kv in _pendingBossCineApplyByLevel)
+            {
+                var pendingLevelId = kv.Key;
+                var expiryTicks = kv.Value;
+                if (now >= expiryTicks)
+                {
+                    (remove ??= new List<string>()).Add(pendingLevelId);
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(currentLevelId) ||
+                    !string.Equals(pendingLevelId, currentLevelId, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                TryTriggerBossCinematic(receivedLevelId);
+                if (TryTriggerBossCinematic(pendingLevelId))
+                    (remove ??= new List<string>()).Add(pendingLevelId);
             }
+
+            if (remove == null || remove.Count == 0)
+                return;
+
+            for (int i = 0; i < remove.Count; i++)
+                _pendingBossCineApplyByLevel.Remove(remove[i]);
         }
 
-        private static void TryTriggerBossCinematic(string levelId)
+        private static bool TryTriggerBossCinematic(string levelId)
         {
             try
             {
@@ -1109,14 +1209,14 @@ namespace DeadCellsMultiplayerMod
                 var hero = game?.hero ?? ModEntry.me;
                 var level = hero?._level;
                 if (game == null || level == null)
-                    return;
+                    return false;
 
                 if (game.curCine != null && !game.curCine.destroyed)
-                    return;
+                    return false;
 
                 var cm = level.cm;
                 if (cm == null)
-                    return;
+                    return false;
                 var cmType = cm.GetType();
                 var playMethod = cmType.GetMethod("play", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(string) }, null)
                     ?? cmType.GetMethod("play", BindingFlags.Public | BindingFlags.Instance, null, System.Type.EmptyTypes, null)
@@ -1128,7 +1228,7 @@ namespace DeadCellsMultiplayerMod
                         playMethod.Invoke(cm, null);
                     else
                         playMethod.Invoke(cm, new object[] { levelId });
-                    return;
+                    return true;
                 }
 
                 var triggerMethod = cmType.GetMethod("triggerBossIntro", BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic, null, System.Type.EmptyTypes, null)
@@ -1137,11 +1237,14 @@ namespace DeadCellsMultiplayerMod
                 if (triggerMethod != null)
                 {
                     triggerMethod.Invoke(cm, null);
+                    return true;
                 }
             }
             catch
             {
             }
+
+            return false;
         }
 
 

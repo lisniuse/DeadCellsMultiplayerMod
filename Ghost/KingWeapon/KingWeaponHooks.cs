@@ -997,11 +997,29 @@ internal static class KingWeaponHooks
             sourceWeapon = null!;
         }
 
+        Entity sourceEntity;
+        try
+        {
+            sourceEntity = attack.source;
+        }
+        catch
+        {
+            sourceEntity = null!;
+        }
+
         if(sourceWeapon != null && KingWeaponSupport.IsKingWeapon(sourceWeapon))
             return true;
 
         if(sourceWeapon is KingWeapon)
             return true;
+
+        if(sourceEntity is KingSkin)
+            return true;
+
+        // sourceItem can remain bound to a stale King source after inventory churn.
+        // Never block trusted local hero hits based on item binding alone.
+        if(!KingWeaponSupport.IsInKingContext && IsAttackFromLocalHero(attack, sourceWeapon, sourceEntity))
+            return false;
 
         InventItem sourceItem;
         try
@@ -1014,19 +1032,6 @@ internal static class KingWeaponHooks
         }
 
         if(sourceItem != null && KingWeaponSupport.TryGetSourceByItem(sourceItem, out var source) && source != null)
-            return true;
-
-        Entity sourceEntity;
-        try
-        {
-            sourceEntity = attack.source;
-        }
-        catch
-        {
-            sourceEntity = null!;
-        }
-
-        if(sourceEntity is KingSkin)
             return true;
 
         return false;
@@ -1056,6 +1061,22 @@ internal static class KingWeaponHooks
         if(sourceWeapon is KingWeapon)
             return true;
 
+        Entity sourceEntity;
+        try
+        {
+            sourceEntity = attack.source;
+        }
+        catch
+        {
+            sourceEntity = null!;
+        }
+
+        if(sourceEntity is KingSkin)
+            return true;
+
+        if(IsAttackFromLocalHero(attack, sourceWeapon, sourceEntity))
+            return false;
+
         InventItem sourceItem;
         try
         {
@@ -1069,17 +1090,50 @@ internal static class KingWeaponHooks
         if(sourceItem != null && KingWeaponSupport.TryGetSourceByItem(sourceItem, out var sourceByItem) && sourceByItem != null)
             return true;
 
-        Entity sourceEntity;
+        return false;
+    }
+
+    private static bool IsAttackFromLocalHero(AttackData? attack, Weapon? sourceWeapon = null, Entity? sourceEntity = null)
+    {
+        if(attack == null)
+            return false;
+
+        var localHero = ModEntry.me;
+        if(localHero == null)
+            return false;
+
+        if(sourceEntity != null && IsSameEntity(sourceEntity, localHero))
+            return true;
+
+        Entity sourceCarrier;
         try
         {
-            sourceEntity = attack.source;
+            sourceCarrier = attack.carrier;
         }
         catch
         {
-            sourceEntity = null!;
+            sourceCarrier = null!;
         }
 
-        return sourceEntity is KingSkin;
+        if(sourceCarrier != null && IsSameEntity(sourceCarrier, localHero))
+            return true;
+
+        if(sourceWeapon == null)
+        {
+            try
+            {
+                sourceWeapon = attack.sourceWeapon;
+            }
+            catch
+            {
+                sourceWeapon = null;
+            }
+        }
+
+        if(sourceWeapon != null && IsSameEntity(sourceWeapon.owner, localHero))
+            return true;
+
+        return false;
     }
 
     private static void TrackKingWeaponMobHit(Mob mob)
