@@ -3,6 +3,7 @@ using System.Diagnostics;
 using dc;
 using dc.en;
 using dc.libs.heaps.slib._AnimManager;
+using DeadCellsMultiplayerMod.Mobs.Bosses;
 using ModCore.Utilities;
 
 namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
@@ -22,7 +23,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             var preserveLocalMotion = (HasLocalQueuedOrChargingSkill(self) && ShouldPreserveClientAttackMotion(self))
-                || IsWithinClientNetworkAttackMotionPreserveWindow(localIndex);
+                || IsWithinClientNetworkAttackMotionPreserveWindow(self, localIndex);
 
             if (!preserveLocalMotion)
             {
@@ -119,6 +120,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             if (mob.life <= 0 && wasAlive)
             {
+                if (BossSyncHelpers.IsBossMob(mob))
+                    return;
+
                 try
                 {
                     if (!mob.destroyed)

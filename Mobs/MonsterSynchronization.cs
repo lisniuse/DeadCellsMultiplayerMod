@@ -232,6 +232,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             Hook_Mob.contactAttack += Hook_Mob_contactAttack;
             Hook_Mob.onTouch += Hook_Mob_onTouch;
             Hook_Mob.queueAttack += Hook_Mob_queueAttack;
+            Hook_OldSkill.prepare += Hook_OldSkill_prepare;
+            Hook_OldSkill.execute += Hook_OldSkill_execute;
             Hook_OldMobSkill.prepareOnOwnerTarget += Hook_OldMobSkill_prepareOnOwnerTarget;
             Hook_OldMobSkill.execute += Hook_OldMobSkill_execute;
             Hook_MobSkill.execute += Hook_MobSkill_execute;
@@ -367,7 +369,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 TrySendClientMobStateDeltaBatchPreUpdate(net!);
             }
 
-            if (isClient && IsSyncMob(self))
+            if (isClient && IsSyncMob(self) && ShouldLockClientMobAi(self))
             {
                 TryLockMobAi(self, ClientAiLockSeconds);
             }
@@ -1112,6 +1114,62 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             TrySendHostMobAttack(ownerMob, OldSkillChargeCompletePacketPrefix + skillId, false, null);
+        }
+
+        private bool Hook_OldSkill_prepare(Hook_OldSkill.orig_prepare orig, OldSkill self, int? data)
+        {
+            var prepared = false;
+            try
+            {
+                prepared = orig(self, data);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (!prepared || self is OldMobSkill)
+                return prepared;
+
+            var net = GameMenu.NetRef;
+            if (!IsHost(net))
+                return true;
+
+            var ownerMob = self?.owner as Mob;
+            var skillId = self?.id?.ToString() ?? string.Empty;
+            if (ownerMob == null || string.IsNullOrWhiteSpace(skillId))
+                return true;
+
+            Entity? explicitTarget = null;
+            try { explicitTarget = ownerMob.aTarget; } catch { }
+            TrySendHostMobAttack(ownerMob, OldSkillPreparePacketPrefix + skillId, false, data, explicitTarget);
+            return true;
+        }
+
+        private void Hook_OldSkill_execute(Hook_OldSkill.orig_execute orig, OldSkill self, double? ratio)
+        {
+            orig(self, ratio);
+
+            if (self is OldMobSkill)
+                return;
+
+            var net = GameMenu.NetRef;
+            var ownerMob = self?.owner as Mob;
+            var skillId = self?.id?.ToString() ?? string.Empty;
+
+            if (ownerMob == null || string.IsNullOrWhiteSpace(skillId))
+                return;
+
+            if (IsClient(net))
+            {
+                RegisterClientQueuedOldSkillMarker(ownerMob, skillId);
+                return;
+            }
+
+            if (!IsHost(net))
+                return;
+
+            TrySendHostMobAttack(ownerMob, OldSkillExecutePacketPrefix + skillId, false, null);
         }
 
         private bool Hook_OldMobSkill_prepareOnOwnerTarget(Hook_OldMobSkill.orig_prepareOnOwnerTarget orig, OldMobSkill self, bool? data, int? e)
@@ -2030,6 +2088,23 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             catch
             {
             }
+        }
+
+        private static bool ShouldLockClientMobAi(Mob mob)
+        {
+            if (mob == null)
+                return false;
+
+            if (!BossSyncHelpers.IsBossMob(mob))
+                return true;
+
+            if (HasLocalQueuedOrChargingSkill(mob))
+                return false;
+
+            if (!TryGetTrackedIndex(mob, out var localIndex))
+                return true;
+
+            return !IsWithinClientNetworkAttackAiPreserveWindow(mob, localIndex);
         }
 
         private static bool ShouldRunClientNetPumpForFrame(Mob mob)
@@ -3309,6 +3384,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         return;
                 }
 
+                RegisterClientNetworkAttackExecuted(mob);
                 TrySetClientMobAttackTarget(mob, intent.TargetUserId, intent.AttackDir, forceRetarget: true);
                 TryWakeMobForForcedSimulation(mob);
                 if (ResolveClientAttackTargetEntity(mob, intent.TargetUserId) == null)
@@ -3316,7 +3392,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 if (!TryGetChargingOldSkillId(mob, out _))
                 {
-                    if (TryExecuteClientOldSkillNativeLike(oldSkill, intent.Data))
+                    if (oldSkill is OldMobSkill oldMobSkill && TryExecuteClientOldSkillNativeLike(oldMobSkill, intent.Data))
                     { }
                     else
                     {
@@ -3325,7 +3401,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 }
 
                 TryInvokeOldSkillChargeComplete(oldSkill);
-                RegisterClientNetworkAttackExecuted(mob);
                 oldSkill.execute(null);
             }
             catch (Exception ex)
@@ -3345,23 +3420,21 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             try
             {
-                var skillId = normalizedSkillId.AsHaxeString();
-                if (!mob.hasOldSkill(skillId))
+                if (!TryGetMobOldSkill(mob, normalizedSkillId, out var oldSkill))
                     return;
 
-                var oldSkill = mob.getOldSkill(skillId) as OldMobSkill;
-                if (oldSkill == null)
-                    return;
-
+                RegisterClientNetworkAttackExecuted(mob);
                 TrySetClientMobAttackTarget(mob, intent.TargetUserId, intent.AttackDir, forceRetarget: true);
                 TryWakeMobForForcedSimulation(mob);
                 if (ResolveClientAttackTargetEntity(mob, intent.TargetUserId) == null)
                     TrySetClientMobAttackTarget(mob, 0, intent.AttackDir, forceRetarget: true);
 
-                if (!TryExecuteClientOldSkillNativeLike(oldSkill, intent.Data))
+                if (oldSkill is OldMobSkill oldMobSkill && TryExecuteClientOldSkillNativeLike(oldMobSkill, intent.Data))
+                    return;
+
+                if (!oldSkill.prepare(intent.Data))
                 {
-                    RegisterClientNetworkAttackExecuted(mob);
-                    oldSkill.prepare(intent.Data);
+                    return;
                 }
             }
             catch (Exception ex)
@@ -3390,11 +3463,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     if (chargingSkill == null)
                         return;
 
+                    RegisterClientNetworkAttackExecuted(mob);
                     chargingSkill.execute(null);
                     return;
                 }
 
+                RegisterClientNetworkAttackExecuted(mob);
                 TrySetClientMobAttackTarget(mob, intent.TargetUserId, intent.AttackDir, forceRetarget: true);
+                TryWakeMobForForcedSimulation(mob);
 
                 var skillId = normalizedSkillId.AsHaxeString();
                 var skill = mob.getSkill(skillId) as MobSkill;
@@ -3417,7 +3493,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (IsQueuedOrChargingOldSkillId(mob, intent.SkillId))
                     return;
 
+                RegisterClientNetworkAttackExecuted(mob);
                 TrySetClientMobAttackTarget(mob, intent.TargetUserId, intent.AttackDir, forceRetarget: true);
+                TryWakeMobForForcedSimulation(mob);
                 if (ResolveClientAttackTargetEntity(mob, intent.TargetUserId) == null)
                     TrySetClientMobAttackTarget(mob, 0, intent.AttackDir, forceRetarget: true);
 
@@ -3440,7 +3518,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
-        private static void TryInvokeOldSkillChargeComplete(OldMobSkill oldSkill)
+        private static void TryInvokeOldSkillChargeComplete(OldSkill oldSkill)
         {
             if (oldSkill == null)
                 return;
@@ -3464,13 +3542,48 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (oldSkill == null)
                 return false;
 
+            if (TryPrepareClientOldSkillOnOwnerTarget(oldSkill, null, data))
+                return true;
+
+            if (!data.HasValue && TryPrepareClientOldSkillOnOwnerTarget(oldSkill, null, null))
+                return true;
+
+            if (TryPrepareClientOldSkillOnOwnerTarget(oldSkill, true, data))
+                return true;
+
+            return !data.HasValue && TryPrepareClientOldSkillOnOwnerTarget(oldSkill, true, null);
+        }
+
+        private static bool TryPrepareClientOldSkillOnOwnerTarget(OldMobSkill oldSkill, bool? useTargetData, int? data)
+        {
             try
             {
-                oldSkill.prepareOnOwnerTarget(true, data);
-                return true;
+                return oldSkill.prepareOnOwnerTarget(useTargetData, data);
             }
             catch
             {
+                return false;
+            }
+        }
+
+        private static bool TryGetMobOldSkill(Mob mob, string normalizedSkillId, out OldSkill oldSkill)
+        {
+            oldSkill = null!;
+            if (mob == null || string.IsNullOrWhiteSpace(normalizedSkillId))
+                return false;
+
+            try
+            {
+                var skillId = normalizedSkillId.AsHaxeString();
+                if (!mob.hasOldSkill(skillId))
+                    return false;
+
+                oldSkill = mob.getOldSkill(skillId) as OldSkill;
+                return oldSkill != null;
+            }
+            catch
+            {
+                oldSkill = null!;
                 return false;
             }
         }
@@ -3860,7 +3973,25 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
-        private static bool IsWithinClientNetworkAttackMotionPreserveWindow(int localIndex)
+        private static bool IsWithinClientNetworkAttackMotionPreserveWindow(Mob mob, int localIndex)
+        {
+            var preserveSeconds = BossSyncHelpers.IsBossMob(mob)
+                ? ClientBossNetworkAttackMotionPreserveSeconds
+                : ClientNetworkAttackMotionPreserveSeconds;
+
+            return IsWithinClientNetworkAttackWindow(localIndex, preserveSeconds);
+        }
+
+        private static bool IsWithinClientNetworkAttackAiPreserveWindow(Mob mob, int localIndex)
+        {
+            var preserveSeconds = BossSyncHelpers.IsBossMob(mob)
+                ? ClientBossNetworkAttackAiPreserveSeconds
+                : ClientNetworkAttackMotionPreserveSeconds;
+
+            return IsWithinClientNetworkAttackWindow(localIndex, preserveSeconds);
+        }
+
+        private static bool IsWithinClientNetworkAttackWindow(int localIndex, double preserveSeconds)
         {
             lock (Sync)
             {
@@ -3868,7 +3999,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     return false;
 
                 var now = Stopwatch.GetTimestamp();
-                var windowTicks = (long)(Stopwatch.Frequency * ClientNetworkAttackMotionPreserveSeconds);
+                var windowTicks = (long)(Stopwatch.Frequency * preserveSeconds);
                 return now - tick <= windowTicks;
             }
         }
@@ -3960,7 +4091,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var net = GameMenu.NetRef;
             var isHost = IsHost(net);
-            var pending = new List<(Mob Mob, int TargetLife, int TargetMaxLife, bool ForceDie, int SyncId)>(hits.Count);
+            var pending = new List<(Mob Mob, int TargetLife, int TargetMaxLife, bool ForceDie, int SyncId, bool IsBoss)>(hits.Count);
 
             lock (Sync)
             {
@@ -3985,7 +4116,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     var forceDie = targetLife <= 0 && prevLife > 0;
                     var syncId = -1;
                     TryGetMobSyncId(mob, out syncId);
-                    pending.Add((mob, targetLife, maxLife, forceDie, syncId));
+                    pending.Add((mob, targetLife, maxLife, forceDie, syncId, BossSyncHelpers.IsBossMob(mob)));
                 }
             }
 
@@ -3996,35 +4127,47 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (mob == null)
                     continue;
 
+                var appliedLife = update.TargetLife;
                 if (update.ForceDie)
                 {
                     TryWakeMobForForcedSimulation(mob);
                     if (isHost)
                     {
-                        try
+                        if (update.IsBoss)
                         {
-                            if (!mob.destroyed)
+                            TryApplyHostBossFinishingHit(mob, update.TargetMaxLife);
+                        }
+                        else
+                        {
+                            try
                             {
-                                mob.life = 0;
-                                mob.onDie();
+                                if (!mob.destroyed)
+                                {
+                                    mob.life = 0;
+                                    mob.onDie();
+                                }
+                                else
+                                {
+                                    mob.life = 0;
+                                }
                             }
-                            else
+                            catch
                             {
-                                mob.life = 0;
                             }
                         }
-                        catch
-                        {
-                        }
+
+                        appliedLife = GetMobLifeOrFallback(mob, 0);
                     }
                     else
                     {
                         ApplyAuthoritativeLifeState(mob, 0, update.TargetMaxLife);
+                        appliedLife = 0;
                     }
                 }
                 else
                 {
                     ApplyAuthoritativeLifeState(mob, update.TargetLife, update.TargetMaxLife);
+                    appliedLife = GetMobLifeOrFallback(mob, update.TargetLife);
                 }
 
                 if (isHost && net != null && update.SyncId >= 0)
@@ -4032,10 +4175,46 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     var sx = GetWorldX(mob);
                     var sy = GetWorldY(mob);
                     var dir = NormalizeDir(mob.dir);
-                    var hitEv = $"hit|{update.TargetLife.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                    var hitEv = $"hit|{appliedLife.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
                     var evUpdate = new NetNode.MobEventUpdate(update.SyncId, sx, sy, dir, new[] { hitEv });
                     net.SendMobEvents(new[] { evUpdate });
                 }
+            }
+        }
+
+        private static void TryApplyHostBossFinishingHit(Mob mob, int targetMaxLife)
+        {
+            if (mob == null)
+                return;
+
+            try
+            {
+                var damage = System.Math.Max(1.0, targetMaxLife * 8.0);
+                var attackUtilsType = typeof(_AttackUtils);
+                var createFromHeroAndHit = attackUtilsType.GetMethod("createFromHeroAndHit", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (createFromHeroAndHit != null)
+                {
+                    createFromHeroAndHit.Invoke(null, new object?[] { null, damage, null, mob });
+                    return;
+                }
+
+                var createFromHero = attackUtilsType.GetMethod("createFromHero", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                var hit = attackUtilsType.GetMethod("hit", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (createFromHero != null && hit != null)
+                {
+                    var attack = createFromHero.Invoke(null, new object?[] { null, damage, null });
+                    if (attack != null)
+                    {
+                        hit.Invoke(null, new[] { attack, (object)mob });
+                        return;
+                    }
+                }
+
+                Log.Warning("[MobsSync] Host boss finishing hit replay is unavailable: AttackUtils static entry points were not found");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[MobsSync] Host boss finishing hit replay failed");
             }
         }
 
@@ -4155,6 +4334,21 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             catch
             {
                 return false;
+            }
+        }
+
+        private static int GetMobLifeOrFallback(Mob mob, int fallback)
+        {
+            if (mob == null)
+                return fallback;
+
+            try
+            {
+                return mob.life < 0 ? 0 : mob.life;
+            }
+            catch
+            {
+                return fallback;
             }
         }
 
