@@ -179,6 +179,79 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        private bool ShouldSuppressVanillaHeroDeathCinematic(Hero? lostBody)
+        {
+            return _netRole != NetRole.None &&
+                   _net != null &&
+                   _net.IsAlive &&
+                   me != null &&
+                   lostBody != null &&
+                   ReferenceEquals(lostBody, me);
+        }
+
+        private bool SuppressVanillaHeroDeathCinematic(Hero? lostBody, dc.GameCinematic? cine)
+        {
+            if (!ShouldSuppressVanillaHeroDeathCinematic(lostBody))
+                return false;
+
+            if (!_localFakeDead && lostBody != null && _net != null)
+                EnterLocalFakeDeath(lostBody, _net);
+
+            try
+            {
+                var game = dc.pr.Game.Class.ME;
+                if (game != null && cine != null && ReferenceEquals(game.curCine, cine))
+                    game.curCine = null;
+            }
+            catch
+            {
+            }
+
+            try { cine?.destroy(); } catch { }
+            try { cine?.disposeImmediately(); } catch { }
+            return true;
+        }
+
+        private void Hook__HeroDeath__constructor__(Hook__HeroDeath.orig___constructor__ orig, HeroDeath e, Hero lostBody, bool fromMob)
+        {
+            if (SuppressVanillaHeroDeathCinematic(lostBody, e))
+                return;
+
+            orig(e, lostBody, fromMob);
+        }
+
+        private void Hook__HeroDeathBase__constructor__(Hook__HeroDeathBase.orig___constructor__ orig, HeroDeathBase e, Hero lostBody, bool mob)
+        {
+            if (SuppressVanillaHeroDeathCinematic(lostBody, e))
+                return;
+
+            orig(e, lostBody, mob);
+        }
+
+        private void Hook__HeroDeathContinue__constructor__(Hook__HeroDeathContinue.orig___constructor__ orig, HeroDeathContinue e, Hero lostBody, bool keepBody)
+        {
+            if (SuppressVanillaHeroDeathCinematic(lostBody, e))
+                return;
+
+            orig(e, lostBody, keepBody);
+        }
+
+        private void Hook__HeroDeathRespawn__constructor__(Hook__HeroDeathRespawn.orig___constructor__ orig, HeroDeathRespawn e, Hero lostBody)
+        {
+            if (SuppressVanillaHeroDeathCinematic(lostBody, e))
+                return;
+
+            orig(e, lostBody);
+        }
+
+        private void Hook__HeroDeathDLCP__constructor__(Hook__HeroDeathDLCP.orig___constructor__ orig, HeroDeathDLCP e, Hero lostBody, bool fromMob)
+        {
+            if (SuppressVanillaHeroDeathCinematic(lostBody, e))
+                return;
+
+            orig(e, lostBody, fromMob);
+        }
+
         private void Hook_Hero_startDeathCine(Hook_Hero.orig_startDeathCine orig, Hero self)
         {
             var net = _net;

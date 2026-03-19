@@ -70,6 +70,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static Mob? clientNetworkQueuedAttackMob;
         private static readonly Dictionary<int, QueuedOldSkillMarker> hostQueuedOldSkillMarkers = new();
         private static readonly Dictionary<int, long> clientLastNetworkAttackTickByLocalIndex = new();
+        private static readonly HashSet<Mob> clientPendingSuppressedBossDies = new(ReferenceEqualityComparer.Instance);
+        private static int authoritativeClientBossDieDepth;
 
         private readonly struct QueuedOldSkillMarker
         {
@@ -223,6 +225,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             Hook_Level.unregisterEntity += Hook_Level_unregisterEntity;
             Hook_Level.onDispose += Hook_Level_onDispose;
 
+            Hook_Mob.setAttackTarget += Hook_Mob_setAttackTarget;
             Hook_Mob.setNemesisTarget += Hook_Mob_setNemesisTarget;
             Hook_Mob.preUpdate += Hook_Mob_preUpdate;
             Hook_Mob.fixedUpdate += Hook_Mob_fixedupdate;
@@ -414,6 +417,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static void Hook_Mob_onDie(Hook_Mob.orig_onDie orig, Mob self)
         {
+            if (ShouldSuppressClientBossDie(self))
+            {
+                MarkSuppressedClientBossDie(self);
+                return;
+            }
+
             var shouldSendDie = false;
             var dieSyncId = -1;
             var dieX = 0.0;
@@ -434,6 +443,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             if (self == null)
                 return;
+
+            ClearSuppressedClientBossDie(self);
 
             if (shouldSendDie && dieNet != null && dieNet.IsAlive && dieSyncId >= 0)
             {
@@ -465,86 +476,184 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private void Hook_Mob_onDamage(Hook_Mob.orig_onDamage orig, Mob self, AttackData i)
         {
+            var preDamageLife = GetMobLifeOrFallback(self, 0);
             orig(self, i);
 
-            if (self == null || i == null)
+            try
+            {
+                if (self == null || i == null)
+                    return;
+
+                var net = GameMenu.NetRef;
+                if (net == null || !IsSyncMob(self))
+                    return;
+
+                bool shouldReport = false;
+                if (IsHost(net))
+                {
+                    shouldReport = true;
+                }
+                else if (IsClient(net))
+                {
+                    shouldReport = IsDamageFromLocalPlayer(i);
+                }
+
+                if (!shouldReport)
+                    return;
+
+                if (!TryGetTrackedIndex(self, out var localIndex))
+                    return;
+
+                if (!TryGetMobSyncId(self, out var mobSyncId))
+                    return;
+
+                var life = self.life;
+                var x = GetSyncX(self);
+                var y = GetSyncY(self);
+
+                if (IsHost(net))
+                {
+                    var hx = GetWorldX(self);
+                    var hy = GetWorldY(self);
+                    var hitEvent = $"hit|{life.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                    var update = new NetNode.MobEventUpdate(mobSyncId, hx, hy, NormalizeDir(self.dir), new[] { hitEvent });
+                    net.SendMobEvents(new[] { update });
+                }
+
+                if (IsClient(net))
+                {
+                    var now = Stopwatch.GetTimestamp();
+                    var minDelta = (long)(Stopwatch.Frequency * ClientMobHitReportMinIntervalSeconds);
+
+                    lock (Sync)
+                    {
+                        if (!clientLastReportedMobLife.TryGetValue(localIndex, out var lastLife))
+                        {
+                            // First locally-confirmed hit for this tracked mob: establish baseline and
+                            // propagate immediately when damage actually reduced life.
+                            clientLastReportedMobLife[localIndex] = life;
+                            var maxLife = self.maxLife;
+                            if (life >= maxLife && life > 0)
+                                return;
+
+                            clientLastMobHitReportTick[localIndex] = now;
+                        }
+                        else
+                        {
+                            if (life >= lastLife)
+                                return;
+
+                            if (life > 0 &&
+                                clientLastMobHitReportTick.TryGetValue(localIndex, out var lastTick) &&
+                                now - lastTick < minDelta)
+                            {
+                                clientLastReportedMobLife[localIndex] = life;
+                                return;
+                            }
+
+                            clientLastReportedMobLife[localIndex] = life;
+                            clientLastMobHitReportTick[localIndex] = now;
+                        }
+                    }
+
+                    var clientHitEvent = $"hit|{life.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                    var clientUpdate = new NetNode.MobEventUpdate(mobSyncId, x, y, 0, new[] { clientHitEvent });
+                    net.SendMobEvents(new[] { clientUpdate });
+                }
+            }
+            finally
+            {
+                TryRecoverSuppressedClientBossDie(self, preDamageLife);
+            }
+        }
+
+        private static bool ShouldSuppressClientBossDie(Mob? mob)
+        {
+            if (mob == null || !BossSyncHelpers.IsBossMob(mob))
+                return false;
+
+            var net = GameMenu.NetRef;
+            if (!IsClient(net))
+                return false;
+            if (!IsSyncMob(mob))
+                return false;
+
+            return System.Threading.Volatile.Read(ref authoritativeClientBossDieDepth) <= 0;
+        }
+
+        private static void MarkSuppressedClientBossDie(Mob? mob)
+        {
+            if (mob == null)
+                return;
+
+            lock (Sync)
+            {
+                clientPendingSuppressedBossDies.Add(mob);
+            }
+        }
+
+        private static void ClearSuppressedClientBossDie(Mob? mob)
+        {
+            if (mob == null)
+                return;
+
+            lock (Sync)
+            {
+                clientPendingSuppressedBossDies.Remove(mob);
+            }
+        }
+
+        private static void TryRecoverSuppressedClientBossDie(Mob? mob, int fallbackLife)
+        {
+            if (mob == null || mob.destroyed)
                 return;
 
             var net = GameMenu.NetRef;
-            if (net == null || !IsSyncMob(self))
+            if (!IsClient(net))
+            {
+                ClearSuppressedClientBossDie(mob);
                 return;
-
-            bool shouldReport = false;
-            if (IsHost(net))
-            {
-                shouldReport = true;
-            }
-            else if (IsClient(net))
-            {
-                shouldReport = IsDamageFromLocalPlayer(i);
             }
 
-            if (!shouldReport)
-                return;
-
-            if (!TryGetTrackedIndex(self, out var localIndex))
-                return;
-
-            if (!TryGetMobSyncId(self, out var mobSyncId))
-                return;
-
-            var life = self.life;
-            var x = GetSyncX(self);
-            var y = GetSyncY(self);
-
-            if (IsHost(net))
+            bool hadSuppressedDie;
+            lock (Sync)
             {
-                var hx = GetWorldX(self);
-                var hy = GetWorldY(self);
-                var hitEvent = $"hit|{life.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
-                var update = new NetNode.MobEventUpdate(mobSyncId, hx, hy, NormalizeDir(self.dir), new[] { hitEvent });
-                net.SendMobEvents(new[] { update });
+                hadSuppressedDie = clientPendingSuppressedBossDies.Remove(mob);
             }
 
-            if (IsClient(net))
+            if (!hadSuppressedDie)
+                return;
+
+            try
             {
-                var now = Stopwatch.GetTimestamp();
-                var minDelta = (long)(Stopwatch.Frequency * ClientMobHitReportMinIntervalSeconds);
+                if (mob.life <= 0)
+                    mob.life = System.Math.Max(1, fallbackLife);
+            }
+            catch
+            {
+            }
+        }
 
-                lock (Sync)
-                {
-                    if (!clientLastReportedMobLife.TryGetValue(localIndex, out var lastLife))
-                    {
-                        // First locally-confirmed hit for this tracked mob: establish baseline and
-                        // propagate immediately when damage actually reduced life.
-                        clientLastReportedMobLife[localIndex] = life;
-                        var maxLife = self.maxLife;
-                        if (life >= maxLife && life > 0)
-                            return;
+        private static void RunWithAuthoritativeClientBossDie(Mob? mob, Action action)
+        {
+            if (action == null)
+                return;
 
-                        clientLastMobHitReportTick[localIndex] = now;
-                    }
-                    else
-                    {
-                        if (life >= lastLife)
-                            return;
+            var net = GameMenu.NetRef;
+            if (!IsClient(net) || mob == null || !BossSyncHelpers.IsBossMob(mob))
+            {
+                action();
+                return;
+            }
 
-                        if (life > 0 &&
-                            clientLastMobHitReportTick.TryGetValue(localIndex, out var lastTick) &&
-                            now - lastTick < minDelta)
-                        {
-                            clientLastReportedMobLife[localIndex] = life;
-                            return;
-                        }
-
-                        clientLastReportedMobLife[localIndex] = life;
-                        clientLastMobHitReportTick[localIndex] = now;
-                    }
-                }
-
-                var clientHitEvent = $"hit|{life.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
-                var clientUpdate = new NetNode.MobEventUpdate(mobSyncId, x, y, 0, new[] { clientHitEvent });
-                net.SendMobEvents(new[] { clientUpdate });
+            authoritativeClientBossDieDepth++;
+            try
+            {
+                action();
+            }
+            finally
+            {
+                authoritativeClientBossDieDepth--;
             }
         }
 
@@ -1308,6 +1417,17 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             net.SendMobEvents(new[] { update });
         }
 
+        private void Hook_Mob_setAttackTarget(Hook_Mob.orig_setAttackTarget orig, Mob self, Entity e)
+        {
+            if (TryResolveFallbackPlayerCombatTarget(self, e, out var fallbackTarget))
+            {
+                orig(self, fallbackTarget);
+                return;
+            }
+
+            orig(self, e);
+        }
+
         private void Hook_Mob_setNemesisTarget(Hook_Mob.orig_setNemesisTarget orig, Mob self, Entity e)
         {
             if (System.Threading.Volatile.Read(ref forceExactNemesisTargetDepth) > 0)
@@ -1322,67 +1442,59 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             }
 
-            if (e != null && ModEntry.IsEntityDownedForCombat(e))
+            if (TryResolveFallbackPlayerCombatTarget(self, e, out var fallbackTarget))
             {
-                try
-                {
-                    var team = self?._team;
-                    var helper = team?.get_targetHelper();
-                    if (helper != null)
-                    {
-                        helper.filterUntargetables();
-                        var best = helper.getBest();
-                        if (best != null && !ModEntry.IsEntityDownedForCombat(best))
-                        {
-                            orig(self, best);
-                            return;
-                        }
-                    }
-                }
-                catch
-                {
-                }
-
-                var fallbackTarget = ResolveDetectedClientTargetEntity(self);
-                if (fallbackTarget != null)
-                {
-                    orig(self, fallbackTarget);
-                    return;
-                }
+                orig(self, fallbackTarget);
                 return;
             }
 
-            var gameHero = ModCore.Modules.Game.Instance?.HeroInstance;
-            if (gameHero != null && ReferenceEquals(e, gameHero))
-            {
-                try
-                {
-                    var team = self?._team;
-                    var helper = team?.get_targetHelper();
-                    if (helper != null)
-                    {
-                        helper.filterUntargetables();
-                        var best = helper.getBest();
-                        if (best != null && !ModEntry.IsEntityDownedForCombat(best))
-                        {
-                            orig(self, best);
-                            return;
-                        }
-                    }
-                }
-                catch
-                {
-                }
+            orig(self, e);
+        }
 
-                var fallbackTarget = ResolveDetectedClientTargetEntity(self);
-                if (fallbackTarget != null)
-                {
-                    orig(self, fallbackTarget);
-                    return;
-                }
+        private static bool TryResolveFallbackPlayerCombatTarget(Mob? mob, Entity? currentTarget, out Entity fallbackTarget)
+        {
+            fallbackTarget = null!;
+            if (mob == null)
+                return false;
+            if (!IsMobHostileToPlayers(mob))
+                return false;
+            if (currentTarget == null)
+                return false;
+
+            var shouldReplace = ModEntry.IsEntityDownedForCombat(currentTarget);
+            if (!shouldReplace)
+            {
+                var gameHero = ModCore.Modules.Game.Instance?.HeroInstance;
+                shouldReplace = gameHero != null && ReferenceEquals(currentTarget, gameHero);
             }
 
-            orig(self, e);
+            if (!shouldReplace)
+                return false;
+
+            try
+            {
+                var helper = mob._team?.get_targetHelper();
+                if (helper != null)
+                {
+                    helper.filterUntargetables();
+                    var best = helper.getBest();
+                    if (best != null && !ModEntry.IsEntityDownedForCombat(best))
+                    {
+                        fallbackTarget = best;
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            var detectedFallback = ResolveDetectedClientTargetEntity(mob);
+            if (detectedFallback == null)
+                return false;
+
+            fallbackTarget = detectedFallback;
+            return true;
         }
 
         private static void RebuildMobArray(Level? level)
@@ -1482,6 +1594,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static void RemoveTrackedMobLocked(Mob mob)
         {
+            clientPendingSuppressedBossDies.Remove(mob);
+
             if (SyncMobIdRegistry.TryGetExistingSyncId(mob, out var syncId))
             {
                 clientLastSentAffectPayloadBySyncId.Remove(syncId);
@@ -1508,6 +1622,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             var mob = trackedMobs[index];
+            clientPendingSuppressedBossDies.Remove(mob);
             if (SyncMobIdRegistry.TryGetExistingSyncId(mob, out var syncId))
             {
                 clientLastSentAffectPayloadBySyncId.Remove(syncId);
@@ -2171,7 +2286,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             if (!IsMobHostileToPlayers(mob))
                 return;
-            if (ShouldSuppressHostRetarget(mob))
+            if (!HasDownedPlayerCombatTarget(mob) && ShouldSuppressHostRetarget(mob))
                 return;
 
             Entity? selected = null;
@@ -2237,6 +2352,34 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             TrySetNemesisTargetExact(mob, selected);
+        }
+
+        private static bool HasDownedPlayerCombatTarget(Mob mob)
+        {
+            if (mob == null)
+                return false;
+
+            try
+            {
+                var attackTarget = mob.aTarget;
+                if (attackTarget != null && ModEntry.IsEntityDownedForCombat(attackTarget))
+                    return true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var nemesisTarget = mob.nemesisTarget;
+                if (nemesisTarget != null && ModEntry.IsEntityDownedForCombat(nemesisTarget))
+                    return true;
+            }
+            catch
+            {
+            }
+
+            return false;
         }
 
         private static bool ShouldSuppressHostRetarget(Mob mob)
@@ -4072,10 +4215,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 TryWakeMobForForcedSimulation(mob);
                 try
                 {
-                    RunWithSuppressedMobDieSend(() =>
+                    RunWithAuthoritativeClientBossDie(mob, () =>
                     {
-                        mob.life = 0;
-                        mob.onDie();
+                        RunWithSuppressedMobDieSend(() =>
+                        {
+                            mob.life = 0;
+                            mob.onDie();
+                        });
                     });
                 }
                 catch
@@ -4190,27 +4336,36 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             try
             {
                 var damage = System.Math.Max(1.0, targetMaxLife * 8.0);
-                var attackUtilsType = typeof(_AttackUtils);
-                var createFromHeroAndHit = attackUtilsType.GetMethod("createFromHeroAndHit", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                var attackUtils = AttackUtils.Class;
+                var createFromHeroAndHit = attackUtils?.createFromHeroAndHit;
                 if (createFromHeroAndHit != null)
                 {
-                    createFromHeroAndHit.Invoke(null, new object?[] { null, damage, null, mob });
-                    return;
+                    _ = createFromHeroAndHit(null, damage, null, mob);
+                    if (mob.destroyed || GetMobLifeOrFallback(mob, 1) <= 0)
+                        return;
                 }
 
-                var createFromHero = attackUtilsType.GetMethod("createFromHero", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                var hit = attackUtilsType.GetMethod("hit", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                var createFromHero = attackUtils?.createFromHero;
+                var hit = attackUtils?.hit;
                 if (createFromHero != null && hit != null)
                 {
-                    var attack = createFromHero.Invoke(null, new object?[] { null, damage, null });
+                    var attack = createFromHero(null, damage, null);
                     if (attack != null)
                     {
-                        hit.Invoke(null, new[] { attack, (object)mob });
-                        return;
+                        hit(attack, mob);
+                        if (mob.destroyed || GetMobLifeOrFallback(mob, 1) <= 0)
+                            return;
                     }
                 }
 
-                Log.Warning("[MobsSync] Host boss finishing hit replay is unavailable: AttackUtils static entry points were not found");
+                if (!mob.destroyed)
+                {
+                    mob.life = 0;
+                    mob.onDie();
+                    return;
+                }
+
+                mob.life = 0;
             }
             catch (Exception ex)
             {

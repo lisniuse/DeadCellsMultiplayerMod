@@ -21,6 +21,10 @@ using dc.tool;
 using dc.tool.mainSkills;
 using HaxeProxy.Runtime;
 using dc.cine;
+using dc.cine.coll;
+using dc.cine.dlcp;
+using dc.cine.kf;
+using dc.cine.queen;
 using CineHookInitialize;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using ModCore.Events;
@@ -34,6 +38,7 @@ using DeadCellsMultiplayerMod.Tools.ModLang;
 using DeadCellsMultiplayerMod.KingHead;
 using DeadCellsMultiplayerMod.Mobs.Levelinit;
 using dc.en.inter.door;
+using dc.en.mob.boss;
 using Steamworks;
 using System.Reflection;
 using DeadCellsMultiplayerMod.Interaction;
@@ -181,11 +186,25 @@ namespace DeadCellsMultiplayerMod
             "roomGardenerBoss", "roomGiant", "roomKingsHand", "roomQueen", "roomBehemoth",
             "roomMamaTick", "roomKingsHandAsKing"
         };
+        private static readonly HashSet<string> BossDeathCineTypeNames = new(StringComparer.Ordinal)
+        {
+            "BeholderDeath", "GiantDeath", "GiantDeath4", "KillKingCinem", "KillQueenCinem",
+            "QueenDefeated", "KillDookuBeastCinem", "FakeKillDooku", "RichterDeath",
+            "EndCollectorPreSmash", "SmashCinem", "EndCollectorPostSmash", "EndCollectorPostSmashKS"
+        };
+        private static readonly HashSet<string> BossIntroCineTypeNames = new(StringComparer.Ordinal)
+        {
+            "EnterRoomBoss", "EnterRoomDeathBoss", "EnterRoomGardenerBoss", "EnterRoomQueenBoss",
+            "EnterThroneRoom", "EnterThroneBossRush", "EnterThroneRoomAsKing", "EnterGiantRoom",
+            "EnterModifiedGiantRoom", "EnterDualBehemoth", "StartCollectorFight", "StartCollectorFightAlt",
+            "MeetCollectorEnd"
+        };
         private string? _lastBossCineSentLevelId;
         private long _lastBossCineSentTick;
         private const double BossCineSendCooldownSeconds = 2.0;
         private readonly Dictionary<string, long> _pendingBossCineApplyByLevel = new(StringComparer.OrdinalIgnoreCase);
         private const double BossCineApplyPendingTtlSeconds = 20.0;
+        private int _suppressBossCineSendDepth;
 
 
         void IOnAfterLoadingCDB.OnAfterLoadingCDB(dc._Data_ cdb)
@@ -603,6 +622,25 @@ namespace DeadCellsMultiplayerMod
             Hook_HeroHead.initCustomHead += Hook_HeroHead_initCustomHead;
             Hook_DiveAttack.onStart += Hook_DiveAttack_onStart;
             Hook_DiveAttack.onOwnerLand += Hook_DiveAttack_onOwnerLand;
+            Hook_HiddenTrigger.trigger += Hook_HiddenTrigger_trigger;
+            Hook__HeroDeath.__constructor__ += Hook__HeroDeath__constructor__;
+            Hook__HeroDeathBase.__constructor__ += Hook__HeroDeathBase__constructor__;
+            Hook__HeroDeathContinue.__constructor__ += Hook__HeroDeathContinue__constructor__;
+            Hook__HeroDeathRespawn.__constructor__ += Hook__HeroDeathRespawn__constructor__;
+            Hook__HeroDeathDLCP.__constructor__ += Hook__HeroDeathDLCP__constructor__;
+            Hook__BeholderDeath.__constructor__ += Hook__BeholderDeath__constructor__;
+            Hook__GiantDeath.__constructor__ += Hook__GiantDeath__constructor__;
+            Hook__GiantDeath4.__constructor__ += Hook__GiantDeath4__constructor__;
+            Hook__KillKingCinem.__constructor__ += Hook__KillKingCinem__constructor__;
+            Hook__KillQueenCinem.__constructor__ += Hook__KillQueenCinem__constructor__;
+            Hook__QueenDefeated.__constructor__ += Hook__QueenDefeated__constructor__;
+            Hook__KillDookuBeastCinem.__constructor__ += Hook__KillDookuBeastCinem__constructor__;
+            Hook__FakeKillDooku.__constructor__ += Hook__FakeKillDooku__constructor__;
+            Hook__RichterDeath.__constructor__ += Hook__RichterDeath__constructor__;
+            Hook__EndCollectorPreSmash.__constructor__ += Hook__EndCollectorPreSmash__constructor__;
+            Hook__SmashCinem.__constructor__ += Hook__SmashCinem__constructor__;
+            Hook__EndCollectorPostSmash.__constructor__ += Hook__EndCollectorPostSmash__constructor__;
+            Hook__EndCollectorPostSmashKS.__constructor__ += Hook__EndCollectorPostSmashKS__constructor__;
             // Hook_Hero.tryToApplyYoloPerk += Hook_Hero_tryToApplyYoloPerk;
             // Hook_Hero.onEnterRoom += 
             Ghost.KingWeaponHooks.Install();
@@ -720,6 +758,33 @@ namespace DeadCellsMultiplayerMod
                 try { self.spr = null; } catch (Exception ex2) { Logger.Warning(ex2, "[NetMod] BossRushDoor spr=null failed"); }
                 return;
             }
+        }
+
+        private void Hook_HiddenTrigger_trigger(Hook_HiddenTrigger.orig_trigger orig, HiddenTrigger self, Entity dh)
+        {
+            orig(self, dh);
+
+            if (_suppressBossCineSendDepth > 0)
+                return;
+            if (_netRole == NetRole.None || _net == null || !_net.IsAlive)
+                return;
+            if (self == null || dh == null || me == null || !ReferenceEquals(dh, me))
+                return;
+
+            var currentLevelId = string.IsNullOrWhiteSpace(levelId) ? string.Empty : levelId.Trim();
+            if (!BossLevelIds.Contains(currentLevelId))
+                return;
+
+            string? genericEventId = null;
+            try { genericEventId = self.genericEventId?.ToString(); } catch { }
+            if (string.IsNullOrWhiteSpace(genericEventId))
+                return;
+
+            genericEventId = genericEventId.Trim();
+            if (!BossRoomGenericEventIds.Contains(genericEventId))
+                return;
+
+            TrySendBossCinePayload($"{currentLevelId}|{genericEventId}");
         }
 
         private static bool ContainsBossRushFrameCrash(Exception ex)
@@ -1105,6 +1170,7 @@ namespace DeadCellsMultiplayerMod
             GameMenu.TickMenu(dt);
             DetectAndSendBossCine();
             ApplyReceivedBossCine();
+            SuppressRemoteBossDeathCineIfNeeded();
         }
 
         private void DetectAndSendBossCine()
@@ -1139,18 +1205,62 @@ namespace DeadCellsMultiplayerMod
                         return;
                 }
 
-                var now = Stopwatch.GetTimestamp();
-                var cooldownTicks = (long)(Stopwatch.Frequency * BossCineSendCooldownSeconds);
-                if (_lastBossCineSentLevelId == currentLevelId && now - _lastBossCineSentTick < cooldownTicks)
-                    return;
-
-                _lastBossCineSentLevelId = currentLevelId;
-                _lastBossCineSentTick = now;
-                _net.SendBossCine(currentLevelId);
+                TrySendBossCinePayload(currentLevelId);
             }
             catch
             {
             }
+        }
+
+        private void TrySendBossCinePayload(string payload)
+        {
+            if (_netRole == NetRole.None || _net == null || !_net.IsAlive)
+                return;
+
+            if (!TryParseBossCinePayload(payload, out var levelId, out var _))
+                return;
+
+            var now = Stopwatch.GetTimestamp();
+            var cooldownTicks = (long)(Stopwatch.Frequency * BossCineSendCooldownSeconds);
+            if (_lastBossCineSentLevelId == levelId && now - _lastBossCineSentTick < cooldownTicks)
+                return;
+
+            _lastBossCineSentLevelId = levelId;
+            _lastBossCineSentTick = now;
+            _net.SendBossCine(payload);
+        }
+
+        private static bool TryParseBossCinePayload(string? payload, out string levelId, out string? genericEventId)
+        {
+            levelId = string.Empty;
+            genericEventId = null;
+
+            if (string.IsNullOrWhiteSpace(payload))
+                return false;
+
+            var normalized = payload
+                .Replace("\r", string.Empty, StringComparison.Ordinal)
+                .Replace("\n", string.Empty, StringComparison.Ordinal)
+                .Trim();
+            if (normalized.Length == 0)
+                return false;
+
+            var separatorIndex = normalized.IndexOf('|');
+            if (separatorIndex < 0)
+            {
+                levelId = normalized;
+                return !string.IsNullOrWhiteSpace(levelId);
+            }
+
+            levelId = normalized[..separatorIndex].Trim();
+            if (separatorIndex + 1 < normalized.Length)
+            {
+                var eventId = normalized[(separatorIndex + 1)..].Trim();
+                if (eventId.Length > 0)
+                    genericEventId = eventId;
+            }
+
+            return !string.IsNullOrWhiteSpace(levelId);
         }
 
         private void ApplyReceivedBossCine()
@@ -1167,13 +1277,14 @@ namespace DeadCellsMultiplayerMod
                 var defaultExpiry = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossCineApplyPendingTtlSeconds);
                 for (int i = 0; i < levelIds.Count; i++)
                 {
-                    var receivedLevelId = levelIds[i];
-                    if (string.IsNullOrWhiteSpace(receivedLevelId))
+                    var receivedPayload = levelIds[i];
+                    if (!TryParseBossCinePayload(receivedPayload, out var _, out var _))
                         continue;
 
-                    var normalized = receivedLevelId.Trim();
-                    if (normalized.Length == 0)
-                        continue;
+                    var normalized = receivedPayload
+                        .Replace("\r", string.Empty, StringComparison.Ordinal)
+                        .Replace("\n", string.Empty, StringComparison.Ordinal)
+                        .Trim();
 
                     var expiry = defaultExpiry;
                     if (_pendingBossCineApplyByLevel.TryGetValue(normalized, out var oldExpiry) && oldExpiry > expiry)
@@ -1191,11 +1302,17 @@ namespace DeadCellsMultiplayerMod
             List<string>? remove = null;
             foreach (var kv in _pendingBossCineApplyByLevel)
             {
-                var pendingLevelId = kv.Key;
+                var pendingPayload = kv.Key;
                 var expiryTicks = kv.Value;
                 if (now >= expiryTicks)
                 {
-                    (remove ??= new List<string>()).Add(pendingLevelId);
+                    (remove ??= new List<string>()).Add(pendingPayload);
+                    continue;
+                }
+
+                if (!TryParseBossCinePayload(pendingPayload, out var pendingLevelId, out var genericEventId))
+                {
+                    (remove ??= new List<string>()).Add(pendingPayload);
                     continue;
                 }
 
@@ -1203,8 +1320,8 @@ namespace DeadCellsMultiplayerMod
                     !string.Equals(pendingLevelId, currentLevelId, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (TryTriggerBossCinematic(pendingLevelId))
-                    (remove ??= new List<string>()).Add(pendingLevelId);
+                if (TryTriggerBossCinematic(pendingLevelId, genericEventId))
+                    (remove ??= new List<string>()).Add(pendingPayload);
             }
 
             if (remove == null || remove.Count == 0)
@@ -1214,7 +1331,7 @@ namespace DeadCellsMultiplayerMod
                 _pendingBossCineApplyByLevel.Remove(remove[i]);
         }
 
-        private static bool TryTriggerBossCinematic(string levelId)
+        private bool TryTriggerBossCinematic(string levelId, string? genericEventId)
         {
             try
             {
@@ -1230,29 +1347,51 @@ namespace DeadCellsMultiplayerMod
                 if (game == null || level == null || hero == null)
                     return false;
 
-                if (game.curCine != null && !game.curCine.destroyed)
-                    return false;
+                var currentCine = game.curCine;
+                if (currentCine != null && !currentCine.destroyed)
+                    return IsBossIntroCinematic(currentCine);
 
                 var entitiesByClass = level.entitiesByClass;
-                if (entitiesByClass == null)
-                    return false;
-
-                var triggerClid = HiddenTrigger.Class.__clid;
-                var entries = entitiesByClass.get(triggerClid) as dc.hl.types.ArrayObj;
-                if (entries == null)
-                    return false;
-
-                for (var i = 0; i < entries.length; i++)
+                if (entitiesByClass != null)
                 {
-                    if (entries.getDyn(i) is not HiddenTrigger ht)
-                        continue;
-                    if (ht.used)
-                        continue;
-                    var evId = ht.genericEventId?.ToString();
-                    if (string.IsNullOrEmpty(evId) || !BossRoomGenericEventIds.Contains(evId))
-                        continue;
+                    var triggerClid = HiddenTrigger.Class.__clid;
+                    var entries = entitiesByClass.get(triggerClid) as dc.hl.types.ArrayObj;
+                    if (entries != null)
+                    {
+                        for (var i = 0; i < entries.length; i++)
+                        {
+                            if (entries.getDyn(i) is not HiddenTrigger ht)
+                                continue;
+                            if (ht.used)
+                                continue;
 
-                    ht.trigger(hero);
+                            var evId = ht.genericEventId?.ToString();
+                            if (string.IsNullOrEmpty(evId))
+                                continue;
+                            if (!string.IsNullOrWhiteSpace(genericEventId))
+                            {
+                                if (!string.Equals(evId, genericEventId, StringComparison.Ordinal))
+                                    continue;
+                            }
+                            else if (!BossRoomGenericEventIds.Contains(evId))
+                            {
+                                continue;
+                            }
+
+                            RunWithSuppressedBossCineSend(() => ht.trigger(hero));
+                            _lastBossCineSentLevelId = levelId;
+                            _lastBossCineSentTick = Stopwatch.GetTimestamp();
+                            return true;
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(genericEventId) &&
+                    TryCreateBossCinematicDirectly(level, hero, genericEventId))
+                {
+                    MarkBossRoomHiddenTriggersUsed(level, genericEventId);
+                    _lastBossCineSentLevelId = levelId;
+                    _lastBossCineSentTick = Stopwatch.GetTimestamp();
                     return true;
                 }
             }
@@ -1261,6 +1400,389 @@ namespace DeadCellsMultiplayerMod
             }
 
             return false;
+        }
+
+        private static bool IsBossIntroCinematic(dc.GameCinematic? cine)
+        {
+            if (cine == null)
+                return false;
+
+            try
+            {
+                var typeName = cine.GetType().Name ?? string.Empty;
+                return BossIntroCineTypeNames.Contains(typeName);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryCreateBossCinematicDirectly(Level level, Hero hero, string genericEventId)
+        {
+            if (level == null || hero == null || string.IsNullOrWhiteSpace(genericEventId))
+                return false;
+
+            try
+            {
+                switch (genericEventId.Trim())
+                {
+                    case "roomDeath":
+                        RunWithSuppressedBossCineSend(() => _ = new EnterRoomDeathBoss(hero));
+                        return true;
+
+                    case "roomBeholder":
+                    case "roomBerserk":
+                        RunWithSuppressedBossCineSend(() => _ = new EnterRoomBoss(hero));
+                        return true;
+
+                    case "roomCollectorBoss":
+                        RunWithSuppressedBossCineSend(() =>
+                        {
+                            var story = level.game?.user?.story;
+                            var counters = story?.counters;
+                            var key = "collectorMet".AsHaxeString();
+                            var collectorMet = 0;
+                            if (counters != null && counters.exists(key))
+                            {
+                                var rawValue = counters.get(key)?.ToString();
+                                int.TryParse(rawValue, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out collectorMet);
+                            }
+                            if (collectorMet == 1)
+                                _ = new StartCollectorFightAlt(hero);
+                            else
+                                _ = new MeetCollectorEnd(null);
+                        });
+                        return true;
+
+                    case "roomDooku":
+                        RunWithSuppressedBossCineSend(() => _ = new EnterDookuBossRoom(hero));
+                        return true;
+
+                    case "roomGardenerBoss":
+                        RunWithSuppressedBossCineSend(() => _ = new EnterRoomGardenerBoss(hero));
+                        return true;
+
+                    case "roomGiant":
+                        RunWithSuppressedBossCineSend(() =>
+                        {
+                            if (level.boss is Giant giant)
+                            {
+                                var modifiers = giant.bossRushModifiers;
+                                if (modifiers != null && modifiers.enabled)
+                                {
+                                    _ = new EnterModifiedGiantRoom(hero);
+                                    return;
+                                }
+                            }
+
+                            _ = new EnterGiantRoom(hero);
+                        });
+                        return true;
+
+                    case "roomKingsHand":
+                        RunWithSuppressedBossCineSend(() =>
+                        {
+                            if (level.game.isBossRush())
+                            {
+                                _ = new EnterThroneBossRush(hero);
+                                return;
+                            }
+
+                            if (hero.hasSkin("king".AsHaxeString(), null))
+                                return;
+
+                            _ = new EnterThroneRoom(hero);
+                        });
+                        return true;
+
+                    case "roomKingsHandAsKing":
+                        if (!hero.hasSkin("king".AsHaxeString(), null))
+                            return false;
+
+                        RunWithSuppressedBossCineSend(() => _ = new EnterThroneRoomAsKing(hero));
+                        return true;
+
+                    case "roomMamaTick":
+                        RunWithSuppressedBossCineSend(() =>
+                        {
+                            var storyProgress = 0;
+                            try { storyProgress = (int)level.game.user.story.getNpcProgress(new NpcId.TickPriest()); } catch { }
+
+                            if (storyProgress > 0 && level.boss is MamaTick mamaTick)
+                            {
+                                mamaTick.publicEmerge();
+                                return;
+                            }
+
+                            _ = new EnterRoomBoss(hero);
+                        });
+                        return true;
+
+                    case "roomQueen":
+                        RunWithSuppressedBossCineSend(() => _ = new EnterRoomQueenBoss());
+                        return true;
+
+                    case "roomBehemoth":
+                        RunWithSuppressedBossCineSend(() =>
+                        {
+                            if (level.boss is Behemoth behemoth)
+                            {
+                                var modifiers = behemoth.bossRushModifiers;
+                                if (modifiers != null && modifiers.bossRushClone != null)
+                                {
+                                    _ = new EnterDualBehemoth(hero);
+                                    return;
+                                }
+                            }
+
+                            _ = new EnterRoomBoss(hero);
+                        });
+                        return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static void MarkBossRoomHiddenTriggersUsed(Level level, string genericEventId)
+        {
+            if (level == null || string.IsNullOrWhiteSpace(genericEventId))
+                return;
+
+            try
+            {
+                var entries = level.entitiesByClass?.get(HiddenTrigger.Class.__clid) as dc.hl.types.ArrayObj;
+                if (entries == null)
+                    return;
+
+                for (var i = 0; i < entries.length; i++)
+                {
+                    if (entries.getDyn(i) is not HiddenTrigger ht)
+                        continue;
+
+                    var eventId = ht.genericEventId?.ToString();
+                    if (!string.Equals(eventId, genericEventId, StringComparison.Ordinal))
+                        continue;
+
+                    ht.used = true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void RunWithSuppressedBossCineSend(Action action)
+        {
+            if (action == null)
+                return;
+
+            _suppressBossCineSendDepth++;
+            try
+            {
+                action();
+            }
+            finally
+            {
+                _suppressBossCineSendDepth--;
+            }
+        }
+
+        private void SuppressRemoteBossDeathCineIfNeeded()
+        {
+            if (_netRole != NetRole.Client || _net == null || !_net.IsAlive)
+                return;
+
+            try
+            {
+                var game = dc.pr.Game.Class.ME;
+                var cine = game?.curCine;
+                if (cine == null || cine.destroyed)
+                    return;
+
+                if (cine is DeadBase || cine is RemoteDownedCorpse)
+                    return;
+
+                var typeName = cine.GetType().Name ?? string.Empty;
+                if (!BossDeathCineTypeNames.Contains(typeName))
+                    return;
+
+                SuppressRemoteBossDeathCineState(cine);
+            }
+            catch
+            {
+            }
+        }
+
+        private bool ShouldSuppressRemoteBossDeathCineConstruction()
+        {
+            return _netRole == NetRole.Client && _net != null && _net.IsAlive;
+        }
+
+        private void SuppressRemoteBossDeathCineState(dc.GameCinematic? cine)
+        {
+            try
+            {
+                var game = dc.pr.Game.Class.ME;
+                if (game != null && cine != null && ReferenceEquals(game.curCine, cine))
+                    game.curCine = null;
+            }
+            catch
+            {
+            }
+
+            try { cine?.destroy(); } catch { }
+            try { cine?.disposeImmediately(); } catch { }
+            try { me?.cancelSkillControlLock(); } catch { }
+            try { me?.unlockControls(); } catch { }
+            EnsureHeroVisibilityAfterRoomChange(me);
+        }
+
+        private void Hook__BeholderDeath__constructor__(Hook__BeholderDeath.orig___constructor__ orig, BeholderDeath e, Beholder boss)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, boss);
+        }
+
+        private void Hook__GiantDeath__constructor__(Hook__GiantDeath.orig___constructor__ orig, GiantDeath e, Hero heroTarget)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, heroTarget);
+        }
+
+        private void Hook__GiantDeath4__constructor__(Hook__GiantDeath4.orig___constructor__ orig, GiantDeath4 e, Hero heroTarget)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, heroTarget);
+        }
+
+        private void Hook__KillKingCinem__constructor__(Hook__KillKingCinem.orig___constructor__ orig, KillKingCinem e, HlAction tween)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, tween);
+        }
+
+        private void Hook__KillQueenCinem__constructor__(Hook__KillQueenCinem.orig___constructor__ orig, KillQueenCinem e)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e);
+        }
+
+        private void Hook__QueenDefeated__constructor__(Hook__QueenDefeated.orig___constructor__ orig, QueenDefeated e, Queen queen, HlAction dialogEnd)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, queen, dialogEnd);
+        }
+
+        private void Hook__KillDookuBeastCinem__constructor__(Hook__KillDookuBeastCinem.orig___constructor__ orig, KillDookuBeastCinem e)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e);
+        }
+
+        private void Hook__FakeKillDooku__constructor__(Hook__FakeKillDooku.orig___constructor__ orig, FakeKillDooku e, Hero manager, DookuManager instant, Ref<bool> instantRef)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, manager, instant, instantRef);
+        }
+
+        private void Hook__RichterDeath__constructor__(Hook__RichterDeath.orig___constructor__ orig, RichterDeath e, Hero lostBody, bool titleLib)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, lostBody, titleLib);
+        }
+
+        private void Hook__EndCollectorPreSmash__constructor__(Hook__EndCollectorPreSmash.orig___constructor__ orig, EndCollectorPreSmash e, dc.en.mob.Boss boss, HlAction lt)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, boss, lt);
+        }
+
+        private void Hook__SmashCinem__constructor__(Hook__SmashCinem.orig___constructor__ orig, SmashCinem e, bool hasKingSkin, HlAction endCb)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e, hasKingSkin, endCb);
+        }
+
+        private void Hook__EndCollectorPostSmash__constructor__(Hook__EndCollectorPostSmash.orig___constructor__ orig, EndCollectorPostSmash e)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e);
+        }
+
+        private void Hook__EndCollectorPostSmashKS__constructor__(Hook__EndCollectorPostSmashKS.orig___constructor__ orig, EndCollectorPostSmashKS e)
+        {
+            if (ShouldSuppressRemoteBossDeathCineConstruction())
+            {
+                SuppressRemoteBossDeathCineState(e);
+                return;
+            }
+
+            orig(e);
         }
 
 
