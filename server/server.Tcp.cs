@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -106,17 +105,11 @@ public sealed partial class NetNode
                     break;
                 }
 
-                int assignedId;
-                lock (UsedClientIds)
+                if (!TryTakeNextUnusedClientId(out var assignedId))
                 {
-                    assignedId = ClientIds.FirstOrDefault(id => !UsedClientIds.Contains(id));
-                    if (assignedId == 0)
-                    {
-                        _log.Warning("[NetNode] Max players reached, kicking client");
-                        try { tcp.Close(); } catch { }
-                        continue;
-                    }
-                    UsedClientIds.Add(assignedId);
+                    _log.Warning("[NetNode] Max players reached, kicking client");
+                    try { tcp.Close(); } catch { }
+                    continue;
                 }
                 tcp.NoDelay = true;
                 var connection = new ClientConnection(tcp, assignedId);
@@ -330,7 +323,12 @@ public sealed partial class NetNode
         List<ClientConnection> snapshot;
         lock (_clientsLock)
         {
-            snapshot = _clients.Values.Where(c => c.AssignedId != sender.AssignedId).ToList();
+            snapshot = new List<ClientConnection>(_clients.Count);
+            foreach (var c in _clients.Values)
+            {
+                if (c.AssignedId != sender.AssignedId)
+                    snapshot.Add(c);
+            }
         }
 
         foreach (var client in snapshot)

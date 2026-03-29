@@ -27,13 +27,8 @@ namespace DeadCellsMultiplayerMod
         private double _targetX;
         private double _targetY;
         private int _targetDir;
-        private bool _hasHeadTarget;
         private double _headTargetX;
         private double _headTargetY;
-        private bool _hasHomunculusPose;
-        private double _lastHomunculusX;
-        private double _lastHomunculusY;
-        private int _lastHomunculusDir;
         private bool _hasHeadAnimTarget;
         private string? _headAnimTarget;
         private string? _interactionLabelText;
@@ -76,13 +71,11 @@ namespace DeadCellsMultiplayerMod
             {
                 _headTargetX = headX.Value;
                 _headTargetY = headY.Value;
-                _hasHeadTarget = true;
             }
             else
             {
                 _headTargetX = x;
                 _headTargetY = y;
-                _hasHeadTarget = false;
             }
             if (!string.IsNullOrWhiteSpace(headAnim))
             {
@@ -765,7 +758,6 @@ namespace DeadCellsMultiplayerMod
         {
             var hom = _homunculus;
             _homunculus = null;
-            _hasHomunculusPose = false;
             _hasHeadAnimTarget = false;
             _headAnimTarget = null;
             if (hom == null)

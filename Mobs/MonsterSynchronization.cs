@@ -53,14 +53,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly Dictionary<int, CachedHostMobPayload> hostCachedPayloadBySyncId = new();
         private static readonly Dictionary<int, long> hostAttackRetargetLockUntilTick = new();
         private static readonly List<Entity> hostDetectedTargets = new();
+        private static readonly List<Mob> s_batchMobsScratch = new();
+        private static readonly List<NetNode.MobStateSnapshot> s_batchSnapshotsScratch = new();
         private static int suppressMobDieSendDepth;
 
         private static Level? currentLevel;
-        private static Level? lastClientNetPumpLevel;
-        private static Level? lastHostNetPumpLevel;
         private static Level? lastHostStateDeltaPumpLevel;
-        private static double lastClientNetPumpFrame = double.NaN;
-        private static double lastHostNetPumpFrame = double.NaN;
         private static double lastHostStateDeltaPumpFrame = double.NaN;
         private static long lastClientMobDrawSendTick;
         private static long lastClientStateSendTick;
@@ -361,16 +359,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             EnsureMobTracked(self);
-
-            if (isClient && ShouldRunClientNetPumpForFrame(self))
-            {
-                ConsumeIncomingHostMobStates(net!);
-                ConsumeIncomingHostMobAttacks(net!);
-                ConsumeIncomingMobDies(net!);
-                ConsumeIncomingMobHits(net!);
-                TrySendClientMobDraws(net!);
-                TrySendClientMobStateDeltaBatchPreUpdate(net!);
-            }
 
             if (isClient && IsSyncMob(self) && ShouldLockClientMobAi(self))
             {
@@ -764,32 +752,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return false;
         }
 
-        private static void TrySendImmediateHostMobState(NetNode net, int mobSyncId, Mob mob, double x, double y)
-        {
-            if (!IsHost(net) || mob == null || mobSyncId < 0)
-                return;
-
-            var dir = NormalizeDir(mob.dir);
-            var life = mob.life;
-            var maxLife = mob.maxLife;
-            var animPayload = BuildAnimPayload(mob);
-            var mobType = BuildMobStateTypeSignature(mob);
-            var statePayload = BuildMobAffectStatePayload(mob, includeBossStateForHost: true);
-
-            var one = new List<NetNode.MobStateSnapshot>(1)
-            {
-                new(mobSyncId, x, y, dir, life, maxLife, animPayload, mobType, statePayload)
-            };
-
-            lock (Sync)
-            {
-                hostLastSentMobStatesBySyncId[mobSyncId] = new HostMobSentState(
-                    x, y, dir, life, maxLife, animPayload, mobType, statePayload);
-            }
-
-            net.SendMobStates(one);
-        }
-
         private static void TrySendHostMobStateDeltaBatchPreUpdate(NetNode net)
         {
             if (!IsHost(net))
@@ -806,36 +768,35 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var now = Stopwatch.GetTimestamp();
 
-            List<Mob> mobs;
             lock (Sync)
             {
                 PruneInvalidTrackedMobsLocked();
                 if (trackedMobs.Count == 0)
                     return;
 
-                mobs = new List<Mob>(trackedMobs.Count);
+                s_batchMobsScratch.Clear();
                 for (int i = 0; i < trackedMobs.Count; i++)
                 {
                     var mob = trackedMobs[i];
                     if (mob != null && IsSyncMob(mob))
-                        mobs.Add(mob);
+                        s_batchMobsScratch.Add(mob);
                 }
             }
 
-            if (mobs.Count == 0)
+            if (s_batchMobsScratch.Count == 0)
                 return;
 
-            var deltas = new List<NetNode.MobStateSnapshot>(mobs.Count);
-            for (int i = 0; i < mobs.Count; i++)
+            s_batchSnapshotsScratch.Clear();
+            for (int i = 0; i < s_batchMobsScratch.Count; i++)
             {
-                if (TryBuildHostMobStateDeltaSnapshot(mobs[i], now, trackedMobCount, out var snapshot))
-                    deltas.Add(snapshot);
+                if (TryBuildHostMobStateDeltaSnapshot(s_batchMobsScratch[i], now, trackedMobCount, out var snapshot))
+                    s_batchSnapshotsScratch.Add(snapshot);
             }
 
-            if (deltas.Count > 0)
+            if (s_batchSnapshotsScratch.Count > 0)
             {
                 lastHostStateSendTick = now;
-                net.SendMobStates(deltas);
+                net.SendMobStates(s_batchSnapshotsScratch);
             }
         }
 
@@ -855,36 +816,35 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var now = Stopwatch.GetTimestamp();
 
-            List<Mob> mobs;
             lock (Sync)
             {
                 PruneInvalidTrackedMobsLocked();
                 if (trackedMobs.Count == 0)
                     return;
 
-                mobs = new List<Mob>(trackedMobs.Count);
+                s_batchMobsScratch.Clear();
                 for (int i = 0; i < trackedMobs.Count; i++)
                 {
                     var mob = trackedMobs[i];
                     if (mob != null && IsSyncMob(mob))
-                        mobs.Add(mob);
+                        s_batchMobsScratch.Add(mob);
                 }
             }
 
-            if (mobs.Count == 0)
+            if (s_batchMobsScratch.Count == 0)
                 return;
 
-            var affectResendTicks = (long)(Stopwatch.Frequency * ComputeAdaptiveAffectResendSeconds(mobs.Count));
-            var deltas = new List<NetNode.MobStateSnapshot>(mobs.Count);
-            for (int i = 0; i < mobs.Count; i++)
+            var affectResendTicks = (long)(Stopwatch.Frequency * ComputeAdaptiveAffectResendSeconds(s_batchMobsScratch.Count));
+            s_batchSnapshotsScratch.Clear();
+            for (int i = 0; i < s_batchMobsScratch.Count; i++)
             {
-                var mob = mobs[i];
+                var mob = s_batchMobsScratch[i];
                 if (mob == null)
                     continue;
                 if (!TryGetMobSyncId(mob, out var mobSyncId) || mobSyncId < 0)
                     continue;
 
-                var statePayload = GetClientAffectPayloadForSend(mob, mobSyncId, now, mobs.Count);
+                var statePayload = GetClientAffectPayloadForSend(mob, mobSyncId, now, s_batchMobsScratch.Count);
                 var shouldSend = false;
                 var hasAnyState = !string.IsNullOrWhiteSpace(statePayload);
 
@@ -905,7 +865,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (!shouldSend)
                     continue;
 
-                deltas.Add(new NetNode.MobStateSnapshot(
+                s_batchSnapshotsScratch.Add(new NetNode.MobStateSnapshot(
                     mobSyncId,
                     0.0,
                     0.0,
@@ -917,10 +877,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     statePayload));
             }
 
-            if (deltas.Count > 0)
+            if (s_batchSnapshotsScratch.Count > 0)
             {
                 lastClientStateSendTick = now;
-                net.SendMobStates(deltas);
+                net.SendMobStates(s_batchSnapshotsScratch);
             }
         }
 
@@ -1581,11 +1541,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             hostQueuedOldSkillMarkers.Clear();
             hostDetectedTargets.Clear();
             currentLevel = null;
-            lastClientNetPumpLevel = null;
-            lastHostNetPumpLevel = null;
             lastHostStateDeltaPumpLevel = null;
-            lastClientNetPumpFrame = double.NaN;
-            lastHostNetPumpFrame = double.NaN;
             lastHostStateDeltaPumpFrame = double.NaN;
             lastClientMobDrawSendTick = 0;
             lastClientStateSendTick = 0;
@@ -2272,11 +2228,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return !IsWithinClientNetworkAttackAiPreserveWindow(mob, localIndex);
         }
 
-        private static bool ShouldRunClientNetPumpForFrame(Mob mob)
-        {
-            return ShouldRunNetPumpForFrame(mob, isClientPump: true);
-        }
-
         private static bool ShouldRunHostStateDeltaPumpForFrame(Mob mob)
         {
             var level = mob._level ?? currentLevel;
@@ -2295,39 +2246,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             return false;
-        }
-
-        private static bool ShouldRunNetPumpForFrame(Mob mob, bool isClientPump)
-        {
-            var level = mob._level ?? currentLevel;
-            if (level == null)
-                return true;
-
-            var frame = level.ftime;
-
-            lock (Sync)
-            {
-                if (isClientPump)
-                {
-                    if (!ReferenceEquals(lastClientNetPumpLevel, level) || lastClientNetPumpFrame != frame)
-                    {
-                        lastClientNetPumpLevel = level;
-                        lastClientNetPumpFrame = frame;
-                        return true;
-                    }
-
-                    return false;
-                }
-
-                if (!ReferenceEquals(lastHostNetPumpLevel, level) || lastHostNetPumpFrame != frame)
-                {
-                    lastHostNetPumpLevel = level;
-                    lastHostNetPumpFrame = frame;
-                    return true;
-                }
-
-                return false;
-            }
         }
 
         private static void TryAssignHostAttackTarget(Mob mob)

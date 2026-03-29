@@ -91,8 +91,6 @@ namespace DeadCellsMultiplayerMod
         private string? _lastAnimSent;
         private int? _lastAnimQueueSent;
         private bool? _lastAnimGSent;
-        private double _animResendElapsed;
-        private double? _lastAnimPlayRatio;
         private long _suppressHeroAnimUntilTicks;
         private string? _lastSentHeroSkin;
         private string? _lastSentHeroHeadSkin;
@@ -1190,35 +1188,9 @@ namespace DeadCellsMultiplayerMod
         }
 
 
-        private void Hook_MobsGen_addElites(Hook_MobsGen.orig_addElites orig, MobsGen self, ArrayObj mobsPerRooms)
-        {
-            orig(self, mobsPerRooms);
-            dynamic mobs = mobsPerRooms.array.Count;
-            dynamic b = mobsPerRooms.array;
-            for (int i = 0; i < mobs; i++)
-            {
-                var m = b[i];
-                // Logger.Information($"[DEBUG|MOB] mobs at index {i}: {m}");
-
-            }
-        }
-
-        private void Hook_LevelGen_genmobs(Hook_LevelGen.orig_genMobs orig, LevelGen self, User maps, ArrayObj extraMobs, ArrayObj bonusTotalMobCount1, Ref<int> bonusTotalMobCount)
-        {
-            orig(self, maps, extraMobs, bonusTotalMobCount1, bonusTotalMobCount);
-            dynamic count = extraMobs.array.Count;
-            for (int i = 0; i < count; i++)
-            {
-                var mobs = extraMobs.array[i];
-            }
-        }
-
         private void hook_boot_update(Hook_Boot.orig_update orig, Boot self, double dt)
         {
             orig(self, dt);
-            TryRunSteamCallbacks();
-            TryDeferredSteamOverlayCallbackRegistration();
-            TryPollSteamOverlayJoinFromLaunchData();
             GameMenu.ProcessMainThreadQueue();
             GameMenu.HandleTextInputClipboardShortcuts();
             _ghost?.UpdateLabels();
@@ -1417,9 +1389,6 @@ namespace DeadCellsMultiplayerMod
         public void OnFrameUpdate(double dt)
         {
             if (!_ready) return;
-            TryRunSteamCallbacks();
-            TryDeferredSteamOverlayCallbackRegistration();
-            TryPollSteamOverlayJoinFromLaunchData();
             GameMenu.ProcessMainThreadQueue();
             GameMenu.TickMenu(dt);
             DetectAndSendBossCine();
@@ -3299,8 +3268,6 @@ namespace DeadCellsMultiplayerMod
             _lastAnimSent = anim;
             _lastAnimQueueSent = queueAnim;
             _lastAnimGSent = g;
-            _animResendElapsed = 0;
-            _lastAnimPlayRatio = null;
         }
 
 

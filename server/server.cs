@@ -507,6 +507,26 @@ public sealed partial class NetNode : IDisposable
 
     private static readonly HashSet<int> UsedClientIds = new();
 
+    private static bool TryTakeNextUnusedClientId(out int assignedId)
+    {
+        lock (UsedClientIds)
+        {
+            for (var i = 0; i < ClientIds.Length; i++)
+            {
+                var id = ClientIds[i];
+                if (!UsedClientIds.Contains(id))
+                {
+                    UsedClientIds.Add(id);
+                    assignedId = id;
+                    return true;
+                }
+            }
+
+            assignedId = 0;
+            return false;
+        }
+    }
+
     private readonly object _clientsLock = new();
     private readonly Dictionary<int, ClientConnection> _clients = new();
     private readonly Dictionary<int, SteamClientConnection> _steamClients = new();
@@ -902,16 +922,10 @@ public sealed partial class NetNode : IDisposable
             }
         }
 
-        int assignedId;
-        lock (UsedClientIds)
+        if (!TryTakeNextUnusedClientId(out var assignedId))
         {
-            assignedId = ClientIds.FirstOrDefault(id => !UsedClientIds.Contains(id));
-            if (assignedId == 0)
-            {
-                _log.Warning("[NetNode] Max players reached, ignoring Steam client {SteamId}", steamKey);
-                return false;
-            }
-            UsedClientIds.Add(assignedId);
+            _log.Warning("[NetNode] Max players reached, ignoring Steam client {SteamId}", steamKey);
+            return false;
         }
 
         if (_steamBridge != null && _steamBridge.LocalSteamId != 0UL && _steamBridge.LocalSteamId == steamKey)
@@ -2062,7 +2076,12 @@ public sealed partial class NetNode : IDisposable
         List<SteamClientConnection> snapshot;
         lock (_clientsLock)
         {
-            snapshot = _steamClients.Values.Where(c => c.AssignedId != sender.AssignedId).ToList();
+            snapshot = new List<SteamClientConnection>(_steamClients.Count);
+            foreach (var c in _steamClients.Values)
+            {
+                if (c.AssignedId != sender.AssignedId)
+                    snapshot.Add(c);
+            }
         }
 
         foreach (var client in snapshot)
@@ -3532,7 +3551,9 @@ public sealed partial class NetNode : IDisposable
             List<SteamClientConnection> steamSnapshot;
             lock (_clientsLock)
             {
-                steamSnapshot = _steamClients.Values.ToList();
+                steamSnapshot = new List<SteamClientConnection>(_steamClients.Count);
+                foreach (var c in _steamClients.Values)
+                    steamSnapshot.Add(c);
             }
             if (steamSnapshot.Count == 0) return;
             var sendType = ResolveSteamSendType(line);
@@ -3548,10 +3569,14 @@ public sealed partial class NetNode : IDisposable
         List<ClientConnection> snapshot;
         lock (_clientsLock)
         {
-            snapshot = _clients.Values.ToList();
+            snapshot = new List<ClientConnection>(_clients.Count);
+            foreach (var c in _clients.Values)
+                snapshot.Add(c);
         }
         if (snapshot.Count == 0) return;
-        var tasks = snapshot.Select(client => SendLineToClientSafe(client, line));
+        var tasks = new Task[snapshot.Count];
+        for (var i = 0; i < snapshot.Count; i++)
+            tasks[i] = SendLineToClientSafe(snapshot[i], line);
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
@@ -5000,8 +5025,12 @@ public sealed partial class NetNode : IDisposable
         List<SteamClientConnection> steamClients;
         lock (_clientsLock)
         {
-            clients = _clients.Values.ToList();
-            steamClients = _steamClients.Values.ToList();
+            clients = new List<ClientConnection>(_clients.Count);
+            foreach (var c in _clients.Values)
+                clients.Add(c);
+            steamClients = new List<SteamClientConnection>(_steamClients.Count);
+            foreach (var c in _steamClients.Values)
+                steamClients.Add(c);
             _clients.Clear();
             _steamClients.Clear();
             _steamClientIdsBySteam.Clear();
