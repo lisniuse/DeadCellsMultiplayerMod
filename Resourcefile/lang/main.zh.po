@@ -108,6 +108,78 @@ msgstr "加入"
 msgid "Connect to host"
 msgstr "连接到主机"
 
+#: GameMenu.cs:611
+msgid "Lan host"
+msgstr "局域网主机"
+
+#: GameMenu.cs:627
+msgid "Steam host"
+msgstr "Steam 主机"
+
+#: GameMenu.cs:625
+msgid "Use direct IP/port hosting"
+msgstr "使用 IP/端口直连创建房间"
+
+#: GameMenu.cs:631
+msgid "Create Steam lobby and start immediately"
+msgstr "创建 Steam 房间并立即开始"
+
+#: GameMenu.cs:667
+msgid "Lan join"
+msgstr "局域网加入"
+
+#: GameMenu.cs:675
+msgid "Steam join"
+msgstr "Steam 加入"
+
+#: GameMenu.cs:671
+msgid "Connect by IP/port"
+msgstr "通过 IP/端口连接"
+
+#: GameMenu.cs:677
+msgid "Connect by Steam lobby id/code from clipboard"
+msgstr "通过剪贴板中的 Steam 房间 ID/代码连接"
+
+#: GameMenu.cs:821
+msgid "Steam host failed"
+msgstr "Steam 主机失败"
+
+#: GameMenu.cs:822
+msgid "Could not start Steam host. Check console logs."
+msgstr "无法启动 Steam 主机。请查看控制台日志。"
+
+#: GameMenu.cs:835
+msgid "Steam lobby creation failed. Check console logs."
+msgstr "Steam 房间创建失败。请查看控制台日志。"
+
+#: GameMenu.cs:934
+msgid "Connecting to Steam lobby..."
+msgstr "正在连接 Steam 房间..."
+
+#: GameMenu.cs:960
+msgid "Steam join failed"
+msgstr "Steam 加入失败"
+
+#: GameMenu.cs:961
+msgid "Steam join failed. Check console logs."
+msgstr "Steam 加入失败。请查看控制台日志。"
+
+#: GameMenu.cs:975
+msgid "Steam lobby endpoint is invalid. Check console logs."
+msgstr "Steam 房间端点无效。请查看控制台日志。"
+
+#: GameMenu.cs:1019
+msgid "Return to previous menu"
+msgstr "返回上一菜单"
+
+#: GameMenu.cs:1073
+msgid "Steam host id is missing. Check console logs."
+msgstr "缺少 Steam 主机 ID。请查看控制台日志。"
+
+#: GameMenu.cs:604
+msgid "Back to multiplayer menu"
+msgstr "返回多人游戏菜单"
+
 #: GameMenu.cs:637
 msgid "Play"
 msgstr "开始游戏"
@@ -152,9 +224,9 @@ msgstr "IP地址"
 msgid "Port"
 msgstr "端口"
 
-#: GameMenu.cs:1111
-msgid "connecting"
-msgstr "连接"
+#: GameMenu.cs:1899
+msgid "connecting..."
+msgstr "连接中..."
 
 #: GameMenu.cs:1115
 msgid "waiting for the host"

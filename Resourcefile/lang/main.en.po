@@ -56,3 +56,58 @@ msgstr "Hold to revive."
 
 msgid "Game Over"
 msgstr "Game Over"
+
+#: GameMenu.cs (transport / Steam)
+msgid "Lan host"
+msgstr ""
+
+msgid "Steam host"
+msgstr ""
+
+msgid "Use direct IP/port hosting"
+msgstr ""
+
+msgid "Create Steam lobby and start immediately"
+msgstr ""
+
+msgid "Lan join"
+msgstr ""
+
+msgid "Steam join"
+msgstr ""
+
+msgid "Connect by IP/port"
+msgstr ""
+
+msgid "Connect by Steam lobby id/code from clipboard"
+msgstr ""
+
+msgid "Steam host failed"
+msgstr ""
+
+msgid "Could not start Steam host. Check console logs."
+msgstr ""
+
+msgid "Steam lobby creation failed. Check console logs."
+msgstr ""
+
+msgid "Connecting to Steam lobby..."
+msgstr ""
+
+msgid "Steam join failed"
+msgstr ""
+
+msgid "Steam join failed. Check console logs."
+msgstr ""
+
+msgid "Steam lobby endpoint is invalid. Check console logs."
+msgstr ""
+
+msgid "Return to previous menu"
+msgstr ""
+
+msgid "Steam host id is missing. Check console logs."
+msgstr ""
+
+msgid "Back to multiplayer menu"
+msgstr ""

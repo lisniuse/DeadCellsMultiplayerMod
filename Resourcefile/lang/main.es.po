@@ -54,3 +54,58 @@ msgstr "Mantén para revivir."
 
 msgid "Game Over"
 msgstr "Fin del juego"
+
+#: GameMenu.cs (transport / Steam)
+msgid "Lan host"
+msgstr "Anfitrión LAN"
+
+msgid "Steam host"
+msgstr "Anfitrión Steam"
+
+msgid "Use direct IP/port hosting"
+msgstr "Usar alojamiento directo por IP/puerto"
+
+msgid "Create Steam lobby and start immediately"
+msgstr "Crear lobby de Steam y empezar de inmediato"
+
+msgid "Lan join"
+msgstr "Unirse por LAN"
+
+msgid "Steam join"
+msgstr "Unirse por Steam"
+
+msgid "Connect by IP/port"
+msgstr "Conectar por IP/puerto"
+
+msgid "Connect by Steam lobby id/code from clipboard"
+msgstr "Conectar con ID/código de lobby de Steam del portapapeles"
+
+msgid "Steam host failed"
+msgstr "Error de anfitrión Steam"
+
+msgid "Could not start Steam host. Check console logs."
+msgstr "No se pudo iniciar el anfitrión Steam. Revisa la consola."
+
+msgid "Steam lobby creation failed. Check console logs."
+msgstr "Falló la creación del lobby de Steam. Revisa la consola."
+
+msgid "Connecting to Steam lobby..."
+msgstr "Conectando al lobby de Steam..."
+
+msgid "Steam join failed"
+msgstr "Error al unirse por Steam"
+
+msgid "Steam join failed. Check console logs."
+msgstr "Error al unirse por Steam. Revisa la consola."
+
+msgid "Steam lobby endpoint is invalid. Check console logs."
+msgstr "El extremo del lobby de Steam no es válido. Revisa la consola."
+
+msgid "Return to previous menu"
+msgstr "Volver al menú anterior"
+
+msgid "Steam host id is missing. Check console logs."
+msgstr "Falta el ID de anfitrión de Steam. Revisa la consola."
+
+msgid "Back to multiplayer menu"
+msgstr "Volver al menú multijugador"

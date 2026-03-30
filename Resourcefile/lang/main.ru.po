@@ -109,6 +109,74 @@ msgstr "Присоединиться"
 msgid "Connect to host"
 msgstr "Присоединиться в лобби"
 
+#: GameMenu.cs:611
+msgid "Lan host"
+msgstr "Хост по LAN"
+
+#: GameMenu.cs:627
+msgid "Steam host"
+msgstr "Хост Steam"
+
+#: GameMenu.cs:625
+msgid "Use direct IP/port hosting"
+msgstr "Прямое подключение по IP и порту"
+
+#: GameMenu.cs:631
+msgid "Create Steam lobby and start immediately"
+msgstr "Создать лобби Steam и сразу начать"
+
+#: GameMenu.cs:667
+msgid "Lan join"
+msgstr "Подключение по LAN"
+
+#: GameMenu.cs:675
+msgid "Steam join"
+msgstr "Подключение через Steam"
+
+#: GameMenu.cs:671
+msgid "Connect by IP/port"
+msgstr "Подключиться по IP и порту"
+
+#: GameMenu.cs:677
+msgid "Connect by Steam lobby id/code from clipboard"
+msgstr "Подключение по ID/коду лобби Steam из буфера обмена"
+
+#: GameMenu.cs:821
+msgid "Steam host failed"
+msgstr "Ошибка хоста Steam"
+
+#: GameMenu.cs:822
+msgid "Could not start Steam host. Check console logs."
+msgstr "Не удалось запустить хост Steam. Смотрите логи консоли."
+
+#: GameMenu.cs:835
+msgid "Steam lobby creation failed. Check console logs."
+msgstr "Не удалось создать лобби Steam. Смотрите логи консоли."
+
+#: GameMenu.cs:934
+msgid "Connecting to Steam lobby..."
+msgstr "Подключение к лобби Steam..."
+
+#: GameMenu.cs:960
+msgid "Steam join failed"
+msgstr "Ошибка подключения Steam"
+
+#: GameMenu.cs:961
+msgid "Steam join failed. Check console logs."
+msgstr "Ошибка подключения Steam. Смотрите логи консоли."
+
+#: GameMenu.cs:975
+msgid "Steam lobby endpoint is invalid. Check console logs."
+msgstr "Неверная конечная точка лобби Steam. Смотрите логи консоли."
+
+#: GameMenu.cs:1019
+msgid "Return to previous menu"
+msgstr "Вернуться в предыдущее меню"
+
+#: GameMenu.cs:1073
+msgid "Steam host id is missing. Check console logs."
+msgstr "Отсутствует Steam ID хоста. Смотрите логи консоли."
+
 #: GameMenu.cs:637
 msgid "Play"
 msgstr "Играть"
