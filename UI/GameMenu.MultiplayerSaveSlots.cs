@@ -56,7 +56,7 @@ namespace DeadCellsMultiplayerMod
 
         private static string GetMultiplayerSaveButtonLabel()
         {
-            return $"Save: current slot(Slot {ResolveSaveSlotNumber(null) + 1})";
+            return $"Save: Slot {ResolveSaveSlotNumber(null) + 1}";
         }
 
         private static void OpenMultiplayerSlotMenu(TitleScreen screen)
