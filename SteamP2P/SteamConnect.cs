@@ -1801,6 +1801,12 @@ namespace DeadCellsMultiplayerMod
                 InstallAssemblyResolver();
                 TryPreloadSteamworksAssembly();
 
+                if (string.Equals(Environment.GetEnvironmentVariable(MobSyncWorkerEnvironment.EnvChildMode), "1", StringComparison.OrdinalIgnoreCase))
+                {
+                    MobSyncWorker.WorkerEntry();
+                    return;
+                }
+
                 var workerMode = Environment.GetEnvironmentVariable(EnvWorkerMode);
                 if (string.Equals(workerMode, SteamP2PWorkerEnvironment.WorkerModeP2P, StringComparison.OrdinalIgnoreCase))
                 {

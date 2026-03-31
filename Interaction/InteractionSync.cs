@@ -45,6 +45,9 @@ public class InteractionSync :
     private bool _applyingRemoteTeleportEvents;
     private bool _applyingRemoteBreakableGroundEvents;
     private bool _applyingRemotePortalEvents;
+    private bool _applyingRemoteElevatorEvents;
+    /// <summary>Throttle elevator INTERELEV sends — onStep can fire every frame while riding.</summary>
+    private readonly Dictionary<Elevator, long> _elevatorLastInterSendTickMs = new();
 
     public InteractionSync(ModEntry entry)
     {
@@ -206,7 +209,43 @@ public class InteractionSync :
     private void Hook_Elevator_onStep(Hook_Elevator.orig_onStep orig, Elevator self)
     {
         orig(self);
-        TrySendInteractEvent(self, (x, y) => GameMenu.NetRef!.SendInterElevator(x, y), "Elevator");
+        if (_applyingRemoteElevatorEvents)
+            return;
+        if (!IsNetReadyForSend(GameMenu.NetRef))
+            return;
+        try
+        {
+            var now = System.Environment.TickCount64;
+            if (_elevatorLastInterSendTickMs.TryGetValue(self, out var last) && now - last < ElevatorInterSendMinIntervalMs)
+                return;
+            _elevatorLastInterSendTickMs[self] = now;
+
+            var (x, y) = GetElevatorStableAnchor(self);
+            GameMenu.NetRef!.SendInterElevator(x, y);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[InteractionSync] Elevator send failed");
+        }
+    }
+
+    private const int ElevatorInterSendMinIntervalMs = 100;
+
+    /// <summary>
+    /// Tile/cell anchor for an elevator (stable across movement). Sprite position drifts and breaks matching on peers.
+    /// </summary>
+    private static (double x, double y) GetElevatorStableAnchor(Elevator e)
+    {
+        if (e == null)
+            return (0, 0);
+        try
+        {
+            return ((e.cx + e.xr) * TileSizePx, (e.cy + e.yr) * TileSizePx);
+        }
+        catch
+        {
+            return GetEntityPixelPos(e);
+        }
     }
 
     private void Hook_PressurePlate_trigger(Hook_PressurePlate.orig_trigger orig, PressurePlate self, Entity by)
@@ -595,23 +634,35 @@ public class InteractionSync :
         if (level == null || events == null || events.Count == 0)
             return;
 
-        foreach (var ev in events)
+        _applyingRemoteElevatorEvents = true;
+        try
         {
-            var elevator = FindElevatorByPos(level, ev.X, ev.Y);
-            if (elevator == null)
+            var applied = new HashSet<Elevator>();
+            foreach (var ev in events)
             {
-                _log.Warning("[InteractionSync] No Elevator found at x={X} y={Y}", ev.X, ev.Y);
-                continue;
-            }
+                var elevator = FindElevatorByPos(level, ev.X, ev.Y);
+                if (elevator == null)
+                {
+                    _log.Warning("[InteractionSync] No Elevator found at x={X} y={Y}", ev.X, ev.Y);
+                    continue;
+                }
 
-            try
-            {
-                elevator.onStep();
+                if (!applied.Add(elevator))
+                    continue;
+
+                try
+                {
+                    elevator.onStep();
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "[InteractionSync] Apply elevator event failed x={X} y={Y}", ev.X, ev.Y);
+                }
             }
-            catch (Exception ex)
-            {
-                _log.Warning(ex, "[InteractionSync] Apply elevator event failed x={X} y={Y}", ev.X, ev.Y);
-            }
+        }
+        finally
+        {
+            _applyingRemoteElevatorEvents = false;
         }
     }
 
@@ -830,6 +881,10 @@ public class InteractionSync :
 
     private static Elevator? FindElevatorByPos(Level level, double x, double y)
     {
+        var byAnchor = FindElevatorByStableAnchor(level, x, y);
+        if (byAnchor != null)
+            return byAnchor;
+
         var byPos = FindInteractByPos<Elevator>(level, x, y, ElevatorPosTolerance);
         if (byPos != null)
             return byPos;
@@ -842,6 +897,32 @@ public class InteractionSync :
         if (nearest != null)
             return nearest;
         return FindElevatorInTriggers(level, x, y);
+    }
+
+    private static Elevator? FindElevatorByStableAnchor(Level level, double anchorX, double anchorY)
+    {
+        if (level?.entities == null)
+            return null;
+
+        for (var i = 0; i < level.entities.length; i++)
+        {
+            var e = level.entities.getDyn(i) as Elevator;
+            if (e == null)
+                continue;
+            try
+            {
+                var (ax, ay) = GetElevatorStableAnchor(e);
+                if (System.Math.Abs(ax - anchorX) < ElevatorPosTolerance &&
+                    System.Math.Abs(ay - anchorY) < ElevatorPosTolerance)
+                    return e;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return null;
     }
 
     private static Elevator? FindElevatorByTrackBounds(Level level, double x, double y)

@@ -1726,7 +1726,7 @@ public sealed partial class NetNode : IDisposable
                 }
 
                 if (_role == NetRole.Host && senderId.HasValue)
-                    forwardLine = BuildMobDieLine(die);
+                    forwardLine = MobWireCodec.BuildMobDieLine(die);
             }
             return true;
         }
@@ -3254,178 +3254,6 @@ public sealed partial class NetNode : IDisposable
         }
     }
 
-    private static string BuildMobStatesLine(IReadOnlyList<MobStateSnapshot> states)
-    {
-        var sb = new StringBuilder("MOBSTATE|");
-        if (states != null)
-        {
-            for (int i = 0; i < states.Count; i++)
-            {
-                var state = states[i];
-                if (i > 0)
-                    sb.Append(';');
-                sb.Append(state.Index.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(state.X.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(state.Y.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(state.Dir.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(state.Life.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(state.MaxLife.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(state.AnimPayload ?? string.Empty);
-                sb.Append(',');
-                sb.Append(state.Type ?? string.Empty);
-                sb.Append(',');
-                sb.Append(state.StatePayload ?? string.Empty);
-            }
-        }
-        sb.Append('\n');
-        return sb.ToString();
-    }
-
-    private static string BuildMobEventsLine(IReadOnlyList<MobEventUpdate> updates)
-    {
-        const char EventSep = '\u00A7'; // section sign - events contain '|' so we use different separator
-        var sb = new StringBuilder("MOBEVENT|");
-        if (updates != null)
-        {
-            for (int i = 0; i < updates.Count; i++)
-            {
-                var u = updates[i];
-                if (i > 0)
-                    sb.Append(';');
-                sb.Append(u.Index.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(u.X.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(u.Y.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(u.Dir.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(u.Type ?? string.Empty);
-                if (u.Events != null)
-                {
-                    for (int j = 0; j < u.Events.Count; j++)
-                    {
-                        sb.Append(EventSep);
-                        sb.Append(u.Events[j] ?? string.Empty);
-                    }
-                }
-            }
-        }
-        sb.Append('\n');
-        return sb.ToString();
-    }
-
-    private static string BuildMobMovesLine(IReadOnlyList<MobMoveSnapshot> moves)
-    {
-        var sb = new StringBuilder("MOBMOVE|");
-        if (moves != null)
-        {
-            for (int i = 0; i < moves.Count; i++)
-            {
-                var move = moves[i];
-                if (i > 0)
-                    sb.Append(';');
-                sb.Append(move.Index.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(move.X.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(move.Y.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(move.Dir.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(move.AnimPayload ?? string.Empty);
-            }
-        }
-        sb.Append('\n');
-        return sb.ToString();
-    }
-
-    private static string BuildMobChargesLine(IReadOnlyList<MobChargeSnapshot> charges)
-    {
-        var sb = new StringBuilder("MOBCHARGE|");
-        if (charges != null)
-        {
-            for (int i = 0; i < charges.Count; i++)
-            {
-                var charge = charges[i];
-                if (i > 0)
-                    sb.Append(';');
-                sb.Append(charge.Index.ToString(CultureInfo.InvariantCulture));
-                sb.Append(',');
-                sb.Append(charge.SkillId ?? string.Empty);
-                sb.Append(',');
-                sb.Append(charge.Ratio.ToString(CultureInfo.InvariantCulture));
-            }
-        }
-        sb.Append('\n');
-        return sb.ToString();
-    }
-
-    private static string BuildMobAttackLine(MobAttack attack)
-    {
-        string encodedSkill;
-        try
-        {
-            encodedSkill = Uri.EscapeDataString(attack.SkillId ?? string.Empty);
-        }
-        catch
-        {
-            encodedSkill = attack.SkillId ?? string.Empty;
-        }
-
-        var hasData = attack.Data.HasValue;
-        var dataPart = attack.Data.GetValueOrDefault().ToString(CultureInfo.InvariantCulture);
-
-        return string.Create(
-            CultureInfo.InvariantCulture,
-            $"MOBATK|{attack.Index},{encodedSkill},{(attack.RequiresTargetInArea ? 1 : 0)},{(hasData ? 1 : 0)},{dataPart},{attack.X},{attack.Y},{attack.TargetUserId},{attack.Dir}\n");
-    }
-
-    private static string BuildMobDieLine(MobDie die)
-    {
-        return string.Create(
-            CultureInfo.InvariantCulture,
-            $"MOBDIE|{die.UserId}|{die.MobIndex}|{die.X}|{die.Y}\n");
-    }
-
-    private static string BuildMobDrawLine(int userId, int mobIndex, bool isOutOfGame, bool isOnScreen)
-    {
-        return string.Create(
-            CultureInfo.InvariantCulture,
-            $"MOBDRAW|{userId}|{mobIndex}|{(isOutOfGame ? 1 : 0)}|{(isOnScreen ? 1 : 0)}\n");
-    }
-
-    private static string BuildMobDrawLine(IReadOnlyList<MobDraw> draws)
-    {
-        var sb = new StringBuilder("MOBDRAW|");
-        if (draws != null)
-        {
-            for (int i = 0; i < draws.Count; i++)
-            {
-                var draw = draws[i];
-                if (i > 0)
-                    sb.Append(';');
-
-                sb.Append(draw.UserId.ToString(CultureInfo.InvariantCulture));
-                sb.Append('|');
-                sb.Append(draw.MobIndex.ToString(CultureInfo.InvariantCulture));
-                sb.Append('|');
-                sb.Append(draw.IsOutOfGame ? '1' : '0');
-                sb.Append('|');
-                sb.Append(draw.IsOnScreen ? '1' : '0');
-            }
-        }
-
-        sb.Append('\n');
-        return sb.ToString();
-    }
-
     private static string BuildExitReadyLine(ExitReadyState state)
     {
         return string.Create(
@@ -3555,6 +3383,24 @@ public sealed partial class NetNode : IDisposable
         }
 
         return _stream != null && _client != null && _client.Connected;
+    }
+
+    /// <summary>Sends a pre-encoded mob protocol line (used by MobSyncWorker). Line must start with MOB.</summary>
+    public Task SendMobWireLine(string line)
+    {
+        if (string.IsNullOrEmpty(line))
+            return Task.CompletedTask;
+
+        if (!line.StartsWith("MOB", StringComparison.OrdinalIgnoreCase))
+            return Task.CompletedTask;
+
+        if (_role != NetRole.Host && _role != NetRole.Client)
+            return Task.CompletedTask;
+
+        if (!HasAnyConnection())
+            return Task.CompletedTask;
+
+        return SendLineSafe(line);
     }
 
     private Task SendLineSafe(string line)
@@ -4135,7 +3981,10 @@ public sealed partial class NetNode : IDisposable
         if (states == null || states.Count == 0)
             return;
 
-        var line = BuildMobStatesLine(states);
+        if (MobSyncWorkerBridge.TryEnqueueMobStates(this, states))
+            return;
+
+        var line = MobWireCodec.BuildMobStatesLine(states);
         _ = SendLineSafe(line);
     }
 
@@ -4148,7 +3997,7 @@ public sealed partial class NetNode : IDisposable
         if (moves == null || moves.Count == 0)
             return;
 
-        var line = BuildMobMovesLine(moves);
+        var line = MobWireCodec.BuildMobMovesLine(moves);
         _ = SendLineSafe(line);
     }
 
@@ -4161,7 +4010,7 @@ public sealed partial class NetNode : IDisposable
         if (charges == null || charges.Count == 0)
             return;
 
-        var line = BuildMobChargesLine(charges);
+        var line = MobWireCodec.BuildMobChargesLine(charges);
         _ = SendLineSafe(line);
     }
 
@@ -4175,7 +4024,7 @@ public sealed partial class NetNode : IDisposable
             return;
 
         var attack = new MobAttack(mobIndex, skillId, requiresTargetInArea, data, x, y, targetUserId, dir);
-        var line = BuildMobAttackLine(attack);
+        var line = MobWireCodec.BuildMobAttackLine(attack);
         _ = SendLineSafe(line);
     }
 
@@ -4189,7 +4038,10 @@ public sealed partial class NetNode : IDisposable
         if (updates == null || updates.Count == 0)
             return;
 
-        var line = BuildMobEventsLine(updates);
+        if (MobSyncWorkerBridge.TryEnqueueMobEvents(this, updates))
+            return;
+
+        var line = MobWireCodec.BuildMobEventsLine(updates);
         _ = SendLineSafe(line);
     }
 
@@ -4234,7 +4086,7 @@ public sealed partial class NetNode : IDisposable
         if (mobIndex < 0)
             return;
 
-        var line = BuildMobDrawLine(ID, mobIndex, isOutOfGame, isOnScreen);
+        var line = MobWireCodec.BuildMobDrawLine(ID, mobIndex, isOutOfGame, isOnScreen);
         _ = SendLineSafe(line);
     }
 
@@ -4249,7 +4101,10 @@ public sealed partial class NetNode : IDisposable
         if (draws == null || draws.Count == 0)
             return;
 
-        var line = BuildMobDrawLine(draws);
+        if (MobSyncWorkerBridge.TryEnqueueMobDrawBatch(this, draws))
+            return;
+
+        var line = MobWireCodec.BuildMobDrawLine(draws);
         _ = SendLineSafe(line);
     }
 
@@ -5043,6 +4898,12 @@ public sealed partial class NetNode : IDisposable
         {
             _steamBridge?.Dispose();
             _steamBridge = null;
+        }
+        catch { }
+
+        try
+        {
+            MobSyncWorkerBridge.StopSingleton();
         }
         catch { }
     }

@@ -902,6 +902,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     s_batchSnapshotsScratch.Add(snapshot);
             }
 
+            // Encoding/sending may offload to MobSyncWorker (see NetNode.SendMobStates); DCCM_MOB_SYNC_WORKER=0 forces in-process.
             if (s_batchSnapshotsScratch.Count > 0)
                 net.SendMobStates(s_batchSnapshotsScratch);
         }
