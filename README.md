@@ -131,8 +131,8 @@ On the first launch, required configuration files will be generated automaticall
 - [x] Synchronize level generation  
 - [x] Synchronize enemies
 - [x] Implement death handling for ghost player
-- [ ] Implement more interactions
-- [ ] Synchronize bosses  
+- [x] Implement more interactions
+- [x] Synchronize bosses  
 
 ---
 
