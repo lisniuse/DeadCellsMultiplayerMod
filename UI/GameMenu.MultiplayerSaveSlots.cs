@@ -3,6 +3,7 @@ using dc;
 using dc.h2d;
 using dc.hxd;
 using dc.hl.types;
+using dc.libs.data;
 using dc.pr;
 using dc.tool;
 using dc.ui;
@@ -22,6 +23,8 @@ namespace DeadCellsMultiplayerMod
         private const string MultiplayerSaveButtonHelp = "Choose multiplayer save slot";
         private const string MultiplayerSaveImportLabel = "Copy your save in that slot";
         private const string OriginalSaveImportTitle = "Choose original save to copy";
+        private const string FallbackSavedGamesTitle = "Saved games";
+        private const string SavedGamesTitleLocalizationKey = "SAUVEGARDES";
         private const int CopyActionCode = 20;
         private const int LiteralKeyboardXKeyCode = 88;
 
@@ -39,6 +42,8 @@ namespace DeadCellsMultiplayerMod
         private static int? _multiplayerSaveImportTargetSlot;
         private static int? _preferredMultiplayerSaveSlot;
         private static ControlLabel? _multiplayerSaveImportControlLabel;
+        private static string _multiplayerSaveDefaultTitle = FallbackSavedGamesTitle;
+        private static bool _hasCapturedMultiplayerSaveDefaultTitle;
 
         private static void InitializeMultiplayerSaveHooks()
         {
@@ -133,6 +138,7 @@ namespace DeadCellsMultiplayerMod
             try
             {
                 AttachSaveChoiceActionBridge(self);
+                TryCaptureDefaultSaveTitle(self);
 
                 switch (_multiplayerSaveMenuKind)
                 {
@@ -227,6 +233,8 @@ namespace DeadCellsMultiplayerMod
 
         private static void Hook_SaveChoice_update(Hook_SaveChoice.orig_update orig, SaveChoice self)
         {
+            EnsureCurrentSaveChoiceTitle(self);
+
             if (_multiplayerSaveMenuKind == MultiplayerSaveMenuKind.MultiplayerSlots)
             {
                 var copyActionPressed = IsActionPressed(self?.controller, CopyActionCode);
@@ -333,6 +341,10 @@ namespace DeadCellsMultiplayerMod
 
         private static void ConfigureMultiplayerSaveChoice(SaveChoice self)
         {
+            if (self?.title != null)
+                self.title.set_text(MakeHLString(ResolveSavedGamesTitle()));
+
+            SetControlLabelVisible(self, 0, true);
             SetControlLabelVisible(self, 1, false);
             EnsureImportControlLabel(self);
             TrySelectPreferredMultiplayerSlot(self);
@@ -358,11 +370,13 @@ namespace DeadCellsMultiplayerMod
 
             try
             {
-                self.fSave?.reflow();
+                if (self.fSave != null && self.cd != null)
+                    self.fSave.reflow();
             }
             catch (Exception ex)
             {
-                _log?.Warning("[NetMod] Failed to rebuild save choice for {Kind}: {Message}", kind, ex.Message);
+                if (!IsBenignSaveRebuildException(ex))
+                    _log?.Warning("[NetMod] Failed to rebuild save choice for {Kind}: {Message}", kind, ex.Message);
             }
 
             try
@@ -427,6 +441,74 @@ namespace DeadCellsMultiplayerMod
             _preferredMultiplayerSaveSlot = targetSlot;
             SwitchSaveChoiceStore(self, MultiplayerSaveMenuKind.OriginalSourceSelection);
             return true;
+        }
+
+        private static void TryCaptureDefaultSaveTitle(SaveChoice self)
+        {
+            if (_hasCapturedMultiplayerSaveDefaultTitle)
+                return;
+            if (_multiplayerSaveMenuKind == MultiplayerSaveMenuKind.OriginalSourceSelection)
+                return;
+
+            var title = self?.title?.rawText?.ToString();
+            if (string.IsNullOrWhiteSpace(title))
+                return;
+            if (string.Equals(title, OriginalSaveImportTitle, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _multiplayerSaveDefaultTitle = title;
+            _hasCapturedMultiplayerSaveDefaultTitle = true;
+        }
+
+        private static string ResolveSavedGamesTitle()
+        {
+            try
+            {
+                var localized = Lang.Class.t?.get(MakeHLString(SavedGamesTitleLocalizationKey), null)?.ToString();
+                if (!string.IsNullOrWhiteSpace(localized))
+                {
+                    _multiplayerSaveDefaultTitle = localized;
+                    _hasCapturedMultiplayerSaveDefaultTitle = true;
+                    return localized;
+                }
+            }
+            catch
+            {
+            }
+
+            return _multiplayerSaveDefaultTitle;
+        }
+
+        private static void EnsureCurrentSaveChoiceTitle(SaveChoice self)
+        {
+            var title = self?.title;
+            if (title == null)
+                return;
+
+            try
+            {
+                switch (_multiplayerSaveMenuKind)
+                {
+                    case MultiplayerSaveMenuKind.OriginalSourceSelection:
+                        if (!string.Equals(title.rawText?.ToString(), OriginalSaveImportTitle, StringComparison.Ordinal))
+                            title.set_text(MakeHLString(OriginalSaveImportTitle));
+                        break;
+                    case MultiplayerSaveMenuKind.MultiplayerSlots:
+                        if (string.Equals(title.rawText?.ToString(), OriginalSaveImportTitle, StringComparison.OrdinalIgnoreCase))
+                            title.set_text(MakeHLString(ResolveSavedGamesTitle()));
+                        break;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool IsBenignSaveRebuildException(Exception ex)
+        {
+            var message = ex?.Message;
+            return !string.IsNullOrEmpty(message) &&
+                   message.IndexOf("Null access ._getCdObject", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool IsActionPressed(ControllerAccess? controllerAccess, int actionCode)
