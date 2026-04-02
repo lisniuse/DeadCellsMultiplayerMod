@@ -11,6 +11,14 @@ namespace DeadCellsMultiplayerMod.Ghost
 {
     public class KingWeaponsManager : HeroWeaponsManager
     {
+        // Vanilla affect ids used by shield block/hold/parry; remote clear must stay aligned with game data.
+        private const int ShieldAffectClearBlockOrHold0 = 96;
+        private const int ShieldAffectClearBlockOrHold1 = 98;
+        private const int ShieldAffectClearBlockOrHold2 = 99;
+
+        private const double ShieldReleaseAfterLastPulseSeconds = 0.22;
+        private const double ShieldPulseIgnoreAfterReleaseSeconds = 0.25;
+
         private readonly GhostKing king;
         private Inventory inventory = null!;
         private Weapon weapon = null!;
@@ -20,7 +28,7 @@ namespace DeadCellsMultiplayerMod.Ghost
         private int pendingSlot = -1;
         private long _shieldLastPulseTicks;
         private bool _shieldActive;
-        private long _shieldIgnorePulsesUntilTicks;
+        private long _lastShieldReleaseTimestamp;
 
         public bool IsShieldActive => _shieldActive;
 
@@ -53,7 +61,7 @@ namespace DeadCellsMultiplayerMod.Ghost
                 weapon = KingWeaponSupport.CreateWeapon(hero, item, king);
                 _shieldActive = false;
                 _shieldLastPulseTicks = 0;
-                _shieldIgnorePulsesUntilTicks = 0;
+                _lastShieldReleaseTimestamp = 0;
                 pendingInterrupts = 0;
                 ClearShieldAffects();
             }
@@ -79,7 +87,9 @@ namespace DeadCellsMultiplayerMod.Ghost
 
                     // When the remote releases the shield, a few late ATK packets can arrive and would re-trigger hold,
                     // causing the animation/state to flicker (release -> hold -> release ...). Ignore pulses briefly after release.
-                    if(now >= _shieldIgnorePulsesUntilTicks)
+                    var ignorePulses = _lastShieldReleaseTimestamp != 0 &&
+                        Stopwatch.GetElapsedTime(_lastShieldReleaseTimestamp, now).TotalSeconds < ShieldPulseIgnoreAfterReleaseSeconds;
+                    if(!ignorePulses)
                     {
                         _shieldLastPulseTicks = now;
 
@@ -104,9 +114,10 @@ namespace DeadCellsMultiplayerMod.Ghost
                     weapon.fixedUpdate();
                     weapon.postUpdate();
 
-                    var sincePulse = now - _shieldLastPulseTicks;
-                    var releaseAfter = (long)(Stopwatch.Frequency * 0.22);
-                    if(_shieldLastPulseTicks != 0 && sincePulse > releaseAfter)
+                    var sincePulseS = _shieldLastPulseTicks != 0
+                        ? Stopwatch.GetElapsedTime(_shieldLastPulseTicks, now).TotalSeconds
+                        : 0.0;
+                    if(_shieldLastPulseTicks != 0 && sincePulseS > ShieldReleaseAfterLastPulseSeconds)
                     {
                         ReleaseShield(now);
                     }
@@ -168,6 +179,24 @@ namespace DeadCellsMultiplayerMod.Ghost
                 pendingInterrupts++;
         }
 
+        /// <summary>Disposes the managed weapon and clears shield state; call when GhostKing is torn down to avoid use-after-dispose.</summary>
+        internal void DisposeManagedWeapon()
+        {
+            if(weapon != null && !weapon.destroyed)
+            {
+                try { weapon.dispose(); } catch { }
+            }
+
+            weapon = null!;
+            weaponItem = null!;
+            pendingAttacks = 0;
+            pendingInterrupts = 0;
+            pendingSlot = -1;
+            _shieldActive = false;
+            _shieldLastPulseTicks = 0;
+            _lastShieldReleaseTimestamp = 0;
+        }
+
         private bool NeedsWeaponRebuild(InventItem item)
         {
             if(item == null)
@@ -202,9 +231,9 @@ namespace DeadCellsMultiplayerMod.Ghost
 
         private void ClearShieldAffects()
         {
-            try { king.removeAllAffects(96); } catch { }
-            try { king.removeAllAffects(98); } catch { }
-            try { king.removeAllAffects(99); } catch { }
+            try { king.removeAllAffects(ShieldAffectClearBlockOrHold0); } catch { }
+            try { king.removeAllAffects(ShieldAffectClearBlockOrHold1); } catch { }
+            try { king.removeAllAffects(ShieldAffectClearBlockOrHold2); } catch { }
         }
 
         private void ReleaseShield(long now)
@@ -220,7 +249,7 @@ namespace DeadCellsMultiplayerMod.Ghost
             try { weapon.postUpdate(); } catch { }
             _shieldActive = false;
             _shieldLastPulseTicks = 0;
-            _shieldIgnorePulsesUntilTicks = now + (long)(Stopwatch.Frequency * 0.25);
+            _lastShieldReleaseTimestamp = now;
             ClearShieldAffects();
             try { king.spr?._animManager?.play("idle".AsHaxeString(), null, null)?.loop(null); } catch { }
         }

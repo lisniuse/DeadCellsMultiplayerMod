@@ -929,9 +929,26 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         public override void dispose()
         {
+            DisposeKingWeaponsManager();
             DisposeScarf();
             DisposeRemoteDiveAttack();
             base.dispose();
+        }
+
+        private void DisposeKingWeaponsManager()
+        {
+            if(kingWeaponsManager == null)
+                return;
+
+            try
+            {
+                kingWeaponsManager.DisposeManagedWeapon();
+            }
+            catch
+            {
+            }
+
+            kingWeaponsManager = null;
         }
 
 

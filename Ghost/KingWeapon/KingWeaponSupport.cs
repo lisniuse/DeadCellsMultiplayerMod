@@ -2,12 +2,18 @@ using System;
 using System.Runtime.CompilerServices;
 using dc.en;
 using dc.hl.types;
+using dc.libs.heaps.slib;
+using dc.pr;
 using dc.tool;
 using dc.tool.skill;
 using HaxeProxy.Runtime;
 
 namespace DeadCellsMultiplayerMod.Ghost;
 
+// King weapons are created with Weapon.owner = the local Hero because engine APIs (Weapon.create, skills, areas)
+// require a Hero. Logical attribution uses ConditionalWeakTable binds to KingSkin. WithKingContextCore temporarily
+// copies KingSkin pose/level/team/sprite onto that Hero so vanilla weapon code reads the king; callers must not
+// assume Hero global state matches KingSkin outside WithKingContext. Main-thread-only: context uses [ThreadStatic].
 internal static class KingWeaponSupport
 {
     private static readonly ConditionalWeakTable<Weapon, KingSkin> WeaponToSource = new();
@@ -25,8 +31,76 @@ internal static class KingWeaponSupport
     internal static bool IsLocalHeroDamageAllowedInKingContext => _allowLocalHeroDamageDepth > 0;
     internal static bool TryGetCurrentContextSource(out KingSkin source)
     {
-        source = _currentContextSource!;
-        return source != null;
+        if(!IsInKingContext || _currentContextSource == null)
+        {
+            source = null!;
+            return false;
+        }
+
+        source = _currentContextSource;
+        return true;
+    }
+
+    /// <summary>Saved Hero fields for WithKingContextCore; keeps save/restore in one place when extending the swap.</summary>
+    internal readonly struct KingWeaponRuntimeFrame
+    {
+        public readonly HSprite? spr;
+        public readonly Level? _level;
+        public readonly Team? _team;
+        public readonly int cx;
+        public readonly int cy;
+        public readonly double xr;
+        public readonly double yr;
+        public readonly int dir;
+        public readonly double dx;
+        public readonly double dy;
+
+        public KingWeaponRuntimeFrame(Hero hero)
+        {
+            spr = hero.spr;
+            _level = hero._level;
+            _team = hero._team;
+            cx = hero.cx;
+            cy = hero.cy;
+            xr = hero.xr;
+            yr = hero.yr;
+            dir = hero.dir;
+            dx = hero.dx;
+            dy = hero.dy;
+        }
+
+        public void ApplyKingSkin(KingSkin? src, Hero hero)
+        {
+            if(src == null)
+                return;
+            if(src.spr != null)
+                hero.spr = src.spr;
+            if(src._level != null)
+                hero._level = src._level;
+            if(src._team != null)
+                hero._team = src._team;
+            hero.cx = src.cx;
+            hero.cy = src.cy;
+            hero.xr = src.xr;
+            hero.yr = src.yr;
+            hero.dir = src.dir;
+            hero.dx = src.dx;
+            hero.dy = src.dy;
+        }
+
+        public void Restore(Hero hero)
+        {
+            hero.spr = spr;
+            hero._level = _level;
+            hero._team = _team;
+            hero.cx = cx;
+            hero.cy = cy;
+            hero.xr = xr;
+            hero.yr = yr;
+            hero.dir = dir;
+            hero.dx = dx;
+            hero.dy = dy;
+        }
     }
 
     private sealed class SkillHooks
@@ -182,42 +256,15 @@ internal static class KingWeaponSupport
         var previousSource = _currentContextSource;
         _currentContextSource = src;
 
-        var savedSpr = hero.spr;
-        var savedLevel = hero._level;
-        var savedTeam = hero._team;
-        var savedCx = hero.cx;
-        var savedCy = hero.cy;
-        var savedXr = hero.xr;
-        var savedYr = hero.yr;
-        var savedDir = hero.dir;
-        var savedDx = hero.dx;
-        var savedDy = hero.dy;
+        var frame = new KingWeaponRuntimeFrame(hero);
         try
         {
-            if(src.spr != null) hero.spr = src.spr;
-            if(src._level != null) hero._level = src._level;
-            if(src._team != null) hero._team = src._team;
-            hero.cx = src.cx;
-            hero.cy = src.cy;
-            hero.xr = src.xr;
-            hero.yr = src.yr;
-            hero.dir = src.dir;
-            hero.dx = src.dx;
-            hero.dy = src.dy;
+            frame.ApplyKingSkin(src, hero);
             action();
         }
         finally
         {
-            hero.spr = savedSpr;
-            hero._level = savedLevel;
-            hero._team = savedTeam;
-            hero.cx = savedCx;
-            hero.cy = savedCy;
-            hero.xr = savedXr;
-            hero.yr = savedYr;
-            hero.dir = savedDir;
-            hero.dx = savedDx;
-            hero.dy = savedDy;
+            frame.Restore(hero);
             _currentContextSource = previousSource;
             _contextDepth--;
         }

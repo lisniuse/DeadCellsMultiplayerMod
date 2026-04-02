@@ -22,6 +22,27 @@ internal static class KingWeaponHooks
     private static readonly Dictionary<int, long> _recentKingWeaponMobRefHits = new();
     private static readonly Dictionary<string, long> _recentKingWeaponMobSignatureHits = new(StringComparer.Ordinal);
     private const double RecentKingWeaponMobHitSeconds = 3.0;
+    private const int MaxMobHitMapEntries = 4096;
+    private static readonly List<int> s_staleMobUidScratch = new();
+    private static readonly List<int> s_staleMobRefScratch = new();
+    private static readonly List<string> s_staleMobSigScratch = new();
+
+#if DEBUG
+    private static void LogKingWeaponHookEx(Exception ex, string hookName)
+    {
+        try
+        {
+            ModEntry.Instance?.Logger.Warning(ex, "[KingWeapon] {Hook}", hookName);
+        }
+        catch
+        {
+        }
+    }
+#else
+    private static void LogKingWeaponHookEx(Exception ex, string hookName)
+    {
+    }
+#endif
 
     internal static void Install()
     {
@@ -401,7 +422,7 @@ internal static class KingWeaponHooks
         if(localHero == null || !IsSameEntity(source, localHero))
             return false;
 
-        if(!KingWeaponSupport.TryGetCurrentContextSource(out var kingSource) || kingSource == null || kingSource.destroyed)
+        if(!KingWeaponSupport.TryGetCurrentContextSource(out var kingSource) || kingSource.destroyed)
             return false;
 
         redirectedSource = kingSource;
@@ -668,95 +689,32 @@ internal static class KingWeaponHooks
 
     private static bool Hook_BaseShield_tryToCancel(Hook_BaseShield.orig_tryToCancel orig, BaseShield self, bool byWeapon)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return false;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-            return KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { return orig(self, byWeapon); } catch { return false; }
-            });
-        return orig(self, byWeapon);
+        return RunBaseShieldHookBool(self, () => orig(self, byWeapon));
     }
 
     private static void Hook_BaseShield_onShieldChargeStart(Hook_BaseShield.orig_onShieldChargeStart orig, BaseShield self)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-        {
-            KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { orig(self); } catch { }
-            });
-            return;
-        }
-        orig(self);
+        RunBaseShieldHookVoid(self, () => orig(self));
     }
 
     private static void Hook_BaseShield_onShieldReleased(Hook_BaseShield.orig_onShieldReleased orig, BaseShield self)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-        {
-            KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { orig(self); } catch { }
-            });
-            return;
-        }
-        orig(self);
+        RunBaseShieldHookVoid(self, () => orig(self));
     }
 
     private static void Hook_BaseShield_startParry(Hook_BaseShield.orig_startParry orig, BaseShield self)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-        {
-            KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { orig(self); } catch { }
-            });
-            return;
-        }
-        orig(self);
+        RunBaseShieldHookVoid(self, () => orig(self));
     }
 
     private static void Hook_BaseShield_onShieldStartParry(Hook_BaseShield.orig_onShieldStartParry orig, BaseShield self)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-        {
-            KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { orig(self); } catch { }
-            });
-            return;
-        }
-        orig(self);
+        RunBaseShieldHookVoid(self, () => orig(self));
     }
 
     private static void Hook_BaseShield_onShieldEndParry(Hook_BaseShield.orig_onShieldEndParry orig, BaseShield self)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-        {
-            KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { orig(self); } catch { }
-            });
-            return;
-        }
-        orig(self);
+        RunBaseShieldHookVoid(self, () => orig(self));
     }
 
     private static void Hook_BaseShield_onShieldHolding(Hook_BaseShield.orig_onShieldHolding orig, BaseShield self, double ratio)
@@ -768,7 +726,14 @@ internal static class KingWeaponHooks
         {
             KingWeaponSupport.WithKingContext(self, () =>
             {
-                try { orig(self, ratio); } catch { }
+                try
+                {
+                    orig(self, ratio);
+                }
+                catch(Exception ex)
+                {
+                    LogKingWeaponHookEx(ex, "BaseShield.onShieldHolding");
+                }
             });
             return;
         }
@@ -779,38 +744,26 @@ internal static class KingWeaponHooks
 
     private static void Hook_BaseShield_onShieldBlock(Hook_BaseShield.orig_onShieldBlock orig, BaseShield self, AttackData sourceAtk, bool fullParry)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-        {
-            KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { orig(self, sourceAtk, fullParry); } catch { }
-            });
-            return;
-        }
-        orig(self, sourceAtk, fullParry);
+        RunBaseShieldHookVoid(self, () => orig(self, sourceAtk, fullParry));
     }
 
     private static void Hook_BaseShield_onShieldCounterSuccessful(Hook_BaseShield.orig_onShieldCounterSuccessful orig, BaseShield self, AttackData sourceAtk, bool fullParry)
     {
-        if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return;
-
-        if(KingWeaponSupport.IsKingWeapon(self))
-        {
-            KingWeaponSupport.WithKingContext(self, () =>
-            {
-                try { orig(self, sourceAtk, fullParry); } catch { }
-            });
-            return;
-        }
-        orig(self, sourceAtk, fullParry);
+        RunBaseShieldHookVoid(self, () => orig(self, sourceAtk, fullParry));
     }
 
     private static void Hook_BaseShield_counterGrenade(Hook_BaseShield.orig_counterGrenade orig, BaseShield self, Grenade repelled)
     {
+        RunBaseShieldHookVoid(self, () => orig(self, repelled));
+    }
+
+    private static Bullet Hook_BaseShield_counterBullet(Hook_BaseShield.orig_counterBullet orig, BaseShield self, AttackData sourceAtk, Bullet cBullet, bool fullParry)
+    {
+        return RunBaseShieldHookBullet(self, cBullet, () => orig(self, sourceAtk, cBullet, fullParry));
+    }
+
+    private static void RunBaseShieldHookVoid(BaseShield self, Action origCall)
+    {
         if(ShouldSuppressLocalHeroShieldInKingContext(self))
             return;
 
@@ -818,24 +771,61 @@ internal static class KingWeaponHooks
         {
             KingWeaponSupport.WithKingContext(self, () =>
             {
-                try { orig(self, repelled); } catch { }
+                try
+                {
+                    origCall();
+                }
+                catch(Exception ex)
+                {
+                    LogKingWeaponHookEx(ex, "BaseShield");
+                }
             });
             return;
         }
-        orig(self, repelled);
+
+        origCall();
     }
 
-    private static Bullet Hook_BaseShield_counterBullet(Hook_BaseShield.orig_counterBullet orig, BaseShield self, AttackData sourceAtk, Bullet cBullet, bool fullParry)
+    private static bool RunBaseShieldHookBool(BaseShield self, Func<bool> origCall)
     {
         if(ShouldSuppressLocalHeroShieldInKingContext(self))
-            return cBullet;
+            return false;
 
         if(KingWeaponSupport.IsKingWeapon(self))
             return KingWeaponSupport.WithKingContext(self, () =>
             {
-                try { return orig(self, sourceAtk, cBullet, fullParry); } catch { return cBullet; }
+                try
+                {
+                    return origCall();
+                }
+                catch(Exception ex)
+                {
+                    LogKingWeaponHookEx(ex, "BaseShield");
+                    return false;
+                }
             });
-        return orig(self, sourceAtk, cBullet, fullParry);
+        return origCall();
+    }
+
+    private static Bullet RunBaseShieldHookBullet(BaseShield self, Bullet fallback, Func<Bullet> origCall)
+    {
+        if(ShouldSuppressLocalHeroShieldInKingContext(self))
+            return fallback;
+
+        if(KingWeaponSupport.IsKingWeapon(self))
+            return KingWeaponSupport.WithKingContext(self, () =>
+            {
+                try
+                {
+                    return origCall();
+                }
+                catch(Exception ex)
+                {
+                    LogKingWeaponHookEx(ex, "BaseShield.counterBullet");
+                    return fallback;
+                }
+            });
+        return origCall();
     }
 
     private static void Hook_Ammo_startMagnet(Hook_Ammo.orig_startMagnet orig, Ammo self, Entity e)
@@ -1191,44 +1181,37 @@ internal static class KingWeaponHooks
 
     private static void PruneRecentKingWeaponMobHitsLocked(long now, long maxAgeTicks)
     {
-        if(_recentKingWeaponMobUidHits.Count > 0)
-        {
-            var staleUid = new List<int>();
-            foreach(var pair in _recentKingWeaponMobUidHits)
-            {
-                if(now - pair.Value > maxAgeTicks)
-                    staleUid.Add(pair.Key);
-            }
+        PruneStaleEntries(_recentKingWeaponMobUidHits, now, maxAgeTicks, s_staleMobUidScratch);
+        PruneStaleEntries(_recentKingWeaponMobRefHits, now, maxAgeTicks, s_staleMobRefScratch);
+        PruneStaleEntries(_recentKingWeaponMobSignatureHits, now, maxAgeTicks, s_staleMobSigScratch);
+        CapMobHitMapsIfNeeded();
+    }
 
-            for(int i = 0; i < staleUid.Count; i++)
-                _recentKingWeaponMobUidHits.Remove(staleUid[i]);
+    private static void PruneStaleEntries<TKey>(Dictionary<TKey, long> map, long now, long maxAgeTicks, List<TKey> scratch)
+        where TKey : notnull
+    {
+        if(map.Count == 0)
+            return;
+
+        scratch.Clear();
+        foreach(var pair in map)
+        {
+            if(now - pair.Value > maxAgeTicks)
+                scratch.Add(pair.Key);
         }
 
-        if(_recentKingWeaponMobRefHits.Count > 0)
-        {
-            var staleRef = new List<int>();
-            foreach(var pair in _recentKingWeaponMobRefHits)
-            {
-                if(now - pair.Value > maxAgeTicks)
-                    staleRef.Add(pair.Key);
-            }
+        for(int i = 0; i < scratch.Count; i++)
+            map.Remove(scratch[i]);
+    }
 
-            for(int i = 0; i < staleRef.Count; i++)
-                _recentKingWeaponMobRefHits.Remove(staleRef[i]);
-        }
-
-        if(_recentKingWeaponMobSignatureHits.Count > 0)
-        {
-            var staleSignatures = new List<string>();
-            foreach(var pair in _recentKingWeaponMobSignatureHits)
-            {
-                if(now - pair.Value > maxAgeTicks)
-                    staleSignatures.Add(pair.Key);
-            }
-
-            for(int i = 0; i < staleSignatures.Count; i++)
-                _recentKingWeaponMobSignatureHits.Remove(staleSignatures[i]);
-        }
+    private static void CapMobHitMapsIfNeeded()
+    {
+        if(_recentKingWeaponMobUidHits.Count > MaxMobHitMapEntries)
+            _recentKingWeaponMobUidHits.Clear();
+        if(_recentKingWeaponMobRefHits.Count > MaxMobHitMapEntries)
+            _recentKingWeaponMobRefHits.Clear();
+        if(_recentKingWeaponMobSignatureHits.Count > MaxMobHitMapEntries)
+            _recentKingWeaponMobSignatureHits.Clear();
     }
 
     private static string BuildMobHitSignature(Mob mob)
