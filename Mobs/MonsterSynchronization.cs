@@ -385,8 +385,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     if (!TryCaptureTrackedMobsForBatch(out var trackedMobCount))
                         return;
                     var now = Stopwatch.GetTimestamp();
-                    TrySendClientMobDraws(net, now, trackedMobCount);
-                    TrySendClientMobStateDeltaBatchPreUpdate(net, now, trackedMobCount);
+                    TrySendClientMobBatchesNetFrame(net, now, trackedMobCount);
                 }
             }
         }
@@ -930,13 +929,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 net.SendMobStates(s_batchSnapshotsScratch);
         }
 
-        private static void TrySendClientMobStateDeltaBatchPreUpdate(NetNode net, long now, int trackedMobCount)
+        private static void TrySendClientMobBatchesNetFrame(NetNode net, long now, int trackedMobCount)
         {
             if (!IsClient(net))
                 return;
 
+            var keepAliveTicks = (long)(Stopwatch.Frequency * ClientDrawKeepAliveSeconds);
             var affectResendTicks = (long)(Stopwatch.Frequency * ComputeAdaptiveAffectResendSeconds(s_batchMobsScratch.Count));
+            s_drawsScratch.Clear();
             s_batchSnapshotsScratch.Clear();
+
             for (int i = 0; i < s_batchMobsScratch.Count; i++)
             {
                 var mob = s_batchMobsScratch[i];
@@ -944,17 +946,54 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     continue;
                 if (!TryGetMobSyncId(mob, out var mobSyncId) || mobSyncId < 0)
                     continue;
+
+                GetClientMobDrawAndAffectEvalSeconds(mob, trackedMobCount, out var drawEvalSec, out var affectEvalSec);
+
+                if (ShouldEvaluateMobBySyncId(
+                        clientLastDrawEvalTickBySyncId,
+                        mobSyncId,
+                        now,
+                        drawEvalSec))
+                {
+                    try
+                    {
+                        var isOutOfGame = mob.isOutOfGame;
+                        var isOnScreen = mob.isOnScreen;
+                        if (!isOutOfGame && isOnScreen)
+                        {
+                            var shouldSendDraw = false;
+                            lock (Sync)
+                            {
+                                if (!clientLastSentDrawStateBySyncId.TryGetValue(mobSyncId, out var lastDraw) ||
+                                    lastDraw.IsOutOfGame != isOutOfGame ||
+                                    lastDraw.IsOnScreen != isOnScreen ||
+                                    now - lastDraw.Tick >= keepAliveTicks)
+                                {
+                                    clientLastSentDrawStateBySyncId[mobSyncId] = new ClientDrawSentState(isOutOfGame, isOnScreen, now);
+                                    shouldSendDraw = true;
+                                }
+                            }
+
+                            if (shouldSendDraw)
+                                s_drawsScratch.Add(new NetNode.MobDraw(net.id, mobSyncId, isOutOfGame, isOnScreen));
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
                 if (!ShouldEvaluateMobBySyncId(
                         clientLastAffectEvalTickBySyncId,
                         mobSyncId,
                         now,
-                        GetClientMobAffectEvalSeconds(mob, trackedMobCount)))
+                        affectEvalSec))
                 {
                     continue;
                 }
 
                 var statePayload = GetClientAffectPayloadForSend(mob, mobSyncId, now, s_batchMobsScratch.Count);
-                var shouldSend = false;
+                var shouldSendAffect = false;
                 var hasAnyState = !string.IsNullOrWhiteSpace(statePayload);
 
                 lock (Sync)
@@ -967,11 +1006,11 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     {
                         clientLastSentAffectPayloadBySyncId[mobSyncId] = statePayload;
                         clientLastSentAffectTickBySyncId[mobSyncId] = now;
-                        shouldSend = true;
+                        shouldSendAffect = true;
                     }
                 }
 
-                if (!shouldSend)
+                if (!shouldSendAffect)
                     continue;
 
                 s_batchSnapshotsScratch.Add(new NetNode.MobStateSnapshot(
@@ -986,8 +1025,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     statePayload));
             }
 
+            if (s_drawsScratch.Count > 0)
+                net.SendMobDrawBatch(s_drawsScratch);
             if (s_batchSnapshotsScratch.Count > 0)
                 net.SendMobStates(s_batchSnapshotsScratch);
+
+            s_drawsScratch.Clear();
         }
 
         private static bool TryBuildHostMobStateDeltaSnapshot(Mob mob, int mobSyncId, long nowTick, int trackedMobCount, out NetNode.MobStateSnapshot snapshot)
@@ -1353,40 +1396,60 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             };
         }
 
-        private static double GetClientMobAffectEvalSeconds(Mob mob, int trackedMobCount)
+        private static void GetClientMobDrawAndAffectEvalSeconds(Mob? mob, int trackedMobCount, out double drawSeconds, out double affectSeconds)
         {
             if (mob == null)
-                return ComputeAdaptiveClientDormantAffectEvalSeconds(trackedMobCount);
-            if (BossSyncHelpers.IsBossMob(mob) || HasValidLivingPlayerCombatTarget(mob))
-                return 0.0;
+            {
+                drawSeconds = ComputeAdaptiveClientDormantDrawEvalSeconds(trackedMobCount);
+                affectSeconds = ComputeAdaptiveClientDormantAffectEvalSeconds(trackedMobCount);
+                return;
+            }
 
-            var hasDistance = TryGetNearestPlayerDistanceSq(mob, out var distanceSq);
+            if (BossSyncHelpers.IsBossMob(mob) || HasValidLivingPlayerCombatTarget(mob))
+            {
+                drawSeconds = 0.0;
+                affectSeconds = 0.0;
+                return;
+            }
+
             TryGetMobVisibilityState(mob, out var isOnScreen, out var isOutOfGame, out var onScreenRecent);
 
-            if (isOnScreen || onScreenRecent > 0.0 || !isOutOfGame || (hasDistance && distanceSq <= MobSyncDistanceSq))
-                return 0.0;
-            if (hasDistance)
-                return ComputeAdaptiveClientFarAffectEvalSeconds(trackedMobCount);
+            if (isOnScreen || onScreenRecent > 0.0 || !isOutOfGame)
+                affectSeconds = 0.0;
+            else
+                affectSeconds = double.NaN;
 
-            return ComputeAdaptiveClientDormantAffectEvalSeconds(trackedMobCount) * 1.6;
-        }
+            if (isOnScreen)
+                drawSeconds = 0.0;
+            else if (!isOutOfGame)
+                drawSeconds = ComputeAdaptiveClientFarDrawEvalSeconds(trackedMobCount);
+            else
+                drawSeconds = double.NaN;
 
-        private static double GetClientMobDrawEvalSeconds(Mob mob, int trackedMobCount)
-        {
-            if (mob == null)
-                return ComputeAdaptiveClientDormantDrawEvalSeconds(trackedMobCount);
+            if (!double.IsNaN(affectSeconds) && !double.IsNaN(drawSeconds))
+                return;
 
             var hasDistance = TryGetNearestPlayerDistanceSq(mob, out var distanceSq);
-            TryGetMobVisibilityState(mob, out var isOnScreen, out var isOutOfGame, out _);
 
-            if (isOnScreen || HasValidLivingPlayerCombatTarget(mob) || (hasDistance && distanceSq <= MobDrawNearDistanceSq))
-                return 0.0;
+            if (double.IsNaN(affectSeconds))
+            {
+                if (hasDistance && distanceSq <= MobSyncDistanceSq)
+                    affectSeconds = 0.0;
+                else if (hasDistance)
+                    affectSeconds = ComputeAdaptiveClientFarAffectEvalSeconds(trackedMobCount);
+                else
+                    affectSeconds = ComputeAdaptiveClientDormantAffectEvalSeconds(trackedMobCount) * 1.6;
+            }
 
-            // MOBDRAW uses only 2 distance bands now: near and far.
-            if ((hasDistance && distanceSq <= MobSyncDistanceSq) || !isOutOfGame)
-                return ComputeAdaptiveClientFarDrawEvalSeconds(trackedMobCount);
-
-            return ComputeAdaptiveClientDormantDrawEvalSeconds(trackedMobCount) * 1.35;
+            if (double.IsNaN(drawSeconds))
+            {
+                if (hasDistance && distanceSq <= MobDrawNearDistanceSq)
+                    drawSeconds = 0.0;
+                else if (hasDistance && distanceSq <= MobSyncDistanceSq)
+                    drawSeconds = ComputeAdaptiveClientFarDrawEvalSeconds(trackedMobCount);
+                else
+                    drawSeconds = ComputeAdaptiveClientDormantDrawEvalSeconds(trackedMobCount) * 1.35;
+            }
         }
 
         private static bool ShouldEvaluateMobBySyncId(
@@ -3834,68 +3897,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 TryQueueClientMobAttack(mob, attack.SkillId, attack.RequiresTargetInArea, attack.Data, attack.TargetUserId, attack.Dir);
             }
-        }
-
-        private static void TrySendClientMobDraws(NetNode net, long now, int trackedMobCount)
-        {
-            if (!IsClient(net))
-                return;
-
-            var keepAliveTicks = (long)(Stopwatch.Frequency * ClientDrawKeepAliveSeconds);
-            s_drawsScratch.Clear();
-            var hero = ModEntry.me ?? ModCore.Modules.Game.Instance?.HeroInstance;
-            for (int i = 0; i < s_batchMobsScratch.Count; i++)
-            {
-                var mob = s_batchMobsScratch[i];
-                if (!TryGetMobSyncId(mob, out var mobSyncId))
-                    continue;
-                if (!ShouldEvaluateMobBySyncId(
-                        clientLastDrawEvalTickBySyncId,
-                        mobSyncId,
-                        now,
-                        GetClientMobDrawEvalSeconds(mob, trackedMobCount)))
-                {
-                    continue;
-                }
-
-                bool isOutOfGame;
-                bool isOnScreen;
-                try
-                {
-                    isOutOfGame = mob.isOutOfGame;
-                    isOnScreen = mob.isOnScreen;
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (isOutOfGame || !isOnScreen)
-                    continue;
-
-                var shouldSend = false;
-                lock (Sync)
-                {
-                    if (!clientLastSentDrawStateBySyncId.TryGetValue(mobSyncId, out var lastDraw) ||
-                        lastDraw.IsOutOfGame != isOutOfGame ||
-                        lastDraw.IsOnScreen != isOnScreen ||
-                        now - lastDraw.Tick >= keepAliveTicks)
-                    {
-                        clientLastSentDrawStateBySyncId[mobSyncId] = new ClientDrawSentState(isOutOfGame, isOnScreen, now);
-                        shouldSend = true;
-                    }
-                }
-
-                if (!shouldSend)
-                    continue;
-
-                s_drawsScratch.Add(new NetNode.MobDraw(net.id, mobSyncId, isOutOfGame, isOnScreen));
-            }
-
-            if (s_drawsScratch.Count > 0)
-                net.SendMobDrawBatch(s_drawsScratch);
-
-            s_drawsScratch.Clear();
         }
 
         private static void ConsumeIncomingMobDraws(NetNode net)
