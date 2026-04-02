@@ -45,7 +45,6 @@ public class SettingsUI :
         Hook_Options.showMain += Hook_Options_showMain;
         Hook_Options.showCredits += Hook_Options_showCredits;
         Hook_Options.onDispose += Hook_Options_onDispose;
-        Hook_OptionsBase.onQuit += Hook_OptionsBase_onQuit;
         _hooksAttached = true;
     }
 
@@ -58,7 +57,10 @@ public class SettingsUI :
         }
 
         if (IsMultiplayerSettingsContext(self))
+        {
+            MultiplayerSettingsStorage.Save();
             ResetMenuState();
+        }
 
         try
         {
@@ -101,18 +103,10 @@ public class SettingsUI :
         orig(self);
 
         if (wasMultiplayerSettings)
-            ResetMenuState();
-    }
-
-    private void Hook_OptionsBase_onQuit(Hook_OptionsBase.orig_onQuit orig, OptionsBase self)
-    {
-        if (self is Options options && IsMultiplayerSettingsContext(options))
         {
-            CloseMultiplayerSettingsMenu(options);
-            return;
+            MultiplayerSettingsStorage.Save();
+            ResetMenuState();
         }
-
-        orig(self);
     }
 
     private void OpenMultiplayerSettingsMenu(Options self)
@@ -130,22 +124,6 @@ public class SettingsUI :
         {
             ResetMenuState();
             mod.Logger.Warning(ex, "[NetMod] Failed to open multiplayer settings menu");
-        }
-    }
-
-    private void CloseMultiplayerSettingsMenu(Options self)
-    {
-        try
-        {
-            MultiplayerSettingsStorage.Save();
-            ResetMenuState();
-
-            if (self != null && !self.destroyed)
-                self.setSection(new OptionsSection.S_Main());
-        }
-        catch (Exception ex)
-        {
-            mod.Logger.Warning(ex, "[NetMod] Failed to return to vanilla settings menu");
         }
     }
 
@@ -176,7 +154,8 @@ public class SettingsUI :
             int leftPadding = 5;
             HlAction onBack = new HlAction(() =>
             {
-                CloseMultiplayerSettingsMenu(self);
+                if (self != null && !self.destroyed)
+                    self.onQuit();
             });
 
             self.addSimpleWidget(
