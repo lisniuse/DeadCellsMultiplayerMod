@@ -1425,19 +1425,24 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var priority = GetHostMobSyncPriority(mob);
             var seconds = priority switch
             {
-                HostMobSyncPriority.Active => 0.0,
+                HostMobSyncPriority.Active => HostActiveStateEvalSeconds,
                 HostMobSyncPriority.MidRange => HostFarStateEvalSeconds,
                 HostMobSyncPriority.FarRange => HostDormantStateEvalSeconds,
                 _ => HostDormantStateEvalSeconds * 1.6
             };
 
-            if (seconds <= 0.0 || priority == HostMobSyncPriority.Active)
+            if (seconds <= 0.0)
                 return seconds;
 
             lock (Sync)
             {
                 if (trackedMobs.Count >= HostCrowdMobCountThreshold)
+                {
+                    if (priority == HostMobSyncPriority.Active)
+                        return seconds * HostCrowdActiveEvalStretchMultiplier;
+
                     return seconds * HostCrowdEvalStretchMultiplier;
+                }
             }
 
             return seconds;
