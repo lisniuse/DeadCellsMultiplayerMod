@@ -1,4 +1,8 @@
+<div align="center">
 
+English • [Русский](README_ru.md)
+  
+</div>
 <h1>Dead Cells Multiplayer Mod</h1>
 
 **DeadCellsMultiplayerMod** is a **multiplayer / co-op mod for Dead Cells**, built using the **Dead Cells Core Modding API (DCCM)**.
