@@ -453,26 +453,17 @@ namespace DeadCellsMultiplayerMod
             if (net == null || !net.IsAlive || me == null || self == null || !ReferenceEquals(self, me))
                 return;
 
-            try
-            {
-                var rawSkin = dc.Main.Class.ME?.user?.heroSkin?.ToString();
-                if (string.IsNullOrWhiteSpace(rawSkin))
-                {
-                    try { rawSkin = self.getSkinInfo()?.consoleCmdId?.ToString(); } catch { }
-                }
+            var rawSkin = dc.Main.Class.ME?.user?.heroSkin?.ToString();
+            if (string.IsNullOrWhiteSpace(rawSkin))
+                rawSkin = self.getSkinInfo()?.consoleCmdId?.ToString();
 
-                var skin = NormalizeSkin(rawSkin, "PrisonerDefault");
+            var skin = NormalizeSkin(rawSkin, "PrisonerDefault");
 
-                if (string.Equals(_lastSentHeroSkin, skin, StringComparison.Ordinal))
-                    return;
+            if (string.Equals(_lastSentHeroSkin, skin, StringComparison.Ordinal))
+                return;
 
-                net.SendHeroSkin(skin);
-                _lastSentHeroSkin = skin;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("[NetMod] Failed to send skin from applySkin hook: {msg}", ex.Message);
-            }
+            net.SendHeroSkin(skin);
+            _lastSentHeroSkin = skin;
         }
 
         private void Hook_HeroHead_initCustomHead(Hook_HeroHead.orig_initCustomHead orig, HeroHead self)
@@ -485,24 +476,16 @@ namespace DeadCellsMultiplayerMod
             if (net == null || !net.IsAlive || me == null || self == null)
                 return;
 
-            HeroHead? localHead = null;
-            try { localHead = me.heroHead; } catch { }
+            var localHead = me.heroHead;
             if (localHead == null || !ReferenceEquals(self, localHead))
                 return;
 
-            try
-            {
-                var skin = NormalizeSkin(dc.Main.Class.ME?.user?.heroHeadSkin?.ToString(), "BaseFlame");
-                if (string.Equals(_lastSentHeroHeadSkin, skin, StringComparison.Ordinal))
-                    return;
+            var skin = NormalizeSkin(dc.Main.Class.ME?.user?.heroHeadSkin?.ToString(), "BaseFlame");
+            if (string.Equals(_lastSentHeroHeadSkin, skin, StringComparison.Ordinal))
+                return;
 
-                net.SendHeroHeadSkin(skin);
-                _lastSentHeroHeadSkin = skin;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("[NetMod] Failed to send head skin from initCustomHead hook: {msg}", ex.Message);
-            }
+            net.SendHeroHeadSkin(skin);
+            _lastSentHeroHeadSkin = skin;
         }
 
         private void Hook_ZDoor_onActivate(Hook_ZDoor.orig_onActivate orig, ZDoor self, Hero lp, bool mob)
@@ -515,18 +498,8 @@ namespace DeadCellsMultiplayerMod
                 lp != null &&
                 ReferenceEquals(lp, me))
             {
-                try { SendCurrentRoomTarget(force: true); } catch { }
-                GameMenu.EnqueueMainThread(() =>
-                {
-                    try
-                    {
-                        ReceiveGhostCoords();
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warning(ex, "[NetMod] ReceiveGhostCoords failed after door activate");
-                    }
-                });
+                SendCurrentRoomTarget(force: true);
+                GameMenu.EnqueueMainThread(() => ReceiveGhostCoords());
             }
         }
 
@@ -539,7 +512,7 @@ namespace DeadCellsMultiplayerMod
             }
             catch (Exception ex)
             {
-                if (_netRole != NetRole.Client || self == null || !ContainsBossRushFrameCrash(ex))
+                if (_netRole != NetRole.Client || self == null)
                     throw;
 
                 string? bossRushType = null;
@@ -566,9 +539,7 @@ namespace DeadCellsMultiplayerMod
             int? senderPostDir = null;
 
             if (self != null)
-            {
-                try { senderGenericEventId = self.genericEventId?.ToString()?.Trim(); } catch { }
-            }
+                senderGenericEventId = self.genericEventId?.ToString()?.Trim();
 
             if (dh != null && me != null && ReferenceEquals(dh, me))
                 TryCaptureBossCineHeroPosition(me, out senderPreX, out senderPreY, out senderPreDir);
@@ -612,19 +583,6 @@ namespace DeadCellsMultiplayerMod
                 senderPostY,
                 senderPostDir)))
                 MarkBossCineCompleted(senderLevelId);
-        }
-
-        private static bool ContainsBossRushFrameCrash(Exception ex)
-        {
-            for (var cur = ex; cur != null; cur = cur.InnerException)
-            {
-                var msg = cur.Message;
-                if (!string.IsNullOrWhiteSpace(msg) &&
-                    msg.IndexOf("Unknown frame: bossRushDoor", StringComparison.OrdinalIgnoreCase) >= 0)
-                    return true;
-            }
-
-            return false;
         }
 
         private void Hook_Hero_lockControlFromSkill(Hook_Hero.orig_lockControlFromSkill orig, Hero self, double sec)
@@ -797,41 +755,27 @@ namespace DeadCellsMultiplayerMod
 
             if (_netRole == NetRole.Host)
             {
-                try
+                GameDataSync.SendLevelGraph(graphLevelId, root, graph, rng, _net);
+                var activeUser = user ?? game?.user ?? dc.Main.Class.ME?.user;
+                if (activeUser != null)
                 {
-                    GameDataSync.SendLevelGraph(graphLevelId, root, graph, rng, _net);
-                    var activeUser = user ?? game?.user ?? dc.Main.Class.ME?.user;
-                    if (activeUser != null)
-                    {
-                        var currentRune = GameDataSync.GetBossRuneInt(activeUser);
-                        if (!GameDataSync.TryGetHostBossRune(out var lastSent) || lastSent != currentRune)
-                            GameDataSync.SendBossRune(activeUser, _net);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("[NetMod] Failed to send level graph for {LevelId}: {msg}", graphLevelId, ex.Message);
+                    var currentRune = GameDataSync.GetBossRuneInt(activeUser);
+                    if (!GameDataSync.TryGetHostBossRune(out var lastSent) || lastSent != currentRune)
+                        GameDataSync.SendBossRune(activeUser, _net);
                 }
             }
             else if (_netRole == NetRole.Client)
             {
-                try
+                const int graphSyncWaitMs = 10000;
+                if (GameDataSync.TryApplyRemoteLevelGraph(graphLevelId, graph, rng, graphSyncWaitMs, out var remoteRoot, out var reason))
                 {
-                    const int graphSyncWaitMs = 10000;
-                    if (GameDataSync.TryApplyRemoteLevelGraph(graphLevelId, graph, rng, graphSyncWaitMs, out var remoteRoot, out var reason))
-                    {
-                        Logger.Information("[NetMod] Applied remote level graph+rand for {LevelId}", graphLevelId);
-                        if (remoteRoot != null)
-                            root = remoteRoot;
-                    }
-                    else
-                    {
-                        Logger.Warning("[NetMod] Remote level graph not applied for {LevelId}: {Reason}", graphLevelId, reason);
-                    }
+                    Logger.Information("[NetMod] Applied remote level graph+rand for {LevelId}", graphLevelId);
+                    if (remoteRoot != null)
+                        root = remoteRoot;
                 }
-                catch (Exception ex)
+                else
                 {
-                    Logger.Warning("[NetMod] Failed to apply remote level graph for {LevelId}: {msg}", graphLevelId, ex.Message);
+                    Logger.Warning("[NetMod] Remote level graph not applied for {LevelId}: {Reason}", graphLevelId, reason);
                 }
             }
 
@@ -894,7 +838,7 @@ namespace DeadCellsMultiplayerMod
         {
             kingInitialized = false;
             DeadCellsMultiplayerMod.Mobs.MobsSynchronization.MobsSynchronization.ClearTrackingForLevelChange();
-            try { _net?.ClearMobSyncQueues(); } catch (Exception ex) { Logger.Warning(ex, "[NetMod] ClearMobSyncQueues failed"); }
+            _net?.ClearMobSyncQueues();
             _pendingBossCineApplyByLevel.Clear();
             _suppressBossCineEchoByLevel.Clear();
             _completedBossCineLevels.Clear();
@@ -903,13 +847,13 @@ namespace DeadCellsMultiplayerMod
             _lastBossCineSentTick = 0;
             ResetFakeDeathState(unlockLocalHero: true, sendNetworkUpState: false, clearRemoteDownedTracking: false, clearDownedAnnouncements: false);
             me = self;
-            try { me._targetable = true; } catch { }
+            me._targetable = true;
             orig(self, oldLevel);
             var currentLevelId = GetCurrentLevelId();
             if (!string.IsNullOrWhiteSpace(currentLevelId))
                 SendLevel(currentLevelId);
             SendCurrentRoomTarget(force: true);
-            try { _net?.ClearMobSyncQueues(); } catch (Exception ex) { Logger.Warning(ex, "[NetMod] ClearMobSyncQueues failed"); }
+            _net?.ClearMobSyncQueues();
             EnsureHeroVisibilityAfterRoomChange(me);
             if (_netRole == NetRole.None) return;
             var net = _net;
@@ -925,17 +869,7 @@ namespace DeadCellsMultiplayerMod
             }
 
             DrainRemoteCombatQueuesAfterLevelChange();
-            GameMenu.EnqueueMainThread(() =>
-            {
-                try
-                {
-                    ReceiveGhostCoords();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning(ex, "[NetMod] ReceiveGhostCoords failed after level change");
-                }
-            });
+            GameMenu.EnqueueMainThread(() => ReceiveGhostCoords());
 
             _debugExplorerRevealAppliedSignature = string.Empty;
             _nextDebugExplorerRevealRetryTick = 0;
@@ -946,7 +880,7 @@ namespace DeadCellsMultiplayerMod
         public void hook_hero_wakeup(Hook_Hero.orig_wakeup orig, Hero self, Level lvl, int cx, int cy)
         {
             me = self;
-            try { me._targetable = true; } catch { }
+            me._targetable = true;
             _debugExplorerRevealAppliedSignature = string.Empty;
             orig(self, lvl, cx, cy);
             EnsureHeroVisibilityAfterRoomChange(me);

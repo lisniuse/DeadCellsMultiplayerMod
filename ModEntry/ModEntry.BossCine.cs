@@ -27,35 +27,23 @@ namespace DeadCellsMultiplayerMod
             if (IsBossCineCompleted(currentLevelId))
                 return;
 
-            try
-            {
-                var game = dc.pr.Game.Class.ME;
-                var cine = game?.curCine;
-                if (cine == null || cine.destroyed)
-                    return;
+            var game = dc.pr.Game.Class.ME;
+            var cine = game?.curCine;
+            if (cine == null || cine.destroyed)
+                return;
 
-                if (cine is DeadBase || cine is RemoteDownedCorpse)
-                    return;
+            if (cine is DeadBase || cine is RemoteDownedCorpse)
+                return;
 
-                try
-                {
-                    if (cine is HeroDeath || cine is HeroDeathBase || cine is HeroDeathContinue ||
-                        cine is HeroDeathRespawn || cine is HeroDeathDLCP)
-                        return;
-                }
-                catch
-                {
-                    var typeName = cine.GetType().FullName ?? string.Empty;
-                    if (typeName.IndexOf("HeroDeath", StringComparison.OrdinalIgnoreCase) >= 0)
-                        return;
-                }
+            if (cine is HeroDeath || cine is HeroDeathBase || cine is HeroDeathContinue ||
+                cine is HeroDeathRespawn || cine is HeroDeathDLCP)
+                return;
+            var deathTypeName = cine.GetType().FullName ?? string.Empty;
+            if (deathTypeName.IndexOf("HeroDeath", StringComparison.OrdinalIgnoreCase) >= 0)
+                return;
 
-                if (TrySendBossCinePayload(BuildBossCinePayload(currentLevelId, null)))
-                    MarkBossCineCompleted(currentLevelId);
-            }
-            catch
-            {
-            }
+            if (TrySendBossCinePayload(BuildBossCinePayload(currentLevelId, null)))
+                MarkBossCineCompleted(currentLevelId);
         }
 
         private bool TrySendBossCinePayload(string payload)
@@ -222,24 +210,18 @@ namespace DeadCellsMultiplayerMod
             if (hero == null)
                 return;
 
-            try
+            if (hero.spr != null)
             {
-                if (hero.spr != null)
-                {
-                    x = hero.spr.x;
-                    y = hero.spr.y;
-                }
-                else
-                {
-                    x = hero.get_targetSprPosX();
-                    y = hero.get_targetSprPosY();
-                }
+                x = hero.spr.x;
+                y = hero.spr.y;
             }
-            catch
+            else
             {
+                x = hero.get_targetSprPosX();
+                y = hero.get_targetSprPosY();
             }
 
-            try { dir = hero.dir; } catch { }
+            dir = hero.dir;
         }
 
         private void ApplyReceivedBossCine()
@@ -354,9 +336,9 @@ namespace DeadCellsMultiplayerMod
                 SuppressBossCineSend(currentLevelId);
                 _suppressBossTriggerNetSendUntilTick =
                     Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossHeroTeleportEchoSuppressSeconds);
-                try { localHero.cancelVelocities(); } catch { }
-                try { localHero.setPosPixel(teleport.X, teleport.Y - BossHeroTeleportYOffsetPx); } catch { }
-                try { localHero.dir = teleport.Dir; } catch { }
+                localHero.cancelVelocities();
+                localHero.setPosPixel(teleport.X, teleport.Y - BossHeroTeleportYOffsetPx);
+                localHero.dir = teleport.Dir;
             }
         }
 
@@ -364,35 +346,28 @@ namespace DeadCellsMultiplayerMod
             string levelId,
             string? genericEventId)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(levelId) || !BossLevelIds.Contains(levelId))
-                    return false;
-
-                var game = dc.pr.Game.Class.ME;
-                var hero = game?.hero ?? me;
-                var level = hero?._level;
-                if (game == null || hero == null || level == null)
-                    return false;
-
-                var currentCine = game.curCine;
-                if (currentCine != null && !currentCine.destroyed)
-                    return IsBossIntroCinematic(currentCine);
-
-                if (GameHasAnyCinematic(game))
-                    return false;
-
-                if (!DidBossHiddenTriggerStart(level, genericEventId))
-                    return false;
-
-                _lastBossCineSentLevelId = levelId;
-                _lastBossCineSentTick = Stopwatch.GetTimestamp();
-                return true;
-            }
-            catch
-            {
+            if (string.IsNullOrWhiteSpace(levelId) || !BossLevelIds.Contains(levelId))
                 return false;
-            }
+
+            var game = dc.pr.Game.Class.ME;
+            var hero = game?.hero ?? me;
+            var level = hero?._level;
+            if (game == null || hero == null || level == null)
+                return false;
+
+            var currentCine = game.curCine;
+            if (currentCine != null && !currentCine.destroyed)
+                return IsBossIntroCinematic(currentCine);
+
+            if (GameHasAnyCinematic(game))
+                return false;
+
+            if (!DidBossHiddenTriggerStart(level, genericEventId))
+                return false;
+
+            _lastBossCineSentLevelId = levelId;
+            _lastBossCineSentTick = Stopwatch.GetTimestamp();
+            return true;
         }
 
         private static bool DidBossHiddenTriggerStart(Level level, string? genericEventId)
@@ -400,29 +375,23 @@ namespace DeadCellsMultiplayerMod
             if (level == null || string.IsNullOrWhiteSpace(genericEventId))
                 return false;
 
-            try
+            var entitiesByClass = level.entitiesByClass;
+            var triggerClid = HiddenTrigger.Class.__clid;
+            var entries = entitiesByClass?.get(triggerClid) as dc.hl.types.ArrayObj;
+            if (entries == null)
+                return false;
+
+            for (var i = 0; i < entries.length; i++)
             {
-                var entitiesByClass = level.entitiesByClass;
-                var triggerClid = HiddenTrigger.Class.__clid;
-                var entries = entitiesByClass?.get(triggerClid) as dc.hl.types.ArrayObj;
-                if (entries == null)
-                    return false;
+                if (entries.getDyn(i) is not HiddenTrigger ht)
+                    continue;
 
-                for (var i = 0; i < entries.length; i++)
-                {
-                    if (entries.getDyn(i) is not HiddenTrigger ht)
-                        continue;
+                var evId = ht.genericEventId?.ToString();
+                if (!string.Equals(evId, genericEventId, StringComparison.Ordinal))
+                    continue;
 
-                    var evId = ht.genericEventId?.ToString();
-                    if (!string.Equals(evId, genericEventId, StringComparison.Ordinal))
-                        continue;
-
-                    if (ht.used)
-                        return true;
-                }
-            }
-            catch
-            {
+                if (ht.used)
+                    return true;
             }
 
             return false;

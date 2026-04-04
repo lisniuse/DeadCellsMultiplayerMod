@@ -23,17 +23,10 @@ namespace DeadCellsMultiplayerMod
             if (hero == null)
                 return;
 
-            try { hero.noDamageDuringBossBattle = true; } catch { }
-            try
-            {
-                if (hero.maxLife > 0 && hero.life < hero.maxLife)
-                    hero.life = hero.maxLife;
-            }
-            catch
-            {
-                try { hero.fullHeal(); } catch { }
-            }
-            try { hero._targetable = true; } catch { }
+            hero.noDamageDuringBossBattle = true;
+            if (hero.maxLife > 0 && hero.life < hero.maxLife)
+                hero.life = hero.maxLife;
+            hero._targetable = true;
         }
 
         private void ApplyDebugHeroRuntimeOptions()
@@ -48,7 +41,7 @@ namespace DeadCellsMultiplayerMod
             }
             else
             {
-                try { hero.noDamageDuringBossBattle = false; } catch { }
+                hero.noDamageDuringBossBattle = false;
             }
 
             TryApplyDebugStartPerk(hero);
@@ -82,30 +75,16 @@ namespace DeadCellsMultiplayerMod
             if (_nextDebugPerkApplyTick != 0 && now < _nextDebugPerkApplyTick)
                 return;
 
-            try
-            {
-                var item = new InventItem(new InventItemKind.Perk(perkId.AsHaxeString()));
-                hero.applyItemPickEffect(hero, item);
+            var item = new InventItem(new InventItemKind.Perk(perkId.AsHaxeString()));
+            hero.applyItemPickEffect(hero, item);
 
-                if (string.Equals(perkId, "P_Yolo", StringComparison.OrdinalIgnoreCase))
-                {
-                    try { hero.tryToApplyYoloPerk(); } catch { }
-                }
+            if (string.Equals(perkId, "P_Yolo", StringComparison.OrdinalIgnoreCase))
+                hero.tryToApplyYoloPerk();
 
-                _debugPerkAppliedHero = hero;
-                _debugPerkAppliedId = perkId;
-                _lastDebugPerkApplyErrorId = string.Empty;
-                _nextDebugPerkApplyTick = 0;
-            }
-            catch (Exception ex)
-            {
-                _nextDebugPerkApplyTick = now + (long)(Stopwatch.Frequency * 1.5);
-                if (string.Equals(_lastDebugPerkApplyErrorId, perkId, StringComparison.Ordinal))
-                    return;
-
-                _lastDebugPerkApplyErrorId = perkId;
-                Logger.Warning(ex, "[NetMod] Failed to apply debug start perk {PerkId}", perkId);
-            }
+            _debugPerkAppliedHero = hero;
+            _debugPerkAppliedId = perkId;
+            _lastDebugPerkApplyErrorId = string.Empty;
+            _nextDebugPerkApplyTick = 0;
         }
 
         private void TryApplyDebugExplorerRune(Hero hero)
@@ -114,41 +93,28 @@ namespace DeadCellsMultiplayerMod
                 return;
 
             ItemMetaManager? itemMeta = null;
-            try
-            {
-                var user = hero._level?.game?.user ?? game?.user ?? dc.pr.Game.Class.ME?.user;
-                if (user == null)
-                    return;
-
-                itemMeta = user.itemMeta ?? new ItemMetaManager(user);
-                itemMeta.itemProgress ??= (ArrayObj)ArrayUtils.CreateDyn().array;
-                itemMeta.permanentItems ??= (ArrayObj)ArrayUtils.CreateDyn().array;
-                user.itemMeta = itemMeta;
-            }
-            catch
-            {
+            var user = hero._level?.game?.user ?? game?.user ?? dc.pr.Game.Class.ME?.user;
+            if (user == null)
                 return;
-            }
+
+            itemMeta = user.itemMeta ?? new ItemMetaManager(user);
+            itemMeta.itemProgress ??= (ArrayObj)ArrayUtils.CreateDyn().array;
+            itemMeta.permanentItems ??= (ArrayObj)ArrayUtils.CreateDyn().array;
+            user.itemMeta = itemMeta;
 
             if (itemMeta == null)
                 return;
 
             if (MultiplayerSettingsStorage.DebugUseExplorersRune)
             {
-                try
+                var runeKey = ExplorerRunePermanentItemId.AsHaxeString();
+                if (!itemMeta.hasPermanentItem(runeKey))
                 {
-                    var runeKey = ExplorerRunePermanentItemId.AsHaxeString();
-                    if (!itemMeta.hasPermanentItem(runeKey))
+                    if (itemMeta.addPermanentItem(runeKey))
                     {
-                        if (itemMeta.addPermanentItem(runeKey))
-                        {
-                            _debugExplorerRuneInjectedByDebug = true;
-                            _debugExplorerRuneInjectedMeta = itemMeta;
-                        }
+                        _debugExplorerRuneInjectedByDebug = true;
+                        _debugExplorerRuneInjectedMeta = itemMeta;
                     }
-                }
-                catch
-                {
                 }
 
                 TryRevealAllMinimapForDebugExplorerRune(hero);
@@ -170,9 +136,6 @@ namespace DeadCellsMultiplayerMod
                     {
                     }
                 }
-            }
-            catch
-            {
             }
             finally
             {
@@ -198,42 +161,28 @@ namespace DeadCellsMultiplayerMod
             if (_nextDebugExplorerRevealRetryTick != 0 && now < _nextDebugExplorerRevealRetryTick)
                 return;
 
-            try
+            var feedback = false;
+            hero.triggerExplorerInstinct(Ref<bool>.From(ref feedback));
+
+            var minimap = hero._level?.game?.hud?.minimap ?? dc.ui.HUD.Class.ME?.minimap;
+            if (minimap == null)
             {
-                var feedback = false;
-                try
-                {
-                    // Match the native game flow: reveal rooms + refresh minimap trackers.
-                    hero.triggerExplorerInstinct(Ref<bool>.From(ref feedback));
-                }
-                catch
-                {
-                }
-
-                var minimap = hero._level?.game?.hud?.minimap ?? dc.ui.HUD.Class.ME?.minimap;
-                if (minimap == null)
-                {
-                    _nextDebugExplorerRevealRetryTick = now + (long)(Stopwatch.Frequency * 0.05);
-                    return;
-                }
-
-                minimap.revealAll();
-                _debugExplorerRevealAllCount++;
-                try { minimap.forceRenderRooms(); } catch { }
-                try { minimap.invalidateMinimap(); } catch { }
-
-                if (string.IsNullOrWhiteSpace(sig))
-                    sig = GetDebugExplorerRevealSignature(hero);
-
-                if (!string.IsNullOrWhiteSpace(sig))
-                    _debugExplorerRevealAppliedSignature = sig;
-
-                _nextDebugExplorerRevealRetryTick = 0;
+                _nextDebugExplorerRevealRetryTick = now + (long)(Stopwatch.Frequency * 0.05);
+                return;
             }
-            catch
-            {
-                _nextDebugExplorerRevealRetryTick = now + (long)(Stopwatch.Frequency * 0.25);
-            }
+
+            minimap.revealAll();
+            _debugExplorerRevealAllCount++;
+            minimap.forceRenderRooms();
+            minimap.invalidateMinimap();
+
+            if (string.IsNullOrWhiteSpace(sig))
+                sig = GetDebugExplorerRevealSignature(hero);
+
+            if (!string.IsNullOrWhiteSpace(sig))
+                _debugExplorerRevealAppliedSignature = sig;
+
+            _nextDebugExplorerRevealRetryTick = 0;
         }
 
         /// <summary>Level id + branch token so we re-reveal after room/sub-level changes with the same map id.</summary>
@@ -252,15 +201,9 @@ namespace DeadCellsMultiplayerMod
 
         private string GetDebugExplorerRevealLevelKey(Hero hero)
         {
-            try
-            {
-                var levelFromHero = hero?._level?.map?.id?.ToString();
-                if (!string.IsNullOrWhiteSpace(levelFromHero))
-                    return levelFromHero.Trim();
-            }
-            catch
-            {
-            }
+            var levelFromHero = hero?._level?.map?.id?.ToString();
+            if (!string.IsNullOrWhiteSpace(levelFromHero))
+                return levelFromHero.Trim();
 
             var currentLevelId = GetCurrentLevelId();
             if (!string.IsNullOrWhiteSpace(currentLevelId))

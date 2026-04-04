@@ -37,15 +37,7 @@ namespace DeadCellsMultiplayerMod
                     continue;
                 }
 
-                try
-                {
-                    head.updateHeadFx(ftime);
-                }
-                catch
-                {
-                    pendingClientHeadRecreate[i] = true;
-                    RecreateClientHead(i);
-                }
+                head.updateHeadFx(ftime);
             }
         }
 
@@ -105,25 +97,16 @@ namespace DeadCellsMultiplayerMod
             levelContextId = GetCurrentLevelId();
             branchToken = 0;
 
-            Level? currentLevel = null;
-            try { currentLevel = me?._level; } catch { }
+            Level? currentLevel = me?._level;
             if (currentLevel == null)
-            {
-                try { currentLevel = game?.curLevel; } catch { }
-            }
+                currentLevel = game?.curLevel;
 
             if (currentLevel == null)
                 return !string.IsNullOrWhiteSpace(levelContextId);
 
-            try
-            {
-                var liveLevelId = currentLevel.map?.id?.ToString();
-                if (!string.IsNullOrWhiteSpace(liveLevelId))
-                    levelContextId = liveLevelId.Trim();
-            }
-            catch
-            {
-            }
+            var liveLevelId = currentLevel.map?.id?.ToString();
+            if (!string.IsNullOrWhiteSpace(liveLevelId))
+                levelContextId = liveLevelId.Trim();
 
             if (string.IsNullOrWhiteSpace(levelContextId))
                 return false;
@@ -134,48 +117,28 @@ namespace DeadCellsMultiplayerMod
 
         private int ComputeLevelBranchToken(Level currentLevel, string levelContextId)
         {
-            try
-            {
-                if (!currentLevel.isSubLevel)
-                    return 0;
-            }
-            catch
-            {
+            if (!currentLevel.isSubLevel)
                 return 0;
-            }
 
             unchecked
             {
-                try
+                var ownerGame = currentLevel.game ?? game;
+                var subLevels = ownerGame?.subLevels;
+                if (subLevels != null)
                 {
-                    var ownerGame = currentLevel.game ?? game;
-                    var subLevels = ownerGame?.subLevels;
-                    if (subLevels != null)
+                    var targetUid = currentLevel.__uid;
+                    for (int i = 0; i < subLevels.length; i++)
                     {
-                        var targetUid = currentLevel.__uid;
-                        for (int i = 0; i < subLevels.length; i++)
-                        {
-                            Level? candidate = null;
-                            try { candidate = subLevels.getDyn(i) as Level; } catch { }
-                            if (candidate == null)
-                                continue;
+                        var candidate = subLevels.getDyn(i) as Level;
+                        if (candidate == null)
+                            continue;
 
-                            if (ReferenceEquals(candidate, currentLevel))
-                                return i + 1;
+                        if (ReferenceEquals(candidate, currentLevel))
+                            return i + 1;
 
-                            try
-                            {
-                                if (candidate.__uid == targetUid)
-                                    return i + 1;
-                            }
-                            catch
-                            {
-                            }
-                        }
+                        if (candidate.__uid == targetUid)
+                            return i + 1;
                     }
-                }
-                catch
-                {
                 }
 
                 return ComputeStablePositiveToken($"SUB|{levelContextId}");
@@ -265,32 +228,7 @@ namespace DeadCellsMultiplayerMod
             if (client != null)
             {
                 if (!string.Equals(prev, cleaned, StringComparison.Ordinal) || client.spr == null)
-                {
-                    try
-                    {
-                        client.ApplyRemoteSkin(cleaned);
-                    }
-                    catch (Exception ex)
-                    {
-                        instance.Logger.Warning(
-                            "[NetMod] Failed to apply client skin remoteId={RemoteId} slot={Slot}: {Message}",
-                            remoteId,
-                            index,
-                            ex.Message);
-
-                        if (!string.Equals(cleaned, "PrisonerDefault", StringComparison.Ordinal))
-                        {
-                            try
-                            {
-                                client.ApplyRemoteSkin("PrisonerDefault");
-                                clientSkins[index] = "PrisonerDefault";
-                            }
-                            catch
-                            {
-                            }
-                        }
-                    }
-                }
+                    client.ApplyRemoteSkin(cleaned);
             }
         }
 
@@ -339,7 +277,7 @@ namespace DeadCellsMultiplayerMod
             var existing = clientHeads[slot];
             if (existing != null)
             {
-                try { existing.dispose(); } catch { }
+                existing.dispose();
                 clientHeads[slot] = null;
             }
 
@@ -355,11 +293,6 @@ namespace DeadCellsMultiplayerMod
                 clientHeads[slot] = newHead;
                 client.head = newHead;
                 pendingClientHeadRecreate[slot] = false;
-            }
-            catch (Exception ex)
-            {
-                pendingClientHeadRecreate[slot] = true;
-                Logger.Warning("[NetMod] Failed to recreate client head slot {slot}: {msg}", slot, ex.Message);
             }
             finally
             {
@@ -379,10 +312,7 @@ namespace DeadCellsMultiplayerMod
             var localId = net.id;
             var localLevelId = GetCurrentLevelId();
             if (string.IsNullOrWhiteSpace(localLevelId))
-            {
-                try { localLevelId = me._level?.map?.id?.ToString() ?? string.Empty; }
-                catch { localLevelId = string.Empty; }
-            }
+                localLevelId = me._level?.map?.id?.ToString() ?? string.Empty;
 
             foreach (var remote in remotes)
             {
@@ -429,11 +359,11 @@ namespace DeadCellsMultiplayerMod
                 if (useDownedOffset)
                 {
                     drawY -= DownedGhostBodyYOffsetPx;
-                    try { client._targetable = false; } catch { }
+                    client._targetable = false;
                 }
                 else
                 {
-                    try { client._targetable = true; } catch { }
+                    client._targetable = true;
                 }
 
                 client.setPosPixel(drawX, drawY);
@@ -535,7 +465,7 @@ namespace DeadCellsMultiplayerMod
             if (!_pendingClientDisposeTicks.TryGetValue(slot, out var startedAtTicks))
             {
                 _pendingClientDisposeTicks[slot] = Stopwatch.GetTimestamp();
-                try { client.spr?._animManager?.play("walkOut".AsHaxeString(), null, null); } catch { }
+                client.spr?._animManager?.play("walkOut".AsHaxeString(), null, null);
                 return;
             }
 
@@ -596,7 +526,7 @@ namespace DeadCellsMultiplayerMod
             var head = clientHeads[slot];
             if (head != null)
             {
-                try { head.dispose(); } catch { }
+                head.dispose();
                 clientHeads[slot] = null;
             }
             pendingClientHeadRecreate[slot] = false;
@@ -604,9 +534,9 @@ namespace DeadCellsMultiplayerMod
             var client = clients[slot];
             if (client != null)
             {
-                try { client.destroy(); } catch { }
-                try { client.dispose(); } catch { }
-                try { client.disposeGfx(); } catch { }
+                client.destroy();
+                client.dispose();
+                client.disposeGfx();
             }
             clients[slot] = null!;
 
@@ -646,8 +576,8 @@ namespace DeadCellsMultiplayerMod
             if (net == null)
                 return;
 
-            try { net.TryConsumeRemoteWeaponSnapshots(out _); } catch { }
-            try { net.TryConsumeRemoteAttacks(out _); } catch { }
+            net.TryConsumeRemoteWeaponSnapshots(out _);
+            net.TryConsumeRemoteAttacks(out _);
         }
 
         private void ReceiveGhostAttacks()
@@ -711,23 +641,17 @@ namespace DeadCellsMultiplayerMod
                 return;
 
             var animManager = client.spr._animManager;
-            try
-            {
-                var current = client.spr.groupName;
-                if(current != null && string.Equals(current.ToString(), anim, StringComparison.Ordinal))
-                    return;
-            }
-            catch
-            {
-            }
+            var current = client.spr.groupName;
+            if(current != null && string.Equals(current.ToString(), anim, StringComparison.Ordinal))
+                return;
 
             if (ShouldLoopRemoteAnim(anim))
             {
                 if (!shieldActive)
                 {
-                    try { client.removeAllAffects(96); } catch { }
-                    try { client.removeAllAffects(98); } catch { }
-                    try { client.removeAllAffects(99); } catch { }
+                    client.removeAllAffects(96);
+                    client.removeAllAffects(98);
+                    client.removeAllAffects(99);
                 }
                 animManager.play(anim.AsHaxeString(), null, null).loop(null);
                 return;
@@ -835,21 +759,14 @@ namespace DeadCellsMultiplayerMod
             if(item == null)
                 return null;
 
-            try
-            {
-                var maxAmmo = item.getMaxAmmo();
-                if(maxAmmo <= 0)
-                    return null;
-
-                var ammo = item.ammo;
-                if(ammo < 0) ammo = 0;
-                if(ammo > maxAmmo) ammo = maxAmmo;
-                return ammo;
-            }
-            catch
-            {
+            var maxAmmo = item.getMaxAmmo();
+            if(maxAmmo <= 0)
                 return null;
-            }
+
+            var ammo = item.ammo;
+            if(ammo < 0) ammo = 0;
+            if(ammo > maxAmmo) ammo = maxAmmo;
+            return ammo;
         }
 
         private static int GetWeaponSlot(Inventory inv, InventItem item)
@@ -953,20 +870,14 @@ namespace DeadCellsMultiplayerMod
             if(item == null || !ammo.HasValue)
                 return;
 
-            try
-            {
-                var maxAmmo = item.getMaxAmmo();
-                if(maxAmmo <= 0)
-                    return;
+            var maxAmmo = item.getMaxAmmo();
+            if(maxAmmo <= 0)
+                return;
 
-                var value = ammo.Value;
-                if(value < 0) value = 0;
-                if(value > maxAmmo) value = maxAmmo;
-                item.ammo = value;
-            }
-            catch
-            {
-            }
+            var value = ammo.Value;
+            if(value < 0) value = 0;
+            if(value > maxAmmo) value = maxAmmo;
+            item.ammo = value;
         }
 
         private static bool IsWeaponKindMatch(InventItem? item, string expectedKindId)

@@ -50,35 +50,18 @@ namespace DeadCellsMultiplayerMod
 
         private void StartHostWithEndpoint(IPEndPoint ep)
         {
-            try
-            {
-                StartHostCore(() => _net = NetNode.CreateHost(Logger, ep));
-                var lep = _net?.ListenerEndpoint;
-                if (lep != null)
-                    Logger.Information($"[NetMod] Host listening at {lep.Address}:{lep.Port}");
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"[NetMod] Host start failed: {ex.Message}");
-                _netRole = NetRole.None;
-                _net = null;
-                GameMenu.SetRole(_netRole);
-            }
+            StartHostCore(() => _net = NetNode.CreateHost(Logger, ep));
+            var lep = _net?.ListenerEndpoint;
+            if (lep != null)
+                Logger.Information($"[NetMod] Host listening at {lep.Address}:{lep.Port}");
         }
 
         private void StartClientCore(Action createClient)
         {
             _net?.Dispose();
-            try
-            {
-                var main = dc.Main.Class.ME;
-                if (main?.user != null)
-                    GameDataSync.RestoreOriginalUserState(main.user, true);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex, "[NetMod] RestoreOriginalUserState failed before client start");
-            }
+            var main = dc.Main.Class.ME;
+            if (main?.user != null)
+                GameDataSync.RestoreOriginalUserState(main.user, true);
             ResetNetworkState();
             createClient();
             _netRole = NetRole.Client;
@@ -89,18 +72,8 @@ namespace DeadCellsMultiplayerMod
 
         private void StartClientWithEndpoint(IPEndPoint ep)
         {
-            try
-            {
-                StartClientCore(() => _net = NetNode.CreateClient(Logger, ep));
-                Logger.Information($"[NetMod] Client connecting to {ep.Address}:{ep.Port}");
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"[NetMod] Client start failed: {ex.Message}");
-                _netRole = NetRole.None;
-                _net = null;
-                GameMenu.SetRole(_netRole);
-            }
+            StartClientCore(() => _net = NetNode.CreateClient(Logger, ep));
+            Logger.Information($"[NetMod] Client connecting to {ep.Address}:{ep.Port}");
         }
 
         private void StartHostWithSteamTransport(int hostPort)
@@ -110,18 +83,8 @@ namespace DeadCellsMultiplayerMod
                 Logger.Warning("[NetMod] Steam host start rejected: OnGameEndInit not yet run");
                 return;
             }
-            try
-            {
-                StartHostCore(() => _net = NetNode.CreateSteamHost(Logger, hostPort));
-                Logger.Information("[NetMod] Host started with Steam P2P transport");
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"[NetMod] Steam host start failed: {ex.Message}");
-                _netRole = NetRole.None;
-                _net = null;
-                GameMenu.SetRole(_netRole);
-            }
+            StartHostCore(() => _net = NetNode.CreateSteamHost(Logger, hostPort));
+            Logger.Information("[NetMod] Host started with Steam P2P transport");
         }
 
         private void StartClientWithSteamTransport(ulong hostSteamId)
@@ -131,42 +94,25 @@ namespace DeadCellsMultiplayerMod
                 Logger.Warning("[NetMod] Steam client start rejected: OnGameEndInit not yet run");
                 return;
             }
-            try
-            {
-                StartClientCore(() => _net = NetNode.CreateSteamClient(Logger, hostSteamId));
-                Logger.Information("[NetMod] Client connecting via Steam P2P to hostSteamId={HostSteamId}", hostSteamId);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"[NetMod] Steam client start failed: {ex.Message}");
-                _netRole = NetRole.None;
-                _net = null;
-                GameMenu.SetRole(_netRole);
-            }
+            StartClientCore(() => _net = NetNode.CreateSteamClient(Logger, hostSteamId));
+            Logger.Information("[NetMod] Client connecting via Steam P2P to hostSteamId={HostSteamId}", hostSteamId);
         }
 
         public void StopNetworkFromMenu()
         {
             var roleBeforeStop = _netRole;
-            try
+            if (roleBeforeStop == NetRole.Client)
             {
-                if (roleBeforeStop == NetRole.Client)
-                {
-                    Logger.Information("[NetMod] Disconnecting client from host...");
-                    _net?.SendControlAndFlush("BYE", 500);
-                }
-                else if (roleBeforeStop == NetRole.Host)
-                {
-                    Logger.Information("[NetMod] Disposing host server...");
-                    _net?.SendControlAndFlush("KICK", 500);
-                }
+                Logger.Information("[NetMod] Disconnecting client from host...");
+                _net?.SendControlAndFlush("BYE", 500);
+            }
+            else if (roleBeforeStop == NetRole.Host)
+            {
+                Logger.Information("[NetMod] Disposing host server...");
+                _net?.SendControlAndFlush("KICK", 500);
+            }
 
-                _net?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex, "[NetMod] Error during network stop/dispose");
-            }
+            _net?.Dispose();
             ResetNetworkState();
             _net = null;
             _netRole = NetRole.None;
