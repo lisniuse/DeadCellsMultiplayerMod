@@ -1,7 +1,5 @@
-using System;
 using dc;
 using dc.en;
-using dc.hl.types;
 using dc.libs.heaps.slib;
 using dc.libs.heaps.slib._AnimManager;
 using dc.tool;

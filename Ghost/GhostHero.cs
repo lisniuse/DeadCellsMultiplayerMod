@@ -8,14 +8,8 @@ using dc.shader;
 using dc.hl.types;
 using Hashlink.Virtuals;
 using dc.libs.heaps.slib;
-using System.Collections.Generic;
-using dc.h2d;
-using dc.ui;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
-using DeadCellsMultiplayerMod.MultiplayerModUI;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
-using dc.tool;
-using DeadCellsMultiplayerMod.Tools;
 
 
 namespace DeadCellsMultiplayerMod

@@ -1,5 +1,3 @@
-using System;
-using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using dc.en;
 using dc.ui;

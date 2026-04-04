@@ -1,9 +1,5 @@
-using System;
-using System.Collections.Generic;
-using DeadCellsMultiplayerMod;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.Mobs.MobsSynchronization;
-using dc.hl.types;
 using dc.ui;
 using HaxeProxy.Runtime;
 using ModCore.Events;

@@ -3,7 +3,6 @@ using dc.tool;
 using dc.tool.hero;
 using dc.tool.weap;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
-using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using System.Diagnostics;
 

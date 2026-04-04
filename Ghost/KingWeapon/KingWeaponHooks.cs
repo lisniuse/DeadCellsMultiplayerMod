@@ -1,10 +1,7 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using dc;
 using dc.en;
 using dc.en.loot;
-using dc.h2d;
 using dc.hl.types;
 using dc.tool;
 using dc.tool.atk;

@@ -18,10 +18,6 @@ namespace CooldownHelper
         public static class Keys
         {
             public const int JUMP_HIT = 585;
-            public const int HERO_LIFE_0 = 99;
-            public const int KING_Create = 31;
-            public const int DELET_YOLO = 1087;
-            public const int KING_ANIM_stun = 240;
         }
     }
 }

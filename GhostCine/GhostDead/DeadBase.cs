@@ -1,4 +1,3 @@
-using System;
 using dc.en;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using HaxeProxy.Runtime;

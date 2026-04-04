@@ -1,8 +1,3 @@
-
-
-using System.Diagnostics.Tracing;
-using ModCore.Events;
-
 namespace DeadCellsMultiplayerMod.Interface.ModuleInitializing
 {
 

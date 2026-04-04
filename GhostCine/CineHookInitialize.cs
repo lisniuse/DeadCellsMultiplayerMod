@@ -1,19 +1,10 @@
-using dc;
 using dc.cine;
 using dc.en;
-using dc.hl._NativeArray;
-using dc.libs._Cooldown;
-using dc.steam.ugc;
 using dc.tool;
 using DeadCellsMultiplayerMod;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
-using Hashlink.Proxy.Objects;
-using Hashlink.Reflection.Members;
 using ModCore.Events;
-using ModCore.Events.Interfaces;
 using ModCore.Utilities;
-using Serilog;
-using Cd = CooldownHelper.Cooldown;
 
 namespace CineHookInitialize
 {
