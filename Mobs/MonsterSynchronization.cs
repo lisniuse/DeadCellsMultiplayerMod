@@ -10,8 +10,10 @@ using dc.h2d;
 using dc.libs.heaps.slib;
 using dc.libs.heaps.slib._AnimManager;
 using dc.pr;
+using dc.tool;
 using dc.tool.atk;
 using dc.tool.skill;
+using DeadCellsMultiplayerMod.Ghost;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.Mobs.Bosses;
 using DeadCellsMultiplayerMod.Mobs.Levelinit;
@@ -919,6 +921,28 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 var owner = (Entity?)sourceWeapon.owner;
                 if (IsLocalPlayerDamageSource(owner, localHero, gameHero))
+                    return true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                InventItem sourceItem;
+                try
+                {
+                    sourceItem = attack.sourceItem;
+                }
+                catch
+                {
+                    sourceItem = null!;
+                }
+
+                if (sourceItem != null &&
+                    KingWeaponSupport.TryGetSourceByItem(sourceItem, out var kingSkin) &&
+                    kingSkin != null &&
+                    !IsKnownRemoteClientEntity(kingSkin))
                     return true;
             }
             catch

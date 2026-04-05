@@ -267,7 +267,9 @@ public class SettingsUI :
         bool verticalSyncNow = MultiplayerSettingsStorage.SyncVerticalPosition;
         self.addToggleWidget(
             GameMenu.Localize("Sync vertical position").AsHaxeString(),
-            null,
+            GameMenu.Localize(
+                    "Applies host vertical position to gravity mobs. Off: X-only for walkers; flying mobs still sync Y. On: can reduce desync but may snap ground mobs.")
+                .AsHaxeString(),
             new HlFunc<bool>(ToggleVerticalSyncSetting),
             Ref<bool>.From(ref verticalSyncNow),
             widgetParent);

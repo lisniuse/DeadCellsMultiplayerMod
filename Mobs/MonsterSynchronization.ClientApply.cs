@@ -33,14 +33,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             if (!preserveLocalMotion)
             {
-                var syncY = IsClientVerticalSyncEnabled();
+                // Equivalent to: vertical setting OR flying mob (!hasGravity). Flyers always follow host Y.
+                bool syncY;
                 try
                 {
-                    if (!self.hasGravity)
-                        syncY = true;
+                    syncY = !self.hasGravity || IsClientVerticalSyncEnabled();
                 }
                 catch
                 {
+                    syncY = IsClientVerticalSyncEnabled();
                 }
 
                 var currentX = GetWorldX(self);

@@ -28,7 +28,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double ClientDormantAffectEvalSeconds = 1.025;
         private const double ClientFarDrawEvalSeconds = 0.375;
         private const double ClientDormantDrawEvalSeconds = 1.125;
-        private const double ClientMobHitReportMinIntervalSeconds = 0.05;
+        /// <summary>Coalesce rapid client hit MOBEVENT spam; keep small so multi-hit weapons still report.</summary>
+        private const double ClientMobHitReportMinIntervalSeconds = 0.016;
         private const double ClientAnimSpeedEpsilon = 0.05;
         private static readonly bool ClientSyncVerticalPosition = false;
         private const double ClientTurnSnapDeltaPx = 2.0;
@@ -75,6 +76,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return System.Math.Clamp(configured, 0.20, 1.00);
         }
 
+        /// <summary>User toggle (and dev flag); combined per-mob with <c>!hasGravity</c> for client mob Y sync.</summary>
         private static bool IsClientVerticalSyncEnabled()
         {
             return ClientSyncVerticalPosition || MultiplayerSettingsStorage.SyncVerticalPosition;

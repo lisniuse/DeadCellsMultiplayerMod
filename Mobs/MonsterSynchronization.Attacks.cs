@@ -625,7 +625,18 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (!double.IsFinite(dx) || !double.IsFinite(dy))
                     continue;
 
-                var distanceSq = dx * dx + dy * dy;
+                // Walkers: host/client Y often diverges when vertical sync is off; full 2D distance mis-binds
+                // same-type mobs stacked vertically (e.g. flyer vs ground). Fliers need dy for disambiguation.
+                var hasGravity = true;
+                try
+                {
+                    hasGravity = mob.hasGravity;
+                }
+                catch
+                {
+                }
+
+                var distanceSq = hasGravity ? dx * dx : dx * dx + dy * dy;
                 if (distanceSq > MobStateTypeRebindSearchRadiusSq)
                     continue;
 
