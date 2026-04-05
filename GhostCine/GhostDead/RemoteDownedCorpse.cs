@@ -536,26 +536,11 @@ namespace DeadCellsMultiplayerMod
             try
             {
                 _corpsePointer = new Pointer(corpse, "".AsHaxeString(), 99999.0, CorpseMarkerColor);
-                SuppressPointerFx(_corpsePointer);
+                PointerFxHelper.SuppressPointerFx(_corpsePointer, PointerFxSuppressionKey);
             }
             catch
             {
                 _corpsePointer = null;
-            }
-        }
-
-        private static void SuppressPointerFx(Pointer? pointer)
-        {
-            if (pointer == null)
-                return;
-
-            try
-            {
-                dynamic fastCheck = pointer.cd.fastCheck;
-                fastCheck.set(PointerFxSuppressionKey, (object)1);
-            }
-            catch
-            {
             }
         }
 

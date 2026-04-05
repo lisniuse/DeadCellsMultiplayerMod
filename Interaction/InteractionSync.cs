@@ -225,10 +225,14 @@ public class InteractionSync :
     }
 
     private const int ElevatorInterSendMinIntervalMs = 100;
+    private static void TryApplyElevatorRemoteActivation(Elevator elevator)
+    {
+        if (elevator == null)
+            return;
 
-    /// <summary>
-    /// Tile/cell anchor for an elevator (stable across movement). Sprite position drifts and breaks matching on peers.
-    /// </summary>
+        elevator.onStep();
+    }
+
     private static (double x, double y) GetElevatorStableAnchor(Elevator e)
     {
         if (e == null)
@@ -647,7 +651,7 @@ public class InteractionSync :
 
                 try
                 {
-                    elevator.onStep();
+                    TryApplyElevatorRemoteActivation(elevator);
                 }
                 catch (Exception ex)
                 {

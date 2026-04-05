@@ -146,6 +146,15 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        internal static void ClearPendingBossRuneReloadState()
+        {
+            lock (_pendingBossRuneReloadLock)
+            {
+                _hasPendingBossRuneReload = false;
+                _pendingBossRuneReloadLevelId = null;
+            }
+        }
+
         private static void TryScheduleBossRuneReloadForLevel(string levelId)
         {
             if (string.IsNullOrWhiteSpace(levelId))

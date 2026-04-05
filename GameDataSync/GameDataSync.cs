@@ -271,6 +271,7 @@ namespace DeadCellsMultiplayerMod
                 {
                     _remoteBossRune = null;
                 }
+                ClearPendingBossRuneReloadState();
                 RestoreLocalSerializerSyncIfCaptured();
                 _origProgressCaptured = false;
                 _origProgressPayload = null;
@@ -649,7 +650,10 @@ namespace DeadCellsMultiplayerMod
             if (net != null && net.IsHost)
                 return;
 
-            if (!previousRemote.HasValue || previousRemote.Value != bossRune)
+            // Only the *host changing* the boss rune should force a graph reload: the first BOSSRUNE after a
+            // reconnect has no previousRemote (cleared session state) but matches local — pending=true was wrong
+            // and triggered reloadAfterBossRuneModif + curCine crashes.
+            if (previousRemote.HasValue && previousRemote.Value != bossRune)
                 MarkPendingBossRuneReload(bossRune);
             // _log?.Information("[NetMod] Received remote boss rune {BossRune}", bossRune);
 
@@ -660,6 +664,18 @@ namespace DeadCellsMultiplayerMod
                     var user = dc.Main.Class.ME?.user;
                     if (user != null)
                         ApplyRemoteBossRune(user, bossRune);
+                }
+                catch
+                {
+                }
+
+                // If the level graph arrived before the first BOSSRUNE, TryTriggerBossRuneReload bailed early;
+                // re-evaluate after user state matches remote.
+                try
+                {
+                    var n = GameMenu.NetRef;
+                    if (n != null && n.IsAlive && !n.IsHost)
+                        TryScheduleBossRuneReloadForCurrentLevel();
                 }
                 catch
                 {

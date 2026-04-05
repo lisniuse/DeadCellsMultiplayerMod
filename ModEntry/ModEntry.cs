@@ -933,6 +933,7 @@ namespace DeadCellsMultiplayerMod
 
             DrainRemoteCombatQueuesAfterLevelChange();
             GameMenu.EnqueueMainThread(() => ReceiveGhostCoords());
+            MarkDiveNetGuardAfterSpawnOrRoomChange();
 
             _debugExplorerRevealAppliedSignature = string.Empty;
             _nextDebugExplorerRevealRetryTick = 0;
@@ -949,6 +950,7 @@ namespace DeadCellsMultiplayerMod
             EnsureHeroVisibilityAfterRoomChange(me);
             SendCurrentRoomTarget(force: true);
             SendEquippedWeapons(self.inventory);
+            MarkDiveNetGuardAfterSpawnOrRoomChange();
         }
 
 

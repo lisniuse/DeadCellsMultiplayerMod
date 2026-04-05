@@ -275,6 +275,8 @@ namespace DeadCellsMultiplayerMod
                     var ts = GetTitleScreen();
                     if (ts != null) ShowHostStatusMenu(ts);
                 }
+
+                EnqueueMainThread(() => ConnectionUI.RefreshLayoutAfterDisconnect());
                 return;
             }
 
@@ -293,6 +295,8 @@ namespace DeadCellsMultiplayerMod
             MultiplayerUI.PushSystemMessage(Localize("Host disconnected from server."));
             if (wasInRun)
                 StartHostDisconnectCountdown();
+
+            EnqueueMainThread(() => ConnectionUI.RefreshLayoutAfterDisconnect());
         }
 
         private static void SendUsernameToRemote()
@@ -343,8 +347,6 @@ namespace DeadCellsMultiplayerMod
 
         private static void ResetSteamState()
         {
-            if (!(NetRef?.TryClearSteamRichPresence() ?? false) && _steamLobbyId != 0UL)
-                _log?.Warning("[NetMod][Steam] Skipping main-process rich presence clear fallback for lobby {LobbyId}; Steam worker must own rich presence", _steamLobbyId);
             var lobbyId = _steamLobbyId;
             if (lobbyId != 0UL)
             {

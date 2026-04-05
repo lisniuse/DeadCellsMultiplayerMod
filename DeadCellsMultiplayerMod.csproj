@@ -7,7 +7,7 @@
     <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
     <SupportedOSPlatform>Windows</SupportedOSPlatform>
     <NoWarn>$(NoWarn);CA1416;CS0414;CS9107</NoWarn>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <ModType>mod</ModType>
     <ModMain>DeadCellsMultiplayerMod.ModEntry</ModMain>
     <AutoInstallMod Condition="'$(Configuration)' == 'Debug'">true</AutoInstallMod>
@@ -20,10 +20,7 @@
   <ItemGroup>
     <PackageReference Include="DeadCellsCoreModding.MDK" Version="1.0.1" />
     <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.3" />
-    <Reference Include="Steamworks.NET" Condition="Exists('$(SteamworksNetHintPath)')">
-      <HintPath>$(SteamworksNetHintPath)</HintPath>
-      <Private>true</Private>
-    </Reference>
+    <Reference Include="Steamworks.NET" />
     <None Include="$(SteamApi64HintPath)" Condition="Exists('$(SteamApi64HintPath)')" Link="steam_api64.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>

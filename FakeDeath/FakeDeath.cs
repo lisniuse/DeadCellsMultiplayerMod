@@ -1029,9 +1029,7 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
-            bool isHoldPressed;
-            try { isHoldPressed = dc.hxd.Key.Class.isDown(ReviveInteractKey); }
-            catch { isHoldPressed = false; }
+            var isHoldPressed = GameMenu.IsReviveHoldInputDown(me);
 
             if (!isHoldPressed)
             {
@@ -1130,7 +1128,8 @@ namespace DeadCellsMultiplayerMod
                     var hdx = state.HeadX - state.X;
                     var hdy = state.HeadY - state.Y;
                     var headBodyDistSq = hdx * hdx + hdy * hdy;
-                    if (headBodyDistSq > ReviveHomunculusBodyMaxDistancePx * ReviveHomunculusBodyMaxDistancePx)
+                    var maxHeadBodySq = ReviveHomunculusBodyMaxDistancePx * ReviveHomunculusBodyMaxDistancePx * 16.0;
+                    if (headBodyDistSq > maxHeadBodySq)
                         continue;
                 }
 

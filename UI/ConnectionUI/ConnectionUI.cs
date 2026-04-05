@@ -54,6 +54,19 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             set { if (Instance != null) Instance.root.visible = value; }
         }
 
+        /// <summary>After gamepad connect/disconnect, window metrics can change; re-run layout to avoid blurred/scaled UI.</summary>
+        public static void RefreshLayoutAfterDisconnect()
+        {
+            try
+            {
+                if (Instance != null && set_visible)
+                    Instance.onResize();
+            }
+            catch
+            {
+            }
+        }
+
 
         private void BuildUI()
         {

@@ -831,8 +831,6 @@ namespace DeadCellsMultiplayerMod
             ConnectionUI.NotifyConnectionsChanged();
             _log?.Information("[NetMod][Steam] Host lobby ready: id={LobbyId} code={LobbyCode}", _steamLobbyId, _steamLobbyCode);
 
-            if (!(NetRef?.TrySetSteamHostRichPresence(_steamLobbyId) ?? false))
-                _log?.Warning("[NetMod][Steam] Skipping main-process rich presence fallback for lobby {LobbyId}; Steam worker must own rich presence", _steamLobbyId);
 
             var copied = SteamConnect.TryCopyLobbyCodeToClipboard(_steamLobbyCode)
                          || SteamConnect.TryCopyLobbyIdToClipboard(lobby.LobbyId);

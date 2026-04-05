@@ -37,7 +37,7 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
         private long _lastRemoteDiveStartTicks;
         private long _lastRemoteDiveLandTicks;
 
-        private const double RemoteDiveReplayMinSeconds = 0.03;
+        private const double RemoteDiveReplayMinSeconds = 0.08;
         private const int DiveAttackCooldownKey = 729808896;
         private const int HeroControlLockCooldownKey = 255852544;
         private const int HeroSkillLockCooldownKey = 174063616;
@@ -330,7 +330,14 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
                 return false;
             }
 
-            return spr != null;
+            try
+            {
+                return spr != null && spr.groupName != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private readonly struct LocalHeroDiveStateSnapshot
