@@ -163,24 +163,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                     AddTrackedMobLocked(mob);
                 }
-
-                if (MobSyncTrace.Enabled && trackedMobs.Count > 0)
-                {
-                    var max = System.Math.Min(16, trackedMobs.Count);
-                    for (var i = 0; i < max; i++)
-                    {
-                        var mob = trackedMobs[i];
-                        if (mob == null)
-                            continue;
-                        _ = TryGetMobSyncId(mob, out var sid);
-                        MobSyncTrace.LogRegistryHeadEntry(
-                            i,
-                            sid,
-                            BuildMobStateTypeSignature(mob),
-                            GetWorldX(mob),
-                            GetWorldY(mob));
-                    }
-                }
             }
         }
 
@@ -709,6 +691,68 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             if (bestIndex < 0)
                 return -1;
+
+            return bestIndex;
+        }
+
+        /// <summary>Rounds world coordinates to int32 pixels so host/client hit routing agrees despite float drift.</summary>
+        private static void QuantizeWorldPositionToPixelsInt32(double x, double y, out int qx, out int qy)
+        {
+            if (!double.IsFinite(x) || !double.IsFinite(y))
+            {
+                qx = 0;
+                qy = 0;
+                return;
+            }
+
+            const double lim = int.MaxValue - 8;
+            var rx = System.Math.Clamp(System.Math.Round(x, MidpointRounding.AwayFromZero), -lim, lim);
+            var ry = System.Math.Clamp(System.Math.Round(y, MidpointRounding.AwayFromZero), -lim, lim);
+            qx = (int)rx;
+            qy = (int)ry;
+        }
+
+        /// <summary>Squared distance in int32 pixel space (host/client hit routing).</summary>
+        private static long QuantizedPixelDistanceSqInt32(int qx0, int qy0, int qx1, int qy1)
+        {
+            long qdx = (long)qx1 - qx0;
+            long qdy = (long)qy1 - qy0;
+            return qdx * qdx + qdy * qdy;
+        }
+
+        /// <summary>Pick best mob for incoming hit using quantized pixel distance (same radius cap as float rebind).</summary>
+        private static int FindBestTrackedMobIndexForHitByQuantizedPositionLocked(string? expectedType, double refX, double refY)
+        {
+            if (trackedMobs.Count == 0 || string.IsNullOrWhiteSpace(expectedType))
+                return -1;
+
+            QuantizeWorldPositionToPixelsInt32(refX, refY, out var qRefX, out var qRefY);
+
+            var bestIndex = -1;
+            long bestScore = long.MaxValue;
+            var maxSq = (long)System.Math.Round(MobStateTypeRebindSearchRadiusSq);
+
+            for (var i = 0; i < trackedMobs.Count; i++)
+            {
+                var mob = trackedMobs[i];
+                if (!IsStateRebindCandidateLocked(mob))
+                    continue;
+
+                if (!DoesMobMatchStateType(mob, expectedType))
+                    continue;
+
+                QuantizeWorldPositionToPixelsInt32(GetWorldX(mob), GetWorldY(mob), out var qMx, out var qMy);
+
+                var distanceSq = QuantizedPixelDistanceSqInt32(qRefX, qRefY, qMx, qMy);
+                if (distanceSq > maxSq)
+                    continue;
+
+                if (distanceSq < bestScore)
+                {
+                    bestScore = distanceSq;
+                    bestIndex = i;
+                }
+            }
 
             return bestIndex;
         }

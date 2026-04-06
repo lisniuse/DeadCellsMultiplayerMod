@@ -318,14 +318,17 @@ public sealed partial class NetNode : IDisposable
         public readonly int Hp;
         public readonly double X;
         public readonly double Y;
+        /// <summary>Mob type signature from MOBEVENT row (for host hit routing when syncId was rebound to a nearby same-type mob).</summary>
+        public readonly string Type;
 
-        public MobHit(int userId, int mobIndex, int hp, double x, double y)
+        public MobHit(int userId, int mobIndex, int hp, double x, double y, string type = "")
         {
             UserId = userId;
             MobIndex = mobIndex;
             Hp = hp;
             X = x;
             Y = y;
+            Type = type ?? string.Empty;
         }
     }
 

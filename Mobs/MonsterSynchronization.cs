@@ -692,7 +692,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (net == null)
                     return;
 
-                // After lethal orig(), the mob may be destroyed; IsSyncMob can fail even though we were tracked before orig.
                 if (!IsSyncMob(self) && !preSyncOk)
                     return;
 
@@ -765,8 +764,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         }
                         else
                         {
+                            // Never drop a killing blow: stale lastLife or host sync can make life look non-decreasing.
                             if (life >= lastLife)
-                                return;
+                            {
+                                var lethalReport = shouldReport && life <= 0 && lastLife > 0 && preDamageLife > 0;
+                                if (!lethalReport)
+                                    return;
+                            }
 
                             if (life > 0 &&
                                 clientLastMobHitReportTick.TryGetValue(localIndex, out var lastTick) &&

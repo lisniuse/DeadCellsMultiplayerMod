@@ -329,7 +329,8 @@ public sealed partial class NetNode
         if (!double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
             return false;
 
-        hit = new MobHit(parsedUserId, mobIndex, hp, x, y);
+        var type = parts.Length > 5 ? parts[5] : string.Empty;
+        hit = new MobHit(parsedUserId, mobIndex, hp, x, y, type);
         return true;
     }
 
@@ -458,7 +459,7 @@ public sealed partial class NetNode
     }
 
     /// <summary>Parse hit event: hit|life or hit|life|maxLife</summary>
-    private static bool TryParseMobHitEvent(string ev, int index, double x, double y, int userId, out MobHit hit)
+    private static bool TryParseMobHitEvent(string ev, int index, double x, double y, int userId, string? mobType, out MobHit hit)
     {
         hit = default;
         if (string.IsNullOrEmpty(ev) || !ev.StartsWith("hit|", StringComparison.Ordinal))
@@ -471,7 +472,7 @@ public sealed partial class NetNode
         if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
             return false;
 
-        hit = new MobHit(userId, index, life, x, y);
+        hit = new MobHit(userId, index, life, x, y, mobType ?? string.Empty);
         return true;
     }
 

@@ -922,7 +922,7 @@ public sealed partial class NetNode
                             }
                             else if (ev.StartsWith("hit|", StringComparison.Ordinal))
                             {
-                                if (TryParseMobHitEvent(ev, u.Index, u.X, u.Y, effectiveUserId, out var hit))
+                                if (TryParseMobHitEvent(ev, u.Index, u.X, u.Y, effectiveUserId, u.Type, out var hit))
                                 {
                                     _pendingMobHits.Add(hit);
                                 }

@@ -1649,8 +1649,97 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             lock (Sync)
             {
-                return ResolveMobBySyncIdLocked(hit.MobIndex);
+                var registryMob = ResolveMobBySyncIdLocked(hit.MobIndex);
+                var typeMatchesRegistry = MobHitRegistryTypeMatchesLocked(registryMob, hit);
+
+                if (registryMob != null && typeMatchesRegistry &&
+                    (MobHitQuantizedPositionCloseEnoughLocked(registryMob, hit) || MobHitPositionMatchesHostLocked(registryMob, hit)))
+                    return registryMob;
+
+                if (!string.IsNullOrWhiteSpace(hit.Type))
+                {
+                    var rebindIndex = FindBestTrackedMobIndexForHitByQuantizedPositionLocked(hit.Type, hit.X, hit.Y);
+                    if (rebindIndex >= 0 && rebindIndex < trackedMobs.Count)
+                    {
+                        var candidate = trackedMobs[rebindIndex];
+                        if (candidate != null)
+                        {
+                            if (registryMob == null || !typeMatchesRegistry)
+                            {
+                                SyncMobIdRegistry.BindSyncId(candidate, hit.MobIndex);
+                                MobSyncTrace.LogBindSyncId("hit", hit.MobIndex, hit.Type, hit.X, hit.Y);
+                                return candidate;
+                            }
+
+                            if (!ReferenceEquals(candidate, registryMob))
+                            {
+                                var dReg = MobHitQuantizedDistanceSqToHostLocked(registryMob, hit);
+                                var dCand = MobHitQuantizedDistanceSqToHostLocked(candidate, hit);
+                                if (dCand < dReg)
+                                {
+                                    SyncMobIdRegistry.BindSyncId(candidate, hit.MobIndex);
+                                    MobSyncTrace.LogBindSyncId("hit", hit.MobIndex, hit.Type, hit.X, hit.Y);
+                                    return candidate;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (registryMob != null && typeMatchesRegistry)
+                    return registryMob;
+
+                return null;
             }
+        }
+
+        private static bool MobHitRegistryTypeMatchesLocked(Mob? registryMob, NetNode.MobHit hit)
+        {
+            if (registryMob == null)
+                return false;
+            if (string.IsNullOrWhiteSpace(hit.Type))
+                return true;
+            return DoesMobMatchStateType(registryMob, hit.Type);
+        }
+
+        private static bool MobHitQuantizedPositionCloseEnoughLocked(Mob mob, NetNode.MobHit hit)
+        {
+            QuantizeWorldPositionToPixelsInt32(hit.X, hit.Y, out var hx, out var hy);
+            QuantizeWorldPositionToPixelsInt32(GetWorldX(mob), GetWorldY(mob), out var mx, out var my);
+            return mx == hx && my == hy;
+        }
+
+        /// <summary>Squared distance in int32 pixel space (same as <see cref="QuantizedPixelDistanceSqInt32"/>).</summary>
+        private static long MobHitQuantizedDistanceSqToHostLocked(Mob mob, NetNode.MobHit hit)
+        {
+            QuantizeWorldPositionToPixelsInt32(hit.X, hit.Y, out var hx, out var hy);
+            QuantizeWorldPositionToPixelsInt32(GetWorldX(mob), GetWorldY(mob), out var mx, out var my);
+            return QuantizedPixelDistanceSqInt32(hx, hy, mx, my);
+        }
+
+        /// <summary>Same horizontal vs 2D distance convention as <see cref="FindBestTrackedMobIndexForTypeAndPositionLocked"/>.</summary>
+        private static double MobHitDistanceSqToHostLocked(Mob mob, NetNode.MobHit hit)
+        {
+            var dx = GetWorldX(mob) - hit.X;
+            var dy = GetWorldY(mob) - hit.Y;
+            if (!double.IsFinite(dx) || !double.IsFinite(dy))
+                return double.MaxValue;
+
+            var hasGravity = true;
+            try
+            {
+                hasGravity = mob.hasGravity;
+            }
+            catch
+            {
+            }
+
+            return hasGravity ? dx * dx : dx * dx + dy * dy;
+        }
+
+        private static bool MobHitPositionMatchesHostLocked(Mob mob, NetNode.MobHit hit)
+        {
+            return MobHitDistanceSqToHostLocked(mob, hit) <= MobStateTypeRebindSearchRadiusSq;
         }
 
         private static Mob? ResolveMobFromDieLocked(NetNode.MobDie die)

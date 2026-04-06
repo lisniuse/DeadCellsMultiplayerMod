@@ -302,7 +302,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             try
             {
                 if (mob.life <= 0)
+                {
+                    // Was alive before this damage (fallbackLife > 0) and dead after — keep dead so lethal
+                    // hit|0 can be sent and host can apply kill; do not resurrect here.
+                    if (fallbackLife > 0)
+                        return;
+
                     mob.life = System.Math.Max(1, fallbackLife);
+                }
             }
             catch
             {
