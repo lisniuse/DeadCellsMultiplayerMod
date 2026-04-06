@@ -49,7 +49,6 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
     private void Levelinit_EntitiesPostCreate(Hook_Level.orig_entitiesPostCreate orig, Level self)
     {
         orig(self);
-        SyncMobIdRegistry.RebuildForLevel(self);
     }
 
     private void Levelinit_OnDispose(Hook_Level.orig_onDispose orig, Level self)
@@ -147,9 +146,6 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
                 }
             }
         }
-
-        SyncMobIdRegistry.RebuildForLevel(self);
-
 
         self.splatters = (ArrayObj)ArrayUtils.CreateDyn().array;
         self.entityLights = (ArrayObj)ArrayUtils.CreateDyn().array;

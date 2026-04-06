@@ -436,6 +436,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             orig(self);
             RebuildMobArray(self);
+            // Drop any pending mob packets from the previous level so MobIndex is not applied after RebuildMobArray reassigns sync ids.
             try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
         }
 

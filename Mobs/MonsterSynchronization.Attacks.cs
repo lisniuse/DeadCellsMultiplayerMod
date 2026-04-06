@@ -150,7 +150,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 ResetMobTrackingLocked();
                 currentLevel = level;
-                SyncMobIdRegistry.RebuildForLevel(level);
+                SyncMobIdRegistry.RebuildForLevel(level, IsSyncMob);
                 if (level == null || level.entities == null)
                     return;
 
@@ -162,6 +162,24 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         continue;
 
                     AddTrackedMobLocked(mob);
+                }
+
+                if (MobSyncTrace.Enabled && trackedMobs.Count > 0)
+                {
+                    var max = System.Math.Min(16, trackedMobs.Count);
+                    for (var i = 0; i < max; i++)
+                    {
+                        var mob = trackedMobs[i];
+                        if (mob == null)
+                            continue;
+                        _ = TryGetMobSyncId(mob, out var sid);
+                        MobSyncTrace.LogRegistryHeadEntry(
+                            i,
+                            sid,
+                            BuildMobStateTypeSignature(mob),
+                            GetWorldX(mob),
+                            GetWorldY(mob));
+                    }
                 }
             }
         }

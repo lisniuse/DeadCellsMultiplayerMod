@@ -148,6 +148,20 @@ internal static class MobSyncTrace
             mobType ?? string.Empty);
     }
 
+    public static void LogRegistryHeadEntry(int orderIndex, int syncId, string mobType, double x, double y)
+    {
+        if (!Enabled)
+            return;
+
+        Log.Information(
+            "[MobSync] ◎ REGISTRY head[{Order}] syncId={SyncId} type={MobType} x={X} y={Y}",
+            orderIndex,
+            syncId,
+            mobType ?? string.Empty,
+            x,
+            y);
+    }
+
     public static void LogBindSyncId(string reason, int syncId, string mobType, double x, double y)
     {
         if (!Enabled)
