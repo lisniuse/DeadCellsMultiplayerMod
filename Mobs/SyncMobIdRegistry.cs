@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using dc.en;
 using dc.pr;
@@ -13,8 +14,15 @@ internal static class SyncMobIdRegistry
     private static Level? currentLevel;
     private static int nextRuntimeSyncId = 0;
 
-    public static void RebuildForLevel(Level? level)
+    /// <summary>
+    /// Rebuilds contiguous sync ids (0..N-1) for mobs included by <paramref name="includeMob"/>.
+    /// Must match <see cref="DeadCellsMultiplayerMod.Mobs.MobsSynchronization.MobsSynchronization"/> tracked-mob enumeration (getDyn order + IsSyncMob).
+    /// </summary>
+    public static void RebuildForLevel(Level? level, Func<Mob?, bool> includeMob)
     {
+        if (includeMob == null)
+            throw new ArgumentNullException(nameof(includeMob));
+
         lock (Sync)
         {
             ClearLocked();
@@ -26,12 +34,12 @@ internal static class SyncMobIdRegistry
             var syncId = 0;
             for (int i = 0; i < entities.length; i++)
             {
-                var mob = entities.array[i] as Mob;
-                if (!IsUsableMob(mob))
+                var mob = entities.getDyn(i) as Mob;
+                if (mob == null || !includeMob(mob))
                     continue;
 
-                MobToId[mob!] = syncId;
-                IdToMob[syncId] = mob!;
+                MobToId[mob] = syncId;
+                IdToMob[syncId] = mob;
                 syncId++;
             }
 

@@ -89,9 +89,6 @@ msgstr "No se pudo iniciar el anfitrión Steam. Revisa la consola."
 msgid "Steam lobby creation failed. Check console logs."
 msgstr "Falló la creación del lobby de Steam. Revisa la consola."
 
-msgid "Connecting to Steam lobby..."
-msgstr "Conectando al lobby de Steam..."
-
 msgid "Steam join failed"
 msgstr "Error al unirse por Steam"
 

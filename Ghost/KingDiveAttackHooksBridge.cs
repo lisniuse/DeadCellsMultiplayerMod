@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Diagnostics;
 using System.Text;
@@ -10,7 +8,6 @@ using dc.tool.mainSkills;
 using DeadCellsMultiplayerMod.Ghost;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using Hashlink.Virtuals;
-using HaxeProxy.Runtime;
 using ModCore.Utilities;
 
 namespace DeadCellsMultiplayerMod;
@@ -27,6 +24,8 @@ public partial class ModEntry
     private long _lastLocalDiveStartSendTicks;
     private long _lastLocalDiveLandSendTicks;
     private long _lastDiveInfoScanTicks;
+    /// <summary>Suppress dive roll network traffic briefly after spawn / level change (controller noise).</summary>
+    private long _localDiveNetGuardUntilTicks;
     private string _lastSentDiveInfoPayload = string.Empty;
     private readonly Dictionary<int, string> _remoteDiveInfoPayloadById = new();
 
@@ -161,7 +160,36 @@ public partial class ModEntry
         if (level == null)
             return;
 
+        // Vanilla applyHit/applyAttackResult reads spr.groupName; null crashes the HL runtime (HashlinkError).
+        if (!IsHeroSpriteGroupReadyForCombat(hero))
+        {
+            try { self.end(); } catch { }
+            return;
+        }
+
         WithSanitizedQuadElements(level, () => orig(self, high));
+    }
+
+    /// <summary>
+    /// True when the hero sprite has a non-null <c>groupName</c>, which vanilla combat assumes during dive hits
+    /// (e.g. remote dive under <see cref="KingWeaponSupport.WithKingContext"/> swapping the ghost skin onto the hero).
+    /// </summary>
+    private static bool IsHeroSpriteGroupReadyForCombat(Hero? hero)
+    {
+        if (hero == null)
+            return false;
+
+        try
+        {
+            var spr = hero.spr;
+            if (spr == null)
+                return false;
+            return spr.groupName != null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void WithSanitizedQuadElements(Level level, Action action)
@@ -224,7 +252,13 @@ public partial class ModEntry
 
             if (entry is dc.Entity entity)
             {
-                arr.array.pushDyn(entity);
+                if (IsEntityQuadHitSafe(entity))
+                {
+                    arr.array.pushDyn(entity);
+                    continue;
+                }
+
+                needsSanitizing = true;
                 continue;
             }
 
@@ -238,9 +272,44 @@ public partial class ModEntry
         return true;
     }
 
+    /// <summary>
+    /// Skip entities whose sprite/group metadata would crash vanilla hit resolution (<c>applyAttackResult</c>).
+    /// </summary>
+    private static bool IsEntityQuadHitSafe(dc.Entity entity)
+    {
+        if (entity == null)
+            return false;
+
+        try
+        {
+            var spr = entity.spr;
+            if (spr == null)
+                return false;
+            return spr.groupName != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsLocalDiveNetGuardActive()
+    {
+        if (_localDiveNetGuardUntilTicks == 0)
+            return false;
+        return Stopwatch.GetTimestamp() < _localDiveNetGuardUntilTicks;
+    }
+
+    internal void MarkDiveNetGuardAfterSpawnOrRoomChange()
+    {
+        _localDiveNetGuardUntilTicks = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * 0.55);
+    }
+
     private void NotifyLocalDiveAttackStartedFromHooks(DiveAttack? self)
     {
         if (_netRole == NetRole.None || self == null || me == null)
+            return;
+        if (IsLocalDiveNetGuardActive())
             return;
         if (KingWeaponSupport.IsInKingContext)
             return;
@@ -274,6 +343,8 @@ public partial class ModEntry
     private void NotifyLocalDiveAttackLandedFromHooks(DiveAttack? self, double high, bool wasDiving)
     {
         if (_netRole == NetRole.None || self == null || me == null)
+            return;
+        if (IsLocalDiveNetGuardActive())
             return;
         if (KingWeaponSupport.IsInKingContext)
             return;
@@ -388,6 +459,8 @@ public partial class ModEntry
     internal void TrySendCurrentDiveSkillInfoSnapshot()
     {
         if (_netRole == NetRole.None || me == null)
+            return;
+        if (IsLocalDiveNetGuardActive())
             return;
         if (KingWeaponSupport.IsInKingContext)
             return;

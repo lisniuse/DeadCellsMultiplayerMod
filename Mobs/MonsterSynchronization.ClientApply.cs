@@ -22,6 +22,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     return;
             }
 
+            // Life/death must sync even when the mob is far/off-screen (visual interpolation stays gated below).
+            ApplyAuthoritativeLifeState(self, target.Life, target.MaxLife);
+
             if (!ShouldProcessClientVisualState(self, localIndex))
                 return;
 
@@ -30,14 +33,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             if (!preserveLocalMotion)
             {
-                var syncY = IsClientVerticalSyncEnabled();
+                // Equivalent to: vertical setting OR flying mob (!hasGravity). Flyers always follow host Y.
+                bool syncY;
                 try
                 {
-                    if (!self.hasGravity)
-                        syncY = true;
+                    syncY = !self.hasGravity || IsClientVerticalSyncEnabled();
                 }
                 catch
                 {
+                    syncY = IsClientVerticalSyncEnabled();
                 }
 
                 var currentX = GetWorldX(self);
@@ -84,8 +88,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var responsiveDir = ComputeResponsiveFacingDir(self, target);
             if (responsiveDir != 0)
                 self.dir = responsiveDir;
-
-            ApplyAuthoritativeLifeState(self, target.Life, target.MaxLife);
         }
 
         private static bool ShouldPreserveClientAttackMotion(Mob mob)

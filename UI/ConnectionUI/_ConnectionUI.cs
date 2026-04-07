@@ -9,12 +9,20 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 {
     public static class _ConnectionUI
     {
+        /// <summary>Sentinel for <see cref="GameMenu.IsSteamJoinLobbyResolvePending"/>; displayed in ConnectionUI only.</summary>
+        internal const string SteamLobbyConnectingMarker = "_steamLobbyConnecting";
+
         public static List<string> GetAllPlayerNames()
         {
             var playerNames = new List<string>();
 
             var net = ModEntry._net;
-            if (net == null) return playerNames;
+            if (net == null)
+            {
+                if (GameMenu.IsSteamJoinLobbyResolvePending())
+                    playerNames.Add(_ConnectionUI.SteamLobbyConnectingMarker);
+                return playerNames;
+            }
 
             var localName = GameMenu.Username;
             if (string.IsNullOrWhiteSpace(localName))

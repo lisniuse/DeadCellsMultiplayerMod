@@ -1,10 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using dc;
 using dc.en;
 using dc.en.loot;
-using dc.h2d;
 using dc.hl.types;
 using dc.tool;
 using dc.tool.atk;
@@ -18,14 +14,6 @@ internal static class KingWeaponHooks
 {
     private static bool _installed;
     private const double SuppressLocalHeroSkillLockMaxSeconds = 0.35;
-    private static readonly Dictionary<int, long> _recentKingWeaponMobUidHits = new();
-    private static readonly Dictionary<int, long> _recentKingWeaponMobRefHits = new();
-    private static readonly Dictionary<string, long> _recentKingWeaponMobSignatureHits = new(StringComparer.Ordinal);
-    private const double RecentKingWeaponMobHitSeconds = 3.0;
-    private const int MaxMobHitMapEntries = 4096;
-    private static readonly List<int> s_staleMobUidScratch = new();
-    private static readonly List<int> s_staleMobRefScratch = new();
-    private static readonly List<string> s_staleMobSigScratch = new();
 
 #if DEBUG
     private static void LogKingWeaponHookEx(Exception ex, string hookName)
@@ -218,9 +206,6 @@ internal static class KingWeaponHooks
 
     private static void Hook_Hero_addKillCount(Hook_Hero.orig_addKillCount orig, Hero self, Mob mob)
     {
-        if(WasRecentKingWeaponMobHit(mob))
-            return;
-
         if(ShouldSuppressLocalHeroKillProgress(self))
             return;
         orig(self, mob);
@@ -228,9 +213,6 @@ internal static class KingWeaponHooks
 
     private static void Hook_Hero_onMobDeath(Hook_Hero.orig_onMobDeath orig, Hero self, Mob old)
     {
-        if(WasRecentKingWeaponMobHit(old))
-            return;
-
         if(ShouldSuppressLocalHeroKillProgress(self))
             return;
         orig(self, old);
@@ -239,9 +221,6 @@ internal static class KingWeaponHooks
     private static void Hook_Hero_onOwnAttackDealt(Hook_Hero.orig_onOwnAttackDealt orig, Hero self, AttackData atk, Entity target)
     {
         var isKingWeaponAttack = IsKingWeaponAttack(atk);
-
-        if(isKingWeaponAttack && target is Mob mob)
-            TrackKingWeaponMobHit(mob);
 
         var localHero = ModEntry.me;
         if(isKingWeaponAttack && localHero != null && IsSameEntity(self, localHero))
@@ -291,9 +270,6 @@ internal static class KingWeaponHooks
     private static void Hook_Entity_onDamage(Hook_Entity.orig_onDamage orig, Entity self, AttackData a)
     {
         var suppress = ShouldSuppressDamageFromKingWeapon(self, a);
-        if(!suppress && self is Mob mob && IsKingWeaponAttack(a))
-            TrackKingWeaponMobHit(mob);
-
         if(suppress)
             return;
 
@@ -1124,114 +1100,6 @@ internal static class KingWeaponHooks
             return true;
 
         return false;
-    }
-
-    private static void TrackKingWeaponMobHit(Mob mob)
-    {
-        if(mob == null)
-            return;
-
-        var now = Stopwatch.GetTimestamp();
-        var maxAgeTicks = (long)(Stopwatch.Frequency * RecentKingWeaponMobHitSeconds);
-
-        lock(_recentKingWeaponMobRefHits)
-        {
-            PruneRecentKingWeaponMobHitsLocked(now, maxAgeTicks);
-
-            var uid = GetEntityUid(mob);
-            if(uid > 0)
-                _recentKingWeaponMobUidHits[uid] = now;
-
-            var refKey = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(mob);
-            _recentKingWeaponMobRefHits[refKey] = now;
-
-            var signature = BuildMobHitSignature(mob);
-            if(!string.IsNullOrWhiteSpace(signature))
-                _recentKingWeaponMobSignatureHits[signature] = now;
-        }
-    }
-
-    private static bool WasRecentKingWeaponMobHit(Mob? mob)
-    {
-        if(mob == null)
-            return false;
-
-        var now = Stopwatch.GetTimestamp();
-        var maxAgeTicks = (long)(Stopwatch.Frequency * RecentKingWeaponMobHitSeconds);
-
-        lock(_recentKingWeaponMobRefHits)
-        {
-            PruneRecentKingWeaponMobHitsLocked(now, maxAgeTicks);
-
-            var uid = GetEntityUid(mob);
-            if(uid > 0 && _recentKingWeaponMobUidHits.ContainsKey(uid))
-                return true;
-
-            var refKey = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(mob);
-            if(_recentKingWeaponMobRefHits.ContainsKey(refKey))
-                return true;
-
-            var key = BuildMobHitSignature(mob);
-            if(!string.IsNullOrWhiteSpace(key) && _recentKingWeaponMobSignatureHits.ContainsKey(key))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static void PruneRecentKingWeaponMobHitsLocked(long now, long maxAgeTicks)
-    {
-        PruneStaleEntries(_recentKingWeaponMobUidHits, now, maxAgeTicks, s_staleMobUidScratch);
-        PruneStaleEntries(_recentKingWeaponMobRefHits, now, maxAgeTicks, s_staleMobRefScratch);
-        PruneStaleEntries(_recentKingWeaponMobSignatureHits, now, maxAgeTicks, s_staleMobSigScratch);
-        CapMobHitMapsIfNeeded();
-    }
-
-    private static void PruneStaleEntries<TKey>(Dictionary<TKey, long> map, long now, long maxAgeTicks, List<TKey> scratch)
-        where TKey : notnull
-    {
-        if(map.Count == 0)
-            return;
-
-        scratch.Clear();
-        foreach(var pair in map)
-        {
-            if(now - pair.Value > maxAgeTicks)
-                scratch.Add(pair.Key);
-        }
-
-        for(int i = 0; i < scratch.Count; i++)
-            map.Remove(scratch[i]);
-    }
-
-    private static void CapMobHitMapsIfNeeded()
-    {
-        if(_recentKingWeaponMobUidHits.Count > MaxMobHitMapEntries)
-            _recentKingWeaponMobUidHits.Clear();
-        if(_recentKingWeaponMobRefHits.Count > MaxMobHitMapEntries)
-            _recentKingWeaponMobRefHits.Clear();
-        if(_recentKingWeaponMobSignatureHits.Count > MaxMobHitMapEntries)
-            _recentKingWeaponMobSignatureHits.Clear();
-    }
-
-    private static string BuildMobHitSignature(Mob mob)
-    {
-        if(mob == null)
-            return string.Empty;
-
-        try
-        {
-            var type = mob.type?.ToString() ?? string.Empty;
-            var cx = mob.cx;
-            var cy = mob.cy;
-            var xr = (int)System.Math.Round(mob.xr * 100.0);
-            var yr = (int)System.Math.Round(mob.yr * 100.0);
-            return $"{type}|{cx}|{cy}|{xr}|{yr}";
-        }
-        catch
-        {
-            return string.Empty;
-        }
     }
 
     private static int GetEntityUid(Entity? entity)

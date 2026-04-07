@@ -1,8 +1,8 @@
-using System;
 using dc.en;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using HaxeProxy.Runtime;
 using System.Diagnostics;
+using System.Reflection;
 
 namespace DeadCellsMultiplayerMod
 {
@@ -581,15 +581,15 @@ namespace DeadCellsMultiplayerMod
 
                 try
                 {
-                    dynamic hudDyn = game.hud;
-                    if (hudDyn != null)
+                    var hud = game.hud;
+                    if (hud != null)
                     {
-                        dynamic mini = hudDyn.minimap;
+                        var mini = hud.minimap;
                         if (mini != null)
                         {
                             try
                             {
-                                if ((bool)mini.isFullscreen)
+                                if (mini.isFullscreen)
                                     return;
                             }
                             catch
@@ -607,6 +607,60 @@ namespace DeadCellsMultiplayerMod
             catch
             {
             }
+        }
+
+        /// <summary>Optional menu fields exist on the Haxe <see cref="dc.pr.Game"/> shape but are not always exposed on the C# projection; read via reflection.</summary>
+        private static bool TryAnyNonDestroyedOptionalMenu(dc.pr.Game game)
+        {
+            try
+            {
+                var gt = game.GetType();
+                string[] names = { "pauseMenu", "menu", "curMenu", "inventoryMenu", "modal" };
+                for (var ni = 0; ni < names.Length; ni++)
+                {
+                    var name = names[ni];
+                    PropertyInfo? p;
+                    try
+                    {
+                        p = gt.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    object? v;
+                    try
+                    {
+                        v = p?.GetValue(game);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (v == null)
+                        continue;
+
+                    try
+                    {
+                        var pd = v.GetType().GetProperty("destroyed", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (pd == null)
+                            return true;
+                        if (pd.GetValue(v) is bool d && !d)
+                            return true;
+                    }
+                    catch
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
         }
 
         private static bool ShouldRespectMenuHiddenHud(dc.pr.Game game)
@@ -641,26 +695,8 @@ namespace DeadCellsMultiplayerMod
             {
             }
 
-            try
-            {
-                dynamic g = game;
-                var maybeMenu = g.pauseMenu ?? g.menu ?? g.curMenu ?? g.inventoryMenu ?? g.modal;
-                if (maybeMenu != null)
-                {
-                    try
-                    {
-                        if (!(bool)maybeMenu.destroyed)
-                            return true;
-                    }
-                    catch
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
-            }
+            if (TryAnyNonDestroyedOptionalMenu(game))
+                return true;
 
             return false;
         }

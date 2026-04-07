@@ -152,10 +152,6 @@ msgstr "无法启动 Steam 主机。请查看控制台日志。"
 msgid "Steam lobby creation failed. Check console logs."
 msgstr "Steam 房间创建失败。请查看控制台日志。"
 
-#: GameMenu.cs:934
-msgid "Connecting to Steam lobby..."
-msgstr "正在连接 Steam 房间..."
-
 #: GameMenu.cs:960
 msgid "Steam join failed"
 msgstr "Steam 加入失败"

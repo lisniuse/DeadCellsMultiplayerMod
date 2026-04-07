@@ -1,25 +1,14 @@
-
-using System;
-using System.Security.Cryptography;
-using System.Xml.Serialization;
 using dc;
-using dc.cine;
 using dc.en;
 using dc.en.mob;
 using dc.h2d;
-using dc.haxe.io;
-using dc.hl.types;
 using dc.hxd;
-using dc.level.@struct;
 using dc.libs._Cooldown;
-using dc.pow;
 using dc.pr;
 using dc.tool;
-using dc.tool.log;
 using dc.ui;
 using dc.ui.hud;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
-using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Utilities;
@@ -102,8 +91,12 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
         {
             try
             {
+                var fastCheck = ModEntry.me?.cd?.fastCheck;
+                if (fastCheck == null)
+                    return false;
+
                 int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
-                return !ModEntry.me.cd.fastCheck.exists(key);
+                return !fastCheck.exists(key);
             }
             catch { return false; }
         }
@@ -122,33 +115,41 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
                 var hero = ModCore.Modules.Game.Instance.HeroInstance!;
                 Zombie zombie = new Zombie(hero._level, hero.cx, hero.cy, 0, 100);
                 zombie.init();
-                int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
-                ModEntry.me.cd.fastCheck.set(key, new CdInst(key, 3.0));
+                var fastCheck = ModEntry.me?.cd?.fastCheck;
+                if (fastCheck != null)
+                {
+                    int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
+                    fastCheck.set(key, new CdInst(key, 3.0));
+                }
             }
             if (Key.Class.isPressed(99))//num3
             {
-                int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
-                ModEntry.me.cd.fastCheck.remove(key);
-
+                var me = ModEntry.me;
+                var fastCheck = me?.cd?.fastCheck;
+                if (fastCheck != null)
+                {
+                    int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
+                    fastCheck.remove(key);
+                }
 
                 //ModEntry.me.deathRespawn();
 
-                InventItem inventItem = new InventItem(new InventItemKind.Perk("P_Yolo".AsHaxeString()));
-                ModEntry.me.applyItemPickEffect(ModEntry.me, inventItem);
-                inventItem.clone(true, "P_Yolo".AsHaxeString());
+                if (me != null)
+                {
+                    InventItem inventItem = new InventItem(new InventItemKind.Perk("P_Yolo".AsHaxeString()));
+                    me.applyItemPickEffect(me, inventItem);
+                    inventItem.clone(true, "P_Yolo".AsHaxeString());
 
-                // int length = items.array.Count;
-                // for (int i = 0; i < length; i++)
-                // {
-                //     inventItem = (InventItem?)items.array[i]!;
-                // }
-                // virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ itemData = (virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_)item.byId.get(string3);
-                // inventItem._itemData = itemData;
-                ModEntry.me.tryToApplyYoloPerk();
-                ModEntry.me.removeTemporaryItems();
-
-
-
+                    // int length = items.array.Count;
+                    // for (int i = 0; i < length; i++)
+                    // {
+                    //     inventItem = (InventItem?)items.array[i]!;
+                    // }
+                    // virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ itemData = (virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_)item.byId.get(string3);
+                    // inventItem._itemData = itemData;
+                    me.tryToApplyYoloPerk();
+                    me.removeTemporaryItems();
+                }
             }
             if (!CanUseJumpHit())
             {

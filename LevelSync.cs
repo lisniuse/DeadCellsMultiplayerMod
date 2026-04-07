@@ -1,9 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
-using System.Threading;
-using dc;
 using dc.cine;
 using dc.en;
 using dc.en.inter;
@@ -147,6 +143,15 @@ namespace DeadCellsMultiplayerMod
                 _pendingBossRuneReloadLevelId = levelId;
                 _pendingBossRuneReloadTick = Environment.TickCount64;
                 _hasPendingBossRuneReload = true;
+            }
+        }
+
+        internal static void ClearPendingBossRuneReloadState()
+        {
+            lock (_pendingBossRuneReloadLock)
+            {
+                _hasPendingBossRuneReload = false;
+                _pendingBossRuneReloadLevelId = null;
             }
         }
 
@@ -569,6 +574,34 @@ namespace DeadCellsMultiplayerMod
             ConsumeRemoteLevelGraph(levelId);
             if (!applied)
                 return false;
+
+            // FTL / HL cast correlation: pair with host "Sent level graph" and client combat/restart logs.
+            // Repro surface: client PrisonStart (or any level) with remote graph, host_restart, then dive/combat.
+            try
+            {
+                var rootUid = remoteGraph.RootUid ?? "?";
+                try
+                {
+                    if (appliedRoot != null)
+                        rootUid = appliedRoot.uid?.ToString() ?? rootUid;
+                }
+                catch
+                {
+                }
+
+                _log?.Information(
+                    "[NetMod] Remote level graph applied (FTL correlation) levelId={LevelId} nodes={Count} rootUid={RootUid} postRandSeed={PostRand} postRandApplied={PostRandApplied}",
+                    levelId,
+                    remoteGraph.Nodes.Count,
+                    rootUid,
+                    remoteGraph.PostGraphRandSeed.HasValue
+                        ? remoteGraph.PostGraphRandSeed.Value.ToString(CultureInfo.InvariantCulture)
+                        : "n/a",
+                    rng != null && remoteGraph.PostGraphRandSeed.HasValue);
+            }
+            catch
+            {
+            }
 
             return true;
         }

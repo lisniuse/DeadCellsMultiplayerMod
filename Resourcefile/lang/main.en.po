@@ -91,9 +91,6 @@ msgstr ""
 msgid "Steam lobby creation failed. Check console logs."
 msgstr ""
 
-msgid "Connecting to Steam lobby..."
-msgstr ""
-
 msgid "Steam join failed"
 msgstr ""
 

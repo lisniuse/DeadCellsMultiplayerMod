@@ -21,6 +21,7 @@ using HaxeProxy.Runtime;
 using ModCore.Utilities;
 using dc.tool.quadTree;
 using Hashlink.Virtuals;
+using System.Reflection;
 
 
 namespace DeadCellsMultiplayerMod.Mobs.Levelinit;
@@ -48,7 +49,6 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
     private void Levelinit_EntitiesPostCreate(Hook_Level.orig_entitiesPostCreate orig, Level self)
     {
         orig(self);
-        SyncMobIdRegistry.RebuildForLevel(self);
     }
 
     private void Levelinit_OnDispose(Hook_Level.orig_onDispose orig, Level self)
@@ -70,8 +70,8 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
         virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_
         Levelvirtual_ = new virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_();
 
-        dynamic map = Data.Class.level.byId.get(self.map.id);
-        Levelvirtual_ = ((HaxeDynObj)map).ToVirtual<virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_>();
+        object? mapRaw = Data.Class.level.byId.get(self.map.id);
+        Levelvirtual_ = ((HaxeDynObj)mapRaw!).ToVirtual<virtual_baseLootLevel_biome_bonusTripleScrollAfterBC_cellBonus_dlc_doubleUps_eliteRoomChance_eliteWanderChance_flagsProps_group_icon_id_index_loreDescriptions_mapDepth_minGold_mobDensity_mobs_name_nextLevels_parallax_props_quarterUpsBC3_quarterUpsBC4_specificLoots_specificSubBiome_transitionTo_tripleUps_worldDepth_>();
 
 
         if (self.viewport == null)
@@ -91,7 +91,10 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
         }
         else
         {
-            ArrayDyn arrayDyn = ((dynamic)dc.haxe.rtti.Meta.Class.getType(Level.Class)).entitiesByClassUsed;
+            object? hlTypeObj = dc.haxe.rtti.Meta.Class.getType(Level.Class);
+            var entitiesProp = hlTypeObj?.GetType().GetProperty("entitiesByClassUsed", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (entitiesProp?.GetValue(hlTypeObj) is not ArrayDyn arrayDyn)
+                throw new InvalidOperationException("Level hl.Type.entitiesByClassUsed unavailable");
             arrayBytes_Int = ArrayUtils.CreateInt();
 
             int len = arrayDyn.get_length();
@@ -126,10 +129,10 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
         int entitiesCount = arrayObj.length;
         for (; Index < entitiesCount; Index++)
         {
-            dynamic arrayobj = arrayObj.array[Index]!;
+            var arrayobj = arrayObj.getDyn(Index);
             if (arrayobj == null) continue;
 
-            Entity entity = arrayobj;
+            Entity entity = (Entity)arrayobj;
             arrayBytes_Int = entity.getEntityCLIDS();
 
             int clidsCount = arrayBytes_Int.length;
@@ -143,9 +146,6 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
                 }
             }
         }
-
-        SyncMobIdRegistry.RebuildForLevel(self);
-
 
         self.splatters = (ArrayObj)ArrayUtils.CreateDyn().array;
         self.entityLights = (ArrayObj)ArrayUtils.CreateDyn().array;
@@ -249,8 +249,8 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
         Boot.Class.tryRender();
 
         dc.String id = self.map.biome.id;
-        dynamic hasatlasname = (HaxeDynObj)Data.Class.biome.byId.get(id);
-        dynamic atlasname = hasatlasname.ToVirtual<virtual_ambient_ambientScale_atlasName_camEffects_celShadow_cloud_commonAtlas_floorJunkDensity_floorStamps_fog_fogScale_glowData_id_lavaBg_lavaSurface_layers_lightColors_oneWayOpaque_reverbKind_reverbMix_scatterConf_smoke_smokeShader_uiProps_vegetation_vegetationRandScale_wallJunkDensity_water_waterLight_>().atlasName;
+        var hasatlasname = (HaxeDynObj)Data.Class.biome.byId.get(id);
+        dc.String atlasname = hasatlasname.ToVirtual<virtual_ambient_ambientScale_atlasName_camEffects_celShadow_cloud_commonAtlas_floorJunkDensity_floorStamps_fog_fogScale_glowData_id_lavaBg_lavaSurface_layers_lightColors_oneWayOpaque_reverbKind_reverbMix_scatterConf_smoke_smokeShader_uiProps_vegetation_vegetationRandScale_wallJunkDensity_water_waterLight_>().atlasName;
 
 
         virtual_norm_slib_used_ level = Assets.Class.lib.getLevel(atlasname, new HlAction(self.onLevelAssetsReloaded));
@@ -338,7 +338,7 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
 
 
         SpriteLib gameElements = Assets.Class.gameElements;
-        Tile tile = (dynamic)gameElements.pages.array[0]!;
+        Tile tile = (Tile)gameElements.pages.getDyn(0)!;
 
 
         self.sbUi = self.createStandardBatch(tile, Const.Class.DP_CTX_UI);
@@ -374,7 +374,7 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
 
 
         gameElements = self.slib;
-        tile = (dynamic)gameElements.pages.array[0]!;
+        tile = (Tile)gameElements.pages.getDyn(0)!;
         self.sbPendulum_ChainFront = self.createStandardBatch(tile, Const.Class.DP_ROOM_FRONT);
         normalMap = (NormalMap)self.sbPendulum_ChainFront.addShader(new NormalMap(self.norm));
         self.sbPendulum_ChainFront.blendMode = new BlendMode.Alpha();
@@ -459,8 +459,8 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
             }
             else
             {
-                dynamic roommakers = obj.array[roomIndex]!;
-                room = roommakers;
+                var roommakers = obj.getDyn(roomIndex);
+                room = (Room)roommakers!;
                 roomIndex++;
                 markerIndex = 0;
                 markers = room.markers;
@@ -482,8 +482,8 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
                 }
                 else
                 {
-                    dynamic markerdy = markers.array[markerIndex]!;
-                    marker = markerdy;
+                    var markerdy = markers.getDyn(markerIndex);
+                    marker = (Marker)markerdy!;
                 }
                 markerIndex++;
 

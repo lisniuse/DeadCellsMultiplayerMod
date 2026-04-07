@@ -153,10 +153,6 @@ msgstr "Не удалось запустить хост Steam. Смотрите 
 msgid "Steam lobby creation failed. Check console logs."
 msgstr "Не удалось создать лобби Steam. Смотрите логи консоли."
 
-#: GameMenu.cs:934
-msgid "Connecting to Steam lobby..."
-msgstr "Подключение к лобби Steam..."
-
 #: GameMenu.cs:960
 msgid "Steam join failed"
 msgstr "Ошибка подключения Steam"

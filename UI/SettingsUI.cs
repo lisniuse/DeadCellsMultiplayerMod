@@ -1,10 +1,7 @@
-using System;
-using System.Collections.Generic;
-using DeadCellsMultiplayerMod;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.Mobs.MobsSynchronization;
-using dc.hl.types;
 using dc.ui;
+using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Utilities;
@@ -271,7 +268,9 @@ public class SettingsUI :
         bool verticalSyncNow = MultiplayerSettingsStorage.SyncVerticalPosition;
         self.addToggleWidget(
             GameMenu.Localize("Sync vertical position").AsHaxeString(),
-            null,
+            GameMenu.Localize(
+                    "Applies host vertical position to gravity mobs. Off: X-only for walkers; flying mobs still sync Y. On: can reduce desync but may snap ground mobs.")
+                .AsHaxeString(),
             new HlFunc<bool>(ToggleVerticalSyncSetting),
             Ref<bool>.From(ref verticalSyncNow),
             widgetParent);
@@ -431,12 +430,18 @@ public class SettingsUI :
                 var len = byIndex.get_length();
                 for (var i = 0; i < len; i++)
                 {
-                    dynamic row = byIndex.getDyn(i);
-                    if (row == null)
+                    var rowObj = byIndex.getDyn(i);
+                    if (rowObj is not HaxeDynObj ho)
                         continue;
 
                     string? id = null;
-                    try { id = row.id?.ToString(); } catch { }
+                    try
+                    {
+                        id = ho.ToVirtual<virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_>()?.id?.ToString();
+                    }
+                    catch
+                    {
+                    }
                     if (string.IsNullOrWhiteSpace(id))
                         continue;
 

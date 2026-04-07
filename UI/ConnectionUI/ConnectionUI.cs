@@ -11,10 +11,6 @@ using ModCore.Events;
 using ModCore.Utilities;
 using Serilog;
 using DeadCellsMultiplayerMod.MultiplayerModUI.Connection.LightingInitializer;
-using dc.hl.types;
-using dc.hxd.res;
-using dc.haxe.ds;
-using dc.achievements;
 using ModCore.Modules;
 using DeadCellsMultiplayerMod.Tools;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
@@ -56,6 +52,19 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
         {
             get => Instance?.root.visible ?? false;
             set { if (Instance != null) Instance.root.visible = value; }
+        }
+
+        /// <summary>After gamepad connect/disconnect, window metrics can change; re-run layout to avoid blurred/scaled UI.</summary>
+        public static void RefreshLayoutAfterDisconnect()
+        {
+            try
+            {
+                if (Instance != null && set_visible)
+                    Instance.onResize();
+            }
+            catch
+            {
+            }
         }
 
 
@@ -144,20 +153,24 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 
         public void playallanims(HSprite hSprite)
         {
-            dynamic groups = hSprite.lib.groups;
-            if (groups != null)
+            try
             {
-                dynamic keysIterator = groups.keys();
+                var groups = hSprite.lib?.groups;
+                if (groups == null)
+                    return;
+
+                var keysIterator = groups.keys();
                 animlist.Clear();
 
                 while (keysIterator.hasNext())
                 {
                     string key = keysIterator.next().ToString();
                     if (!key.StartsWith("Atk", StringComparison.OrdinalIgnoreCase))
-                    {
                         animlist.Add(key);
-                    }
                 }
+            }
+            catch
+            {
             }
         }
 
@@ -353,10 +366,14 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             List<string> allname = names ?? _ConnectionUI.GetAllPlayerNames();
             foreach (var name in allname)
             {
+                bool isSteamLobbyConnecting = string.Equals(name, _ConnectionUI.SteamLobbyConnectingMarker, StringComparison.Ordinal);
                 bool isConnecting =
-                    string.Equals(name, "connecting", StringComparison.OrdinalIgnoreCase)
+                    isSteamLobbyConnecting
+                    || string.Equals(name, "connecting", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(name, "connecting...", StringComparison.OrdinalIgnoreCase);
-                string displayName = isConnecting
+                string displayName = isSteamLobbyConnecting
+                    ? GetText.Instance.GetString("Connecting to Steam lobby...")
+                    : isConnecting
                     ? GetText.Instance.GetString("connecting...")
                     : $"{GetText.Instance.GetString("- ")}{name}";
                 dc.ui.Text player2 = Assets.Class.makeText(

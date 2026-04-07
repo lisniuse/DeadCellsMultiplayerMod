@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using dc;
@@ -11,6 +9,7 @@ using dc.pr;
 using dc.ui;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
+using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game.Hero;
 using ModCore.Utilities;
@@ -825,11 +824,12 @@ public class LevelExitSync :
 
         try
         {
-            dynamic g = circle;
+            Graphics g = circle;
             g.clear();
-            var alpha = active ? CircleAlphaActive : CircleAlphaIdle;
-            g.beginFill(CircleColor, alpha);
-            g.drawCircle(0.0, 0.0, ExitCircleRadiusPx, null);
+            int color = CircleColor;
+            double alpha = active ? CircleAlphaActive : CircleAlphaIdle;
+            g.beginFill(Ref<int>.From(ref color), Ref<double>.From(ref alpha));
+            g.drawCircle(0.0, 0.0, ExitCircleRadiusPx, Ref<int>.Null);
             g.endFill();
         }
         catch
@@ -919,7 +919,7 @@ public class LevelExitSync :
         try
         {
             _exitPointer = new Pointer(door, "".AsHaxeString(), 99999.0, MarkerColor);
-            SuppressPointerFx(_exitPointer);
+            PointerFxHelper.SuppressPointerFx(_exitPointer, PointerFxSuppressionKey);
         }
         catch
         {
@@ -960,21 +960,6 @@ public class LevelExitSync :
         finally
         {
             _exitPointer = null;
-        }
-    }
-
-    private static void SuppressPointerFx(Pointer? pointer)
-    {
-        if (pointer == null)
-            return;
-
-        try
-        {
-            dynamic fastCheck = pointer.cd.fastCheck;
-            fastCheck.set(PointerFxSuppressionKey, (object)1);
-        }
-        catch
-        {
         }
     }
 

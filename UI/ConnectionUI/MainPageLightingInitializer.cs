@@ -1,13 +1,5 @@
-using dc.h3d.pass;
 using dc.haxe.ds;
-using dc.hl.types;
-using dc.hxsl;
-using dc.libs.heaps.slib;
-using dc.light;
-using dc.pr;
 using HaxeProxy.Runtime;
-using ModCore.Utilities;
-using Serilog;
 
 namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection.LightingInitializer
 {

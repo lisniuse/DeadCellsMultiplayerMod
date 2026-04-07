@@ -10,16 +10,19 @@ namespace DeadCellsMultiplayerMod.Tools
         private const double MinScale = 0.9;
         private const double MaxScale = 1.15;
 
+        /// <summary>After device connect/disconnect the window can briefly report 0×0; avoid blurry/wrong UI scaling.</summary>
+        private static double s_lastGoodScale = 1.0;
+
         public static double GetResolutionScale()
         {
             var win = Window.Class.getInstance();
             if (win == null)
-                return 1.0;
+                return s_lastGoodScale;
 
             double width = win.get_width();
             double height = win.get_height();
             if (width <= 0 || height <= 0)
-                return 1.0;
+                return s_lastGoodScale;
 
             double scaleW = width / ReferenceWidth;
             double scaleH = height / ReferenceHeight;
@@ -36,6 +39,7 @@ namespace DeadCellsMultiplayerMod.Tools
                 scale = MinScale;
             if (scale > MaxScale)
                 scale = MaxScale;
+            s_lastGoodScale = scale;
             return scale;
         }
     }

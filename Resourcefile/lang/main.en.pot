@@ -153,10 +153,6 @@ msgstr ""
 msgid "Steam lobby creation failed. Check console logs."
 msgstr ""
 
-#: GameMenu.cs:934
-msgid "Connecting to Steam lobby..."
-msgstr ""
-
 #: GameMenu.cs:960
 msgid "Steam join failed"
 msgstr ""

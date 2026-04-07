@@ -1,5 +1,3 @@
-using System;
-using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using dc.en;
 using dc.ui;
@@ -326,47 +324,6 @@ namespace DeadCellsMultiplayerMod
             // No-op: head entity is disabled.
         }
 
-        private void ApplyTargetAnimToHomunculus(Homunculus hom)
-        {
-            if (hom == null || !_hasHeadAnimTarget || string.IsNullOrWhiteSpace(_headAnimTarget))
-                return;
-
-            try
-            {
-                var spr = hom.spr;
-                var animManager = spr?.get_anim();
-                if (animManager == null)
-                    return;
-
-                var target = _headAnimTarget!;
-                var current = string.Empty;
-                try
-                {
-                    dynamic am = animManager;
-                    dynamic stack = am.stack;
-                    if (stack != null)
-                    {
-                        int len = stack.length;
-                        if (len > 0)
-                        {
-                            dynamic top = ((object[])stack.array)[len - 1];
-                            current = top?.group?.ToString() ?? string.Empty;
-                        }
-                    }
-                }
-                catch
-                {
-                    current = spr?.groupName?.ToString() ?? string.Empty;
-                }
-
-                if (!string.Equals(current, target, StringComparison.Ordinal))
-                    animManager.play(target.AsHaxeString(), null, null).loop(null);
-            }
-            catch
-            {
-            }
-        }
-
         private static bool IsIdleLikeHomunculusAnim(string? anim)
         {
             if (string.IsNullOrWhiteSpace(anim))
@@ -538,26 +495,11 @@ namespace DeadCellsMultiplayerMod
             try
             {
                 _corpsePointer = new Pointer(corpse, "".AsHaxeString(), 99999.0, CorpseMarkerColor);
-                SuppressPointerFx(_corpsePointer);
+                PointerFxHelper.SuppressPointerFx(_corpsePointer, PointerFxSuppressionKey);
             }
             catch
             {
                 _corpsePointer = null;
-            }
-        }
-
-        private static void SuppressPointerFx(Pointer? pointer)
-        {
-            if (pointer == null)
-                return;
-
-            try
-            {
-                dynamic fastCheck = pointer.cd.fastCheck;
-                fastCheck.set(PointerFxSuppressionKey, (object)1);
-            }
-            catch
-            {
             }
         }
 

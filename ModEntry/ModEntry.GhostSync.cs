@@ -1,0 +1,950 @@
+using System.Diagnostics;
+using dc.pr;
+using ModCore.Utilities;
+using dc.tool;
+using HaxeProxy.Runtime;
+using DeadCellsMultiplayerMod.Ghost.GhostBase;
+using DeadCellsMultiplayerMod.KingHead;
+
+namespace DeadCellsMultiplayerMod
+{
+    public partial class ModEntry
+    {
+        private void UpdateGhostHeads()
+        {
+            var main = dc.Main.Class.ME;
+            if (main == null || main.user == null)
+            {
+                return;
+            }
+            var ftime = dc.pr.Game.Class.ME.ftime;
+            for (int i = 0; i < clientHeads.Length; i++)
+            {
+                var client = clients[i];
+                if (client == null)
+                {
+                    pendingClientHeadRecreate[i] = false;
+                    continue;
+                }
+
+                var head = clientHeads[i];
+                if (head == null)
+                {
+                    var hasKnownHead = !string.IsNullOrWhiteSpace(client.RemoteHeadSkinId) ||
+                                       !string.IsNullOrWhiteSpace(clientHeadSkins[i]);
+                    if (pendingClientHeadRecreate[i] || hasKnownHead)
+                        RecreateClientHead(i);
+                    continue;
+                }
+
+                head.updateHeadFx(ftime);
+            }
+        }
+
+
+
+        private void SendLevel(string lvl)
+        {
+            if (_netRole == NetRole.None) return;
+            var net = _net;
+            if (net == null) return;
+
+            int senderId = net.id;
+            if (senderId <= 0) return;
+            net.LevelSend(senderId, lvl);
+        }
+
+        private void SendRoomTarget(string? targetLevelId, int targetRoomId, bool force)
+        {
+            if (_netRole == NetRole.None)
+                return;
+
+            var net = _net;
+            if (net == null || net.id <= 0)
+                return;
+            if (targetRoomId < 0)
+                return;
+
+            var effectiveLevelId = string.IsNullOrWhiteSpace(targetLevelId)
+                ? GetCurrentLevelId()
+                : targetLevelId.Trim();
+            if (string.IsNullOrWhiteSpace(effectiveLevelId))
+                return;
+
+            if (!force &&
+                string.Equals(_lastDoorMarkerLevelId, effectiveLevelId, StringComparison.Ordinal) &&
+                _lastDoorMarkerToken == targetRoomId)
+            {
+                return;
+            }
+
+            net.SendRoomTarget(effectiveLevelId, targetRoomId);
+            _lastDoorMarkerLevelId = effectiveLevelId;
+            _lastDoorMarkerToken = targetRoomId;
+        }
+
+        private void SendCurrentRoomTarget(bool force)
+        {
+            if (!TryGetCurrentVisibilityContext(out var targetLevelId, out var branchToken))
+                return;
+
+            RegisterLocalDoorMarker(targetLevelId, branchToken);
+            SendRoomTarget(targetLevelId, branchToken, force);
+        }
+
+        private bool TryGetCurrentVisibilityContext(out string levelContextId, out int branchToken)
+        {
+            levelContextId = GetCurrentLevelId();
+            branchToken = 0;
+
+            Level? currentLevel = me?._level;
+            if (currentLevel == null)
+                currentLevel = game?.curLevel;
+
+            if (currentLevel == null)
+                return !string.IsNullOrWhiteSpace(levelContextId);
+
+            var liveLevelId = currentLevel.map?.id?.ToString();
+            if (!string.IsNullOrWhiteSpace(liveLevelId))
+                levelContextId = liveLevelId.Trim();
+
+            if (string.IsNullOrWhiteSpace(levelContextId))
+                return false;
+
+            branchToken = ComputeLevelBranchToken(currentLevel, levelContextId);
+            return branchToken >= 0;
+        }
+
+        private int ComputeLevelBranchToken(Level currentLevel, string levelContextId)
+        {
+            try
+            {
+                if (!currentLevel.isSubLevel)
+                    return 0;
+            }
+            catch
+            {
+                return 0;
+            }
+
+            unchecked
+            {
+                try
+                {
+                    var ownerGame = currentLevel.game ?? game;
+                    var subLevels = ownerGame?.subLevels;
+                    if (subLevels == null)
+                        return ComputeStablePositiveToken($"SUB|{levelContextId}");
+
+                    int targetUid;
+                    try
+                    {
+                        targetUid = currentLevel.__uid;
+                    }
+                    catch
+                    {
+                        return ComputeStablePositiveToken($"SUB|{levelContextId}");
+                    }
+
+                    for (int i = 0; i < subLevels.length; i++)
+                    {
+                        try
+                        {
+                            if (subLevels.getDyn(i) is not Level candidate)
+                                continue;
+
+                            if (ReferenceEquals(candidate, currentLevel))
+                                return i + 1;
+
+                            if (candidate.__uid == targetUid)
+                                return i + 1;
+                        }
+                        catch
+                        {
+                            continue;
+                        }
+                    }
+                }
+                catch
+                {
+                    return ComputeStablePositiveToken($"SUB|{levelContextId}");
+                }
+
+                return ComputeStablePositiveToken($"SUB|{levelContextId}");
+            }
+        }
+
+        private static int ComputeStablePositiveToken(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                return 0;
+
+            unchecked
+            {
+                uint hash = 2166136261;
+                for (int i = 0; i < key.Length; i++)
+                {
+                    hash ^= key[i];
+                    hash *= 16777619;
+                }
+
+                var positive = (int)(hash & 0x7FFFFFFF);
+                return positive == 0 ? 1 : positive;
+            }
+        }
+
+        private void RegisterLocalDoorMarker(string? levelId, int markerToken)
+        {
+            if (markerToken < 0)
+                return;
+
+            _localLastDoorMarkerLevelId = string.IsNullOrWhiteSpace(levelId)
+                ? string.Empty
+                : levelId.Trim();
+            _localLastDoorMarkerToken = markerToken;
+            _remotePendingDoorMarkers.Clear();
+        }
+
+        double last_x, last_y;
+        int lastDir;
+
+        private void SendHeroCoords()
+        {
+            if (_netRole == NetRole.None) return;
+            if (_net == null || me == null) return;
+            int dir = me.dir;
+            if (me.spr.x == last_x && me.spr.y == last_y && lastDir == dir) return;
+
+            _net.TickSend(me.spr.x, me.spr.y, dir);
+            last_x = me.spr.x;
+            last_y = me.spr.y;
+            lastDir = dir;
+        }
+
+        public static double[] rLastX = new double[NetNode.MaxClientSlots];
+        public static double[] rLastY = new double[NetNode.MaxClientSlots];
+
+        internal static bool TryGetClientIndex(int localId, int remoteId, out int index)
+        {
+            index = -1;
+            if (localId <= 0 || remoteId <= 0 || remoteId == localId)
+                return false;
+
+            var mapped = remoteId < localId ? remoteId - 1 : remoteId - 2;
+            if (mapped < 0 || mapped >= clients.Length)
+                return false;
+
+            index = mapped;
+            return true;
+        }
+
+        internal static void SetClientSkin(int remoteId, string? skin)
+        {
+            var instance = Instance;
+            if (instance == null)
+                return;
+
+            var net = _net;
+            var localId = net?.id ?? 0;
+            if (!TryGetClientIndex(localId, remoteId, out var index))
+                return;
+
+            var cleaned = NormalizeSkin(skin, "PrisonerDefault");
+            var prev = clientSkins[index];
+            clientSkins[index] = cleaned;
+
+            var client = clients[index];
+            if (client != null)
+            {
+                if (!string.Equals(prev, cleaned, StringComparison.Ordinal) || client.spr == null)
+                    client.ApplyRemoteSkin(cleaned);
+            }
+        }
+
+        internal static void SetClientHeadSkin(int remoteId, string? skin)
+        {
+            var instance = Instance;
+            if (instance == null)
+                return;
+
+            var net = _net;
+            var localId = net?.id ?? 0;
+            if (!TryGetClientIndex(localId, remoteId, out var index))
+                return;
+
+            var cleaned = NormalizeSkin(skin, "BaseFlame");
+            var prev = clientHeadSkins[index];
+            clientHeadSkins[index] = cleaned;
+
+            var client = clients[index];
+            if (client != null)
+                client.RemoteHeadSkinId = cleaned;
+
+            if (!string.Equals(prev, cleaned, StringComparison.Ordinal) || client?.head == null)
+                instance.RecreateClientHead(index);
+        }
+
+        private static string NormalizeSkin(string? skin, string defaultSkin)
+        {
+            return string.IsNullOrWhiteSpace(skin) ? defaultSkin : skin.Replace("|", "/").Trim();
+        }
+
+        private void RecreateClientHead(int slot)
+        {
+            if (slot < 0 || slot >= clients.Length)
+                return;
+
+            var client = clients[slot];
+            var localHero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            var localLevel = localHero?._level;
+            if (client == null || localHero == null || localLevel == null || client.spr == null)
+            {
+                pendingClientHeadRecreate[slot] = true;
+                return;
+            }
+
+            var existing = clientHeads[slot];
+            if (existing != null)
+            {
+                existing.dispose();
+                clientHeads[slot] = null;
+            }
+
+            var desiredHead = NormalizeSkin(client.RemoteHeadSkinId, "BaseFlame");
+            var previousGlobalHead = remoteHeadSkin;
+            remoteHeadSkin = desiredHead;
+            try
+            {
+                bool fromUI = false;
+                var attachRoot = new dc.h2d.Object(client.spr);
+                var newHead = new Kinghead(localHero, client, localLevel, Logger);
+                newHead.init(localLevel, attachRoot, Ref<bool>.From(ref fromUI));
+                clientHeads[slot] = newHead;
+                client.head = newHead;
+                pendingClientHeadRecreate[slot] = false;
+            }
+            finally
+            {
+                remoteHeadSkin = previousGlobalHead;
+            }
+        }
+
+        private void ReceiveGhostCoords()
+        {
+            var net = _net;
+            var ghost = _ghost;
+            if (net == null || me == null || ghost == null) return;
+
+            if (!net.TryConsumeRemoteSnapshot(out var remotes))
+                return;
+
+            var localId = net.id;
+            var localLevelId = GetCurrentLevelId();
+            if (string.IsNullOrWhiteSpace(localLevelId))
+                localLevelId = me._level?.map?.id?.ToString() ?? string.Empty;
+
+            foreach (var remote in remotes)
+            {
+                if (!TryGetClientIndex(localId, remote.Id, out var index))
+                    continue;
+
+                remotePlayerId = remote.Id;
+                clientIds[index] = remote.Id;
+                ProcessRemoteDoorMarker(remote);
+                if (!ShouldKeepRemoteKingVisibleInRoom(remote, localLevelId))
+                {
+                    QueueClientDisposeWithTransition(index);
+                    continue;
+                }
+
+                CancelPendingClientDispose(index);
+
+                var client = EnsureClientKingSlot(index);
+                if (client == null)
+                    continue;
+
+                var drawX = remote.X;
+                var drawY = remote.Y - 0.2d;
+                var useDownedOffset = false;
+                if (_remoteDowned.TryGetValue(remote.Id, out var downed))
+                {
+                    var currentLevelId = GetCurrentLevelId();
+                    if (string.IsNullOrEmpty(currentLevelId) ||
+                        string.IsNullOrEmpty(downed.LevelId) ||
+                        string.Equals(currentLevelId, downed.LevelId, StringComparison.Ordinal))
+                    {
+                        drawX = downed.X;
+                        drawY = downed.Y;
+                        useDownedOffset = true;
+                        if (_remoteDownedCines.TryGetValue(remote.Id, out var downedCine) &&
+                            downedCine != null &&
+                            !downedCine.destroyed)
+                        {
+                            downedCine.UpdateTarget(drawX, drawY, remote.Dir);
+                        }
+                    }
+                }
+
+                if (useDownedOffset)
+                {
+                    drawY -= DownedGhostBodyYOffsetPx;
+                    client._targetable = false;
+                }
+                else
+                {
+                    client._targetable = true;
+                }
+
+                client.setPosPixel(drawX, drawY);
+                client.dir = remote.Dir;
+                rLastX[index] = drawX;
+                rLastY[index] = drawY;
+
+                var newLabel = BuildRemoteLabel(remote.Id, remote.Username);
+                if (!string.Equals(clientLabels[index], newLabel, StringComparison.Ordinal))
+                {
+                    ghost.SetLabel(client, newLabel);
+                    clientLabels[index] = newLabel;
+                }
+
+                if (remote.HasAnim && !string.IsNullOrWhiteSpace(remote.Anim))
+                    PlayGhostAnim(client, remote.Anim!, remote.AnimQueue, remote.AnimG);
+                if(remote.HasHeadAnim && !string.IsNullOrWhiteSpace(remote.HeadAnim))
+                    PlayGhostHeadAnim(client, remote.HeadAnim);
+            }
+        }
+
+        private bool ShouldKeepRemoteKingVisibleInRoom(NetNode.RemoteSnapshot remote, string localLevelId)
+        {
+            if (!string.IsNullOrWhiteSpace(localLevelId) &&
+                !string.IsNullOrWhiteSpace(remote.LevelId) &&
+                !string.Equals(remote.LevelId, localLevelId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!remote.HasRoom ||
+                !remote.RoomId.HasValue ||
+                remote.RoomId.Value < 0 ||
+                string.IsNullOrWhiteSpace(remote.RoomLevelId))
+            {
+                return true;
+            }
+
+            if (!TryGetCurrentVisibilityContext(out var localContextLevelId, out var localBranchToken))
+            {
+                localContextLevelId = localLevelId;
+                localBranchToken = _localLastDoorMarkerToken >= 0 ? _localLastDoorMarkerToken : 0;
+            }
+
+            var remoteContextLevelId = remote.RoomLevelId.Trim();
+            if (!string.Equals(remoteContextLevelId, localContextLevelId, StringComparison.Ordinal))
+                return false;
+
+            if (remote.RoomId.Value != localBranchToken)
+                return false;
+
+            return true;
+        }
+
+        private void ProcessRemoteDoorMarker(NetNode.RemoteSnapshot remote)
+        {
+            if (!remote.HasRoom ||
+                !remote.RoomId.HasValue ||
+                remote.RoomId.Value < 0 ||
+                string.IsNullOrWhiteSpace(remote.RoomLevelId))
+            {
+                return;
+            }
+
+            var markerToken = remote.RoomId.Value;
+            var markerLevelId = remote.RoomLevelId.Trim();
+            if (string.IsNullOrWhiteSpace(markerLevelId))
+                return;
+
+            if (_remoteLastDoorMarkers.TryGetValue(remote.Id, out var last) &&
+                last != null &&
+                last.MarkerToken == markerToken &&
+                string.Equals(last.LevelId, markerLevelId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _remoteLastDoorMarkers[remote.Id] = new RemoteDoorMarkerState
+            {
+                MarkerToken = markerToken,
+                LevelId = markerLevelId,
+                UpdatedAtTicks = Stopwatch.GetTimestamp()
+            };
+            _remotePendingDoorMarkers.Remove(remote.Id);
+        }
+
+        private void QueueClientDisposeWithTransition(int slot)
+        {
+            if (slot < 0 || slot >= clients.Length)
+                return;
+
+            var client = clients[slot];
+            if (client == null)
+            {
+                DisposeClientSlot(slot, clearIdentity: false);
+                return;
+            }
+
+            if (!_pendingClientDisposeTicks.TryGetValue(slot, out var startedAtTicks))
+            {
+                _pendingClientDisposeTicks[slot] = Stopwatch.GetTimestamp();
+                client.spr?._animManager?.play("walkOut".AsHaxeString(), null, null);
+                return;
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(startedAtTicks).TotalSeconds;
+            if (elapsed < ClientDisposeTransitionSeconds)
+                return;
+
+            DisposeClientSlot(slot, clearIdentity: false);
+        }
+
+        private void CancelPendingClientDispose(int slot)
+        {
+            _pendingClientDisposeTicks.Remove(slot);
+        }
+
+        private GhostKing? EnsureClientKingSlot(int slot)
+        {
+            if (slot < 0 || slot >= clients.Length)
+                return null;
+
+            var existing = clients[slot];
+            if (existing != null)
+                return existing;
+
+            if (_ghost == null || me == null || me._level == null)
+                return null;
+
+            var created = _ghost.CreateGhostKing(me._level);
+            clients[slot] = created;
+
+            var knownSkin = clientSkins[slot];
+            if (!string.IsNullOrWhiteSpace(knownSkin))
+                created.ApplyRemoteSkin(knownSkin);
+
+            var knownHead = clientHeadSkins[slot];
+            created.RemoteHeadSkinId = NormalizeSkin(
+                !string.IsNullOrWhiteSpace(knownHead) ? knownHead : remoteHeadSkin,
+                "BaseFlame");
+            RecreateClientHead(slot);
+
+            if (!string.IsNullOrWhiteSpace(clientLabels[slot]))
+                _ghost.SetLabel(created, clientLabels[slot]);
+
+            ApplyCachedRemoteDiveSkillInfoIfAny(clientIds[slot], created);
+
+            return created;
+        }
+
+        private void DisposeClientSlot(int slot, bool clearIdentity)
+        {
+            if (slot < 0 || slot >= clients.Length)
+                return;
+
+            _pendingClientDisposeTicks.Remove(slot);
+
+            var previousRemoteId = clientIds[slot];
+
+            var head = clientHeads[slot];
+            if (head != null)
+            {
+                head.dispose();
+                clientHeads[slot] = null;
+            }
+            pendingClientHeadRecreate[slot] = false;
+
+            var client = clients[slot];
+            if (client != null)
+            {
+                client.destroy();
+                client.dispose();
+                client.disposeGfx();
+            }
+            clients[slot] = null!;
+
+            if (!clearIdentity)
+                return;
+
+            if (previousRemoteId > 0)
+            {
+                _remoteLastDoorMarkers.Remove(previousRemoteId);
+                _remotePendingDoorMarkers.Remove(previousRemoteId);
+                ClearCachedRemoteDiveSkillInfo(previousRemoteId);
+            }
+
+            clientIds[slot] = 0;
+            clientLabels[slot] = null;
+            rLastX[slot] = 0;
+            rLastY[slot] = 0;
+        }
+
+        private void ReceiveGhostWeapons()
+        {
+            var net = _net;
+            if (net == null || me == null) return;
+
+            if (!net.TryConsumeRemoteWeaponSnapshots(out var updates))
+                return;
+
+            foreach (var update in updates)
+            {
+                ApplyRemoteWeaponUpdate(update.Id, update.Kind, update.Slot, update.PermanentId, update.Ammo);
+            }
+        }
+
+        private void DrainRemoteCombatQueuesAfterLevelChange()
+        {
+            var net = _net;
+            if (net == null)
+                return;
+
+            net.TryConsumeRemoteWeaponSnapshots(out _);
+            net.TryConsumeRemoteAttacks(out _);
+        }
+
+        private void ReceiveGhostAttacks()
+        {
+            var net = _net;
+            if (net == null || me == null) return;
+
+            if (!net.TryConsumeRemoteAttacks(out var attacks))
+                return;
+
+            var localId = net.id;
+            foreach (var attack in attacks)
+            {
+                if (TryHandleRemoteDiveAttack(attack, localId))
+                    continue;
+
+                if (attack.Slot < 0 &&
+                    (string.IsNullOrWhiteSpace(attack.Kind) ||
+                     attack.Kind.StartsWith("__", StringComparison.Ordinal)))
+                {
+                    continue;
+                }
+
+                ApplyRemoteWeaponUpdate(attack.Id, attack.Kind, attack.Slot, attack.PermanentId, attack.Ammo);
+                if (!TryGetClientIndex(localId, attack.Id, out var index))
+                    continue;
+
+                var client = clients[index];
+                if (client?.kingWeaponsManager == null) continue;
+                if (attack.Action == RemoteAttackAction.Interrupt)
+                    client.kingWeaponsManager.queueInterrupt(attack.Slot);
+                else
+                    client.kingWeaponsManager.queueAttack(attack.Slot);
+            }
+        }
+
+        private void UpdateGhostWeapons()
+        {
+            for (int i = 0; i < clients.Length; i++)
+            {
+                var client = clients[i];
+                if (client?.kingWeaponsManager == null) continue;
+                client.kingWeaponsManager.update();
+            }
+        }
+
+        private void PlayGhostAnim(GhostKing client, string anim, int? queueAnim, bool? g)
+        {
+            if (client?.spr?._animManager == null) return;
+            if (string.IsNullOrWhiteSpace(anim)) return;
+            var shieldActive = client.kingWeaponsManager != null && client.kingWeaponsManager.IsShieldActive;
+            if (shieldActive && ShouldLoopRemoteAnim(anim))
+            {
+                return;
+            }
+
+            if (anim.IndexOf("hold", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                anim.IndexOf("shield", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                anim.IndexOf("parry", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                anim.IndexOf("block", StringComparison.OrdinalIgnoreCase) >= 0)
+                return;
+
+            var animManager = client.spr._animManager;
+            var current = client.spr.groupName;
+            if(current != null && string.Equals(current.ToString(), anim, StringComparison.Ordinal))
+                return;
+
+            if (ShouldLoopRemoteAnim(anim))
+            {
+                if (!shieldActive)
+                {
+                    client.removeAllAffects(96);
+                    client.removeAllAffects(98);
+                    client.removeAllAffects(99);
+                }
+                animManager.play(anim.AsHaxeString(), null, null).loop(null);
+                return;
+            }
+            animManager.play(anim.AsHaxeString(), queueAnim, g).stopOnLastFrame(Ref<bool>.Null);
+        }
+
+        private static bool ShouldLoopRemoteAnim(string anim)
+        {
+            if(string.IsNullOrWhiteSpace(anim)) return false;
+            var a = anim.Trim();
+
+            // Don't ever force-loop weapon/hold-ish states; those should be driven by weapon replication.
+            if(IsAttackAnim(a)) return false;
+            if(a.IndexOf("guard", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            if(a.IndexOf("defend", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+
+            if (a.StartsWith("idle", StringComparison.OrdinalIgnoreCase)) return true;
+            if (a.StartsWith("run", StringComparison.OrdinalIgnoreCase)) return true;
+            if (a.StartsWith("walk", StringComparison.OrdinalIgnoreCase)) return true;
+            if (a.IndexOf("move", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("jump", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("fall", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("land", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("climb", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("ladder", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("crouch", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("volte", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (a.IndexOf("remain", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+
+            return false;
+        }
+
+        private void PlayGhostHeadAnim(GhostKing client, string anim)
+        {
+            if (client == null || client?.head == null || client?.head?.customHeadSpr._animManager == null) return;
+            if (string.IsNullOrWhiteSpace(anim)) return;
+            var animManager = client.head.customHeadSpr._animManager;
+            animManager.play(anim.AsHaxeString(), null, null).loop(null);
+            animManager.genSpeed = 0.4;
+        }
+
+        private void SendHeroAnim(string anim, int? queueAnim, bool? g, bool force = false)
+        {
+            if (_netRole == NetRole.None) return;
+            var net = _net;
+            if (net == null || string.IsNullOrWhiteSpace(anim)) return;
+            if (!force &&
+                string.Equals(_lastAnimSent, anim, StringComparison.Ordinal) &&
+                _lastAnimQueueSent == queueAnim &&
+                _lastAnimGSent == g)
+                return;
+
+            net.SendAnim(anim, queueAnim, g);
+            _lastAnimSent = anim;
+            _lastAnimQueueSent = queueAnim;
+            _lastAnimGSent = g;
+        }
+
+
+        private void SendHeadAnim(string anim)
+        {
+            if (_netRole == NetRole.None) return;
+            var net = _net;
+            if (net == null || string.IsNullOrWhiteSpace(anim)) return;
+            net.SendHeadAnim(anim);
+        }
+
+        private void SendEquippedWeapons(Inventory inv)
+        {
+            if (_netRole == NetRole.None || inv == null) return;
+            var w0 = inv.getEquippedWeaponOn(0);
+            if (w0 != null)
+                SendInventoryWeapon(w0, 0);
+            var w1 = inv.getEquippedWeaponOn(1);
+            if (w1 != null)
+                SendInventoryWeapon(w1, 1);
+        }
+
+        private void SendInventoryWeapon(InventItem item, int slot)
+        {
+            if (_netRole == NetRole.None) return;
+            if (item == null) return;
+            if (!TryGetWeaponKindId(item, out var kindId)) return;
+            var net = _net;
+            if (net == null || string.IsNullOrWhiteSpace(kindId)) return;
+            net.SendInventoryWeapon(kindId!, slot, item.permanentId, GetWeaponAmmoForSync(item));
+        }
+
+        private static bool TryGetWeaponKindId(InventItem item, out string? kindId)
+        {
+            kindId = null;
+            if (item == null) return false;
+            var kind = item.kind;
+            if (kind is InventItemKind.Weapon w)
+            {
+                kindId = w.Param0?.ToString();
+                return !string.IsNullOrWhiteSpace(kindId);
+            }
+            return false;
+        }
+
+        private static int? GetWeaponAmmoForSync(InventItem? item)
+        {
+            if(item == null)
+                return null;
+
+            var maxAmmo = item.getMaxAmmo();
+            if(maxAmmo <= 0)
+                return null;
+
+            var ammo = item.ammo;
+            if(ammo < 0) ammo = 0;
+            if(ammo > maxAmmo) ammo = maxAmmo;
+            return ammo;
+        }
+
+        private static int GetWeaponSlot(Inventory inv, InventItem item)
+        {
+            if (inv == null || item == null) return -1;
+            var id = item.permanentId;
+            var w0 = inv.getEquippedWeaponOn(0);
+            if (w0 != null && w0.permanentId == id) return 0;
+            var w1 = inv.getEquippedWeaponOn(1);
+            if (w1 != null && w1.permanentId == id) return 1;
+            return item.posID;
+        }
+
+        private bool IsLocalInventory(Inventory self)
+        {
+            return me != null && self != null && ReferenceEquals(self, me.inventory);
+        }
+
+        private void ApplyRemoteWeaponUpdate(int remoteId, string? kindId, int slot, int permanentId, int? ammo = null)
+        {
+            if (string.IsNullOrWhiteSpace(kindId)) return;
+            var net = _net;
+            var localId = net?.id ?? 0;
+            if (!TryGetClientIndex(localId, remoteId, out var index))
+                return;
+
+            var client = clients[index];
+            if (client?.inventory == null) return;
+
+            var cleaned = kindId.Replace("|", "/").Trim();
+            if (cleaned.Length == 0) return;
+
+            var inv = client.inventory;
+            var existing = permanentId != 0 ? inv.getByPermanentId(permanentId) : null;
+            var currentSlotItem = slot >= 0 ? inv.getEquippedWeaponOn(slot) : null;
+
+            if(existing == null && permanentId == 0)
+            {
+                if(IsWeaponKindMatch(currentSlotItem, cleaned))
+                    existing = currentSlotItem;
+                else if (slot < 0)
+                {
+                    var w0 = inv.getEquippedWeaponOn(0);
+                    if(IsWeaponKindMatch(w0, cleaned))
+                        existing = w0;
+                    else
+                    {
+                        var w1 = inv.getEquippedWeaponOn(1);
+                        if(IsWeaponKindMatch(w1, cleaned))
+                            existing = w1;
+                    }
+                }
+            }
+
+            if (existing == null)
+            {
+                var newItem = new InventItem(new InventItemKind.Weapon(cleaned.AsHaxeString()));
+                if (permanentId != 0)
+                    newItem.permanentId = permanentId;
+                if (slot >= 0)
+                    newItem.posID = slot;
+                _inventorySyncGuard = true;
+                try
+                {
+                    if(currentSlotItem != null)
+                        currentSlotItem.posID = -1;
+                    inv.add(newItem);
+                }
+                finally
+                {
+                    _inventorySyncGuard = false;
+                }
+                existing = newItem;
+            }
+            else if(currentSlotItem != null &&
+                    !ReferenceEquals(currentSlotItem, existing) &&
+                    (currentSlotItem.permanentId == 0 ||
+                     existing.permanentId == 0 ||
+                     currentSlotItem.permanentId != existing.permanentId))
+            {
+                currentSlotItem.posID = -1;
+            }
+
+            if (slot >= 0)
+                existing.posID = slot;
+
+            _inventorySyncGuard = true;
+            try
+            {
+                inv.equip(existing);
+                ApplyRemoteWeaponAmmo(existing, ammo);
+            }
+            finally
+            {
+                _inventorySyncGuard = false;
+            }
+        }
+
+        private static void ApplyRemoteWeaponAmmo(InventItem item, int? ammo)
+        {
+            if(item == null || !ammo.HasValue)
+                return;
+
+            var maxAmmo = item.getMaxAmmo();
+            if(maxAmmo <= 0)
+                return;
+
+            var value = ammo.Value;
+            if(value < 0) value = 0;
+            if(value > maxAmmo) value = maxAmmo;
+            item.ammo = value;
+        }
+
+        private static bool IsWeaponKindMatch(InventItem? item, string expectedKindId)
+        {
+            if(item == null || string.IsNullOrWhiteSpace(expectedKindId))
+                return false;
+            if(!TryGetWeaponKindId(item, out var itemKindId) || string.IsNullOrWhiteSpace(itemKindId))
+                return false;
+            return string.Equals(itemKindId, expectedKindId, StringComparison.Ordinal);
+        }
+
+        private void ResetLocalSkinSendCache()
+        {
+            _lastSentHeroSkin = null;
+            _lastSentHeroHeadSkin = null;
+        }
+
+        private void ResetDoorMarkerState()
+        {
+            _lastDoorMarkerLevelId = string.Empty;
+            _lastDoorMarkerToken = int.MinValue;
+            _localLastDoorMarkerLevelId = string.Empty;
+            _localLastDoorMarkerToken = int.MinValue;
+            _remoteLastDoorMarkers.Clear();
+            _remotePendingDoorMarkers.Clear();
+            _pendingClientDisposeTicks.Clear();
+        }
+
+        private void ResetNetworkState()
+        {
+            ResetFakeDeathState(unlockLocalHero: true, sendNetworkUpState: false);
+            ResetLocalSkinSendCache();
+            ResetDoorMarkerState();
+            _lastSentDiveInfoPayload = string.Empty;
+            _remoteDiveInfoPayloadById.Clear();
+            _lastLocalDiveStartSendTicks = 0;
+            _lastLocalDiveLandSendTicks = 0;
+            _lastDiveInfoScanTicks = 0;
+        }
+    }
+}

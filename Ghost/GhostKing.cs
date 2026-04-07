@@ -9,7 +9,6 @@ using dc.h3d.mat;
 using dc.hl.types;
 using dc.hxd;
 using dc.libs.heaps.slib;
-using dc.pow;
 using dc.pr;
 using dc.shader;
 using dc.tool;
@@ -19,8 +18,6 @@ using dc.tool.mainSkills;
 using Hashlink.Virtuals;
 using ModCore.Storage;
 using ModCore.Utilities;
-using dc.spine.support.utils;
-using DeadCellsMultiplayerMod.Ghost;
 using HaxeProxy.Runtime;
 
 namespace DeadCellsMultiplayerMod.Ghost.GhostBase
@@ -40,7 +37,7 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
         private long _lastRemoteDiveStartTicks;
         private long _lastRemoteDiveLandTicks;
 
-        private const double RemoteDiveReplayMinSeconds = 0.03;
+        private const double RemoteDiveReplayMinSeconds = 0.08;
         private const int DiveAttackCooldownKey = 729808896;
         private const int HeroControlLockCooldownKey = 255852544;
         private const int HeroSkillLockCooldownKey = 174063616;
@@ -333,7 +330,14 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
                 return false;
             }
 
-            return spr != null;
+            try
+            {
+                return spr != null && spr.groupName != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private readonly struct LocalHeroDiveStateSnapshot
@@ -677,6 +681,60 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             EnsureCooldownEntry(localHero.cd, HeroDiveRuntimeCooldownKey, 2.0);
         }
 
+        /// <summary>
+        /// Returns true with a <see cref="CdInst"/> when the key holds one; if the slot holds any other HL type, removes it so mixed maps cannot corrupt combat/affect code.
+        /// </summary>
+        private static bool TryGetFastCheckCdInst(Cooldown cooldown, int key, out CdInst? inst)
+        {
+            inst = null;
+            var fastCheck = cooldown.fastCheck;
+            if (fastCheck == null || !fastCheck.exists(key))
+                return false;
+
+            try
+            {
+                var raw = fastCheck.get(key);
+                if (raw is CdInst good)
+                {
+                    inst = good;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            EvictFastCheckKey(cooldown, key);
+            return false;
+        }
+
+        private static void EvictFastCheckKey(Cooldown cooldown, int key)
+        {
+            try
+            {
+                var fastCheck = cooldown.fastCheck;
+                if (fastCheck == null || !fastCheck.exists(key))
+                    return;
+
+                try
+                {
+                    var raw = fastCheck.get(key);
+                    if (raw is CdInst inst)
+                    {
+                        try { cooldown.cdList?.remove(inst); } catch { }
+                    }
+                }
+                catch
+                {
+                }
+
+                try { fastCheck.remove(key); } catch { }
+            }
+            catch
+            {
+            }
+        }
+
         private static void EnsureCooldownEntry(Cooldown? cooldown, int key, double frames)
         {
             if (cooldown?.fastCheck == null)
@@ -685,13 +743,15 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             try
             {
                 var fastCheck = cooldown.fastCheck;
-                var existing = fastCheck.get(key) as CdInst;
-                if (existing != null)
+                if (TryGetFastCheckCdInst(cooldown, key, out var existing))
                 {
-                    if (existing.frames < frames)
+                    if (existing!.frames < frames)
                         existing.frames = frames;
                     return;
                 }
+
+                if (fastCheck.exists(key))
+                    return;
 
                 var created = new CdInst(key, frames);
                 fastCheck.set(key, created);
@@ -727,12 +787,7 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
             try
             {
-                var fastCheck = cooldown.fastCheck;
-                if (!fastCheck.exists(key))
-                    return default;
-
-                var entry = fastCheck.get(key) as CdInst;
-                if (entry == null)
+                if (!TryGetFastCheckCdInst(cooldown, key, out var entry) || entry == null)
                     return default;
 
                 return new CooldownSnapshot(
@@ -756,7 +811,7 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             try
             {
                 var fastCheck = cooldown.fastCheck;
-                var current = fastCheck.get(key) as CdInst;
+                TryGetFastCheckCdInst(cooldown, key, out var current);
 
                 if (!snapshot.HadEntry || snapshot.Entry == null)
                 {
@@ -764,6 +819,10 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
                     {
                         try { cooldown.cdList?.remove(current); } catch { }
                         try { fastCheck.remove(key); } catch { }
+                    }
+                    else if (fastCheck.exists(key))
+                    {
+                        EvictFastCheckKey(cooldown, key);
                     }
                     return;
                 }

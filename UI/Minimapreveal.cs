@@ -1,18 +1,13 @@
 using dc;
-using dc.en;
 using dc.h2d;
 using dc.haxe.io;
 using dc.hl.types;
-using dc.pr;
-using dc.ui;
 using dc.ui.hud;
-using dc.ui.hud.map;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Utilities;
-using Debug = Serilog.Log;
 
 namespace DeadCellsMultiplayerMod.MultiplayerModUI.Minimap
 {
@@ -70,9 +65,9 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Minimap
                 int length = obj.length;
                 for (int i = 0; i < length; i++)
                 {
-                    dynamic arrayElement = obj.array[i]!;
+                    var arrayElement = obj.getDyn(i);
                     if (arrayElement == null) continue;
-                    mmtracker = arrayElement;
+                    mmtracker = (MMTracker)arrayElement;
                     if (king != null && mmtracker != null && Std.Class.@is(mmtracker.e, GhostKing.Class))
                     {
                         var clients = ModEntry.clients;
