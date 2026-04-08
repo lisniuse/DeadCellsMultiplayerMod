@@ -425,7 +425,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             if (this.lobbyCodeTitleLabel == null)
             {
                 this.lobbyCodeTitleLabel = Assets.Class.makeText(
-                    "lobby code".AsHaxeString(),
+                    GetText.Instance.GetString("Lobby code").AsHaxeString(),
                     Tools.MultiColor.ColorFromHex("#9ea8b3"),
                     false,
                     null);

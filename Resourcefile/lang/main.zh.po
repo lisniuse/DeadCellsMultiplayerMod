@@ -22,6 +22,14 @@ msgstr "DeadCells 多人游戏模组"
 msgid "Lobby menu"
 msgstr "联机菜单"
 
+#: ConnectionUI.cs
+msgid "Lobby code"
+msgstr "房间代码"
+
+#: GameMenu.MultiplayerSaveSlots.cs
+msgid "Save: Slot {0}"
+msgstr "存档：槽位 {0}"
+
 #: ConnectionUI.cs:301
 msgid "Players' list"
 msgstr "玩家列表"
@@ -326,6 +334,18 @@ msgstr "Boss 生命值倍率"
 #: SettingsUI.cs
 msgid "Sync vertical position"
 msgstr "同步垂直位置"
+
+#: SettingsUI.cs
+msgid "Mobs settings"
+msgstr "怪物设置"
+
+#: SettingsUI.cs
+msgid "Debug"
+msgstr "调试"
+
+#: SettingsUI.cs
+msgid "Applies host vertical position to gravity mobs. Off: X-only for walkers; flying mobs still sync Y. On: can reduce desync but may snap ground mobs."
+msgstr "将主机的垂直位置应用于受重力影响的怪物。关闭：步行怪仅同步 X；飞行怪仍会同步 Y。开启：可减少不同步，但可能使地面怪瞬移。"
 
 #: SettingsUI.cs
 msgid "Module: language"
