@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using dc;
 using dc.en;
@@ -76,6 +77,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static bool s_levelIdentityReady;
         private static int s_levelIdentityGeneration;
         private static int s_levelIdentityToken;
+        private static WeakReference<Level>? s_lastResetLevelRef;
+        private static string s_lastResetLevelId = string.Empty;
+        private static int s_lastResetIdentityToken;
+        private static int s_lastResetTrackedCount;
+        private static WeakReference<Level>? s_lastCommittedLevelRef;
+        private static string s_lastCommittedLevelId = string.Empty;
+        private static int s_lastCommittedIdentityToken;
+        private static int s_lastCommittedTrackedCount;
+        private static string s_lastResetReason = string.Empty;
         private static int forceExactNemesisTargetDepth;
         private static int clientNetworkQueuedAttackDepth;
         private static Mob? clientNetworkQueuedAttackMob;
@@ -88,7 +98,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static int authoritativeClientBossDieDepth;
         private const string MobSyncWorkerDisableEnv = "DCCM_MOB_SYNC_WORKER";
         private const string MobSyncAsyncInProcEnv = "DCCM_MOB_SYNC_ASYNC_INPROC";
-
         private static bool s_trackedMobValidationPending = true;
         private const string ExplicitEmptyStatePayloadMarker = "~";
 
@@ -274,7 +283,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 trackedBeforeReset = trackedMobs.Count;
                 levelId = GetLevelTraceIdSafe(currentLevel);
-                ResetMobTrackingLocked();
+                ResetMobTrackingLocked("level_change_external");
             }
             SyncMobIdRegistry.ClearForLevel(null);
             try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
@@ -331,7 +340,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 lock (Sync)
                 {
                     if (trackedMobs.Count > 0 || currentLevel != null)
-                        ResetMobTrackingLocked();
+                        ResetMobTrackingLocked("frame_update_sync_disabled");
                 }
                 return;
             }
@@ -389,6 +398,63 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 return string.Empty;
             }
+        }
+
+        private static int GetEntityCountSafe(Level? level)
+        {
+            try
+            {
+                return level?.entities?.length ?? 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static string GetLevelRuntimeKey(Level? level)
+        {
+            if (level == null)
+                return string.Empty;
+
+            try
+            {
+                return RuntimeHelpers.GetHashCode(level).ToString("X8", CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static bool TryGetTrackedWeakReferenceTargetLocked(WeakReference<Level>? reference, out Level? level)
+        {
+            level = null;
+            return reference != null &&
+                   reference.TryGetTarget(out level) &&
+                   level != null;
+        }
+
+        private static string GetLastResetLevelRuntimeKeyLocked()
+        {
+            return TryGetTrackedWeakReferenceTargetLocked(s_lastResetLevelRef, out var level)
+                ? GetLevelRuntimeKey(level)
+                : string.Empty;
+        }
+
+        private static string GetLastCommittedLevelRuntimeKeyLocked()
+        {
+            return TryGetTrackedWeakReferenceTargetLocked(s_lastCommittedLevelRef, out var level)
+                ? GetLevelRuntimeKey(level)
+                : string.Empty;
+        }
+
+        private static void RememberCommittedRebuildLocked(Level? level, int identityToken, int trackedCount)
+        {
+            s_lastCommittedLevelRef = level == null ? null : new WeakReference<Level>(level);
+            s_lastCommittedLevelId = GetLevelTraceIdSafe(level);
+            s_lastCommittedIdentityToken = identityToken;
+            s_lastCommittedTrackedCount = trackedCount;
         }
 
         private static bool TryGetCurrentLevelIdentityToken(out int identityToken)
@@ -488,10 +554,42 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static void Hook_Level_entitiesPostCreate(Hook_Level.orig_entitiesPostCreate orig, Level self)
         {
+            var levelId = GetLevelTraceIdSafe(self);
+            var levelKey = GetLevelRuntimeKey(self);
+            var entityCount = GetEntityCountSafe(self);
+            var role = MobSyncNetRoleForTrace(GameMenu.NetRef);
+            var trackedBefore = 0;
+            var currentLevelKey = string.Empty;
+            var currentIdentityToken = 0;
+            var identityReady = false;
+            var lastResetReason = string.Empty;
+            lock (Sync)
+            {
+                trackedBefore = trackedMobs.Count;
+                currentLevelKey = GetLevelRuntimeKey(currentLevel);
+                currentIdentityToken = s_levelIdentityToken;
+                identityReady = s_levelIdentityReady;
+                lastResetReason = s_lastResetReason;
+            }
+
+            MobSyncTrace.LogEntitiesPostCreateHookEntered(
+                role,
+                levelId,
+                levelKey,
+                entityCount,
+                trackedBefore,
+                currentLevelKey,
+                identityReady,
+                currentIdentityToken,
+                lastResetReason);
+
             orig(self);
-            RebuildMobArray(self);
-            // Drop any pending mob packets from the previous level so MobIndex is not applied after RebuildMobArray reassigns sync ids.
-            try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
+            var rebuildAccepted = RebuildMobArray(self);
+            // Drop pending mob packets only when a rebuild was actually accepted and the live sync-id map changed.
+            if (rebuildAccepted)
+            {
+                try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
+            }
         }
 
         private static void Hook_Level_registerEntity(Hook_Level.orig_registerEntity orig, Level self, Entity clid)
@@ -570,7 +668,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 trackedBeforeReset = trackedMobs.Count;
                 levelId = GetLevelTraceIdSafe(self);
-                ResetMobTrackingLocked();
+                ResetMobTrackingLocked("level_dispose_before_orig");
             }
             SyncMobIdRegistry.ClearForLevel(self);
             try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
@@ -580,7 +678,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             lock (Sync)
             {
-                ResetMobTrackingLocked();
+                ResetMobTrackingLocked("level_dispose_after_orig");
             }
         }
 
@@ -595,7 +693,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 lock (Sync)
                 {
                     if (trackedMobs.Count > 0 || currentLevel != null)
-                        ResetMobTrackingLocked();
+                        ResetMobTrackingLocked("pre_update_net_unavailable");
                 }
                 orig(self);
                 return;

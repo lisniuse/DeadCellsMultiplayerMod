@@ -7,7 +7,8 @@
     <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
     <SupportedOSPlatform>Windows</SupportedOSPlatform>
     <NoWarn>$(NoWarn);CA1416;CS0414;CS9107</NoWarn>
-    <Version>0.3.1</Version>
+    <!-- don't change this version -->
+    <Version>0.3.2</Version> 
     <ModType>mod</ModType>
     <ModMain>DeadCellsMultiplayerMod.ModEntry</ModMain>
     <AutoInstallMod Condition="'$(Configuration)' == 'Debug'">true</AutoInstallMod>

@@ -144,36 +144,144 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return true;
         }
 
-        private static void RebuildMobArray(Level? level)
+        private static bool RebuildMobArray(Level? level)
         {
-            var trackedBeforeReset = 0;
-            var trackedAfterRebuild = 0;
-            lock (Sync)
+            var candidateIdentityToken = ComputeLevelIdentityToken(level);
+            var candidateEntityCount = 0;
+            var candidateTrackedMobs = new List<Mob>();
+            var role = MobSyncNetRoleForTrace(GameMenu.NetRef);
+            var levelId = GetLevelTraceIdSafe(level);
+            var levelKey = GetLevelRuntimeKey(level);
+            if (level?.entities != null)
             {
-                trackedBeforeReset = trackedMobs.Count;
-                ResetMobTrackingLocked();
-                currentLevel = level;
-                SyncMobIdRegistry.RebuildForLevel(level, IsSyncMob);
-                if (level?.entities != null)
+                var entities = level.entities;
+                candidateEntityCount = entities.length;
+                if (candidateIdentityToken > 0)
                 {
-                    var entities = level.entities;
                     for (int i = 0; i < entities.length; i++)
                     {
                         var mob = entities.getDyn(i) as Mob;
                         if (mob == null || !IsSyncMob(mob))
                             continue;
 
-                        AddTrackedMobLocked(mob);
+                        candidateTrackedMobs.Add(mob);
                     }
                 }
+            }
 
-                trackedAfterRebuild = trackedMobs.Count;
-                s_levelIdentityToken = ComputeLevelIdentityToken(level);
-                s_levelIdentityReady = level != null && s_levelIdentityToken > 0;
-                if (s_levelIdentityReady)
-                    s_levelIdentityGeneration++;
+            var trackedBeforeReset = 0;
+            var trackedAfterRebuild = 0;
+            var rebuildAccepted = false;
+            var generationAfterRebuild = 0;
+            var rejectionReason = string.Empty;
+            var currentIdentityTokenBefore = 0;
+            var currentIdentityReadyBefore = false;
+            var currentLevelKeyBefore = string.Empty;
+            var lastResetLevelKeyBefore = string.Empty;
+            var lastResetTrackedCountBefore = 0;
+            var lastResetIdentityTokenBefore = 0;
+            var lastCommittedLevelKeyBefore = string.Empty;
+            var lastCommittedTrackedCountBefore = 0;
+            var lastCommittedIdentityTokenBefore = 0;
+            var baselineTrackedCount = 0;
+            var baselineSource = string.Empty;
+            var lastResetReasonBefore = string.Empty;
+            lock (Sync)
+            {
+                trackedBeforeReset = trackedMobs.Count;
+                currentIdentityTokenBefore = s_levelIdentityToken;
+                currentIdentityReadyBefore = s_levelIdentityReady;
+                currentLevelKeyBefore = GetLevelRuntimeKey(currentLevel);
+                lastResetLevelKeyBefore = GetLastResetLevelRuntimeKeyLocked();
+                lastResetTrackedCountBefore = s_lastResetTrackedCount;
+                lastResetIdentityTokenBefore = s_lastResetIdentityToken;
+                lastCommittedLevelKeyBefore = GetLastCommittedLevelRuntimeKeyLocked();
+                lastCommittedTrackedCountBefore = s_lastCommittedTrackedCount;
+                lastCommittedIdentityTokenBefore = s_lastCommittedIdentityToken;
+                lastResetReasonBefore = s_lastResetReason;
+                if (!ShouldAcceptRebuildCandidateLocked(
+                        level,
+                        candidateIdentityToken,
+                        candidateEntityCount,
+                        candidateTrackedMobs.Count,
+                        out rejectionReason,
+                        out baselineTrackedCount,
+                        out baselineSource))
+                {
+                    trackedAfterRebuild = trackedMobs.Count;
+                    generationAfterRebuild = s_levelIdentityGeneration;
+                }
+                else
+                {
+                    ResetMobTrackingLocked("rebuild_prepare");
+                    currentLevel = level;
+                    SyncMobIdRegistry.RebuildForLevel(level, IsSyncMob);
+                    for (int i = 0; i < candidateTrackedMobs.Count; i++)
+                        AddTrackedMobLocked(candidateTrackedMobs[i]);
 
-                ValidateTrackedIntegrityLocked("rebuild");
+                    trackedAfterRebuild = trackedMobs.Count;
+                    s_levelIdentityToken = candidateIdentityToken;
+                    s_levelIdentityReady = level != null && s_levelIdentityToken > 0;
+                    if (s_levelIdentityReady)
+                        s_levelIdentityGeneration++;
+
+                    generationAfterRebuild = s_levelIdentityGeneration;
+                    rebuildAccepted = true;
+                    RememberCommittedRebuildLocked(level, candidateIdentityToken, trackedAfterRebuild);
+                    ValidateTrackedIntegrityLocked("rebuild");
+                }
+            }
+
+            MobSyncTrace.LogRebuildCandidate(
+                role,
+                levelId,
+                levelKey,
+                candidateEntityCount,
+                candidateTrackedMobs.Count,
+                candidateIdentityToken,
+                trackedBeforeReset,
+                currentIdentityTokenBefore,
+                currentLevelKeyBefore,
+                lastResetLevelKeyBefore,
+                lastResetTrackedCountBefore,
+                lastResetIdentityTokenBefore,
+                lastCommittedLevelKeyBefore,
+                lastCommittedTrackedCountBefore,
+                lastCommittedIdentityTokenBefore,
+                lastResetReasonBefore);
+
+            MobSyncTrace.LogRebuildDecision(
+                role,
+                levelId,
+                levelKey,
+                rebuildAccepted ? "accepted" : "rejected",
+                rejectionReason,
+                trackedBeforeReset,
+                trackedAfterRebuild,
+                candidateEntityCount,
+                candidateTrackedMobs.Count,
+                baselineTrackedCount,
+                baselineSource,
+                currentIdentityReadyBefore,
+                currentIdentityTokenBefore,
+                candidateIdentityToken,
+                currentLevelKeyBefore,
+                lastResetLevelKeyBefore,
+                lastCommittedLevelKeyBefore,
+                lastResetReasonBefore);
+
+            if (!rebuildAccepted)
+            {
+                MobSyncTrace.LogRebuildRejected(
+                    rejectionReason,
+                    role,
+                    levelId,
+                    trackedBeforeReset,
+                    candidateEntityCount,
+                    candidateTrackedMobs.Count,
+                    currentIdentityTokenBefore,
+                    candidateIdentityToken);
+                return false;
             }
 
             lock (Sync)
@@ -184,21 +292,115 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var registryStats = SyncMobIdRegistry.GetStats();
             MobSyncTrace.LogRegistryRebuild(
-                GameMenu.NetRef?.IsHost == true ? "host" : (GameMenu.NetRef?.IsAlive == true ? "client" : "none"),
-                GetLevelTraceIdSafe(level),
+                role,
+                levelId,
                 trackedBeforeReset,
                 trackedAfterRebuild,
                 registryStats.Count,
                 registryStats.MinSyncId,
                 registryStats.MaxSyncId,
                 registryStats.NextRuntimeSyncId,
-                s_levelIdentityGeneration,
+                generationAfterRebuild,
+                s_levelIdentityToken);
+            MobSyncTrace.LogRebuildCommit(
+                role,
+                levelId,
+                levelKey,
+                trackedAfterRebuild,
+                registryStats.Count,
+                generationAfterRebuild,
                 s_levelIdentityToken);
 
             for (int i = 0; i < s_batchMobsScratch.Count; i++)
                 QueueInitialMobSync(s_batchMobsScratch[i]);
 
             s_batchMobsScratch.Clear();
+            return true;
+        }
+
+        private static bool ShouldAcceptRebuildCandidateLocked(
+            Level? level,
+            int candidateIdentityToken,
+            int candidateEntityCount,
+            int candidateTrackedCount,
+            out string reason,
+            out int baselineTrackedCount,
+            out string baselineSource)
+        {
+            baselineTrackedCount = 0;
+            baselineSource = string.Empty;
+
+            if (level == null)
+            {
+                reason = "level_null";
+                return false;
+            }
+
+            if (level.entities == null)
+            {
+                reason = "entities_missing";
+                return false;
+            }
+
+            if (candidateIdentityToken <= 0)
+            {
+                reason = "identity_invalid";
+                return false;
+            }
+
+            var candidateLevelId = GetLevelTraceIdSafe(level);
+            var currentLevelId = GetLevelTraceIdSafe(currentLevel);
+            var sameIdentity = currentLevel != null &&
+                               s_levelIdentityReady &&
+                               s_levelIdentityToken > 0 &&
+                               s_levelIdentityToken == candidateIdentityToken &&
+                               string.Equals(currentLevelId, candidateLevelId, StringComparison.Ordinal);
+            var sameLastResetIdentity = s_lastResetIdentityToken > 0 &&
+                                        s_lastResetIdentityToken == candidateIdentityToken &&
+                                        string.Equals(s_lastResetLevelId, candidateLevelId, StringComparison.Ordinal);
+            var sameLastCommittedIdentity = s_lastCommittedIdentityToken > 0 &&
+                                            s_lastCommittedIdentityToken == candidateIdentityToken &&
+                                            string.Equals(s_lastCommittedLevelId, candidateLevelId, StringComparison.Ordinal);
+
+            if (sameIdentity && trackedMobs.Count > 0)
+            {
+                baselineTrackedCount = trackedMobs.Count;
+                baselineSource = "live";
+            }
+            else if (sameLastResetIdentity && s_lastResetTrackedCount > 0)
+            {
+                baselineTrackedCount = s_lastResetTrackedCount;
+                baselineSource = "last_reset";
+            }
+            else if (sameLastCommittedIdentity && s_lastCommittedTrackedCount > 0)
+            {
+                baselineTrackedCount = s_lastCommittedTrackedCount;
+                baselineSource = "last_commit";
+            }
+
+            if (baselineTrackedCount > 0)
+            {
+                if (candidateTrackedCount <= 0)
+                {
+                    reason = "same_identity_empty";
+                    return false;
+                }
+
+                if (candidateTrackedCount < baselineTrackedCount)
+                {
+                    reason = "same_identity_partial";
+                    return false;
+                }
+
+                if (candidateEntityCount <= 0)
+                {
+                    reason = "same_identity_entities_empty";
+                    return false;
+                }
+            }
+
+            reason = "accepted";
+            return true;
         }
 
         private static int AddTrackedMobLocked(Mob mob)
@@ -242,7 +444,31 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return addedIndex;
         }
 
-        private static void ResetMobTrackingLocked()
+        private static void ResetMobTrackingLocked(string reason)
+        {
+            s_lastResetReason = reason ?? string.Empty;
+            s_lastResetLevelRef = currentLevel == null ? null : new WeakReference<Level>(currentLevel);
+            s_lastResetLevelId = GetLevelTraceIdSafe(currentLevel);
+            s_lastResetIdentityToken = s_levelIdentityToken;
+            s_lastResetTrackedCount = trackedMobs.Count;
+            MobSyncTrace.LogTrackingReset(
+                s_lastResetReason,
+                MobSyncNetRoleForTrace(GameMenu.NetRef),
+                GetLevelTraceIdSafe(currentLevel),
+                GetLevelRuntimeKey(currentLevel),
+                trackedMobs.Count,
+                s_levelIdentityReady,
+                s_levelIdentityToken,
+                GetLastResetLevelRuntimeKeyLocked(),
+                s_lastResetTrackedCount,
+                s_lastResetIdentityToken,
+                GetLastCommittedLevelRuntimeKeyLocked(),
+                s_lastCommittedTrackedCount,
+                s_lastCommittedIdentityToken);
+            ResetMobTrackingStateLocked();
+        }
+
+        private static void ResetMobTrackingStateLocked()
         {
             trackedMobs.Clear();
             trackedMobIndices.Clear();

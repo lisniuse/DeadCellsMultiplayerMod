@@ -917,7 +917,6 @@ namespace DeadCellsMultiplayerMod
         public void hook_level_changed(Hook_Hero.orig_onLevelChanged orig, Hero self, Level oldLevel)
         {
             kingInitialized = false;
-            DeadCellsMultiplayerMod.Mobs.MobsSynchronization.MobsSynchronization.ClearTrackingForLevelChange();
             _net?.ClearMobSyncQueues();
             _pendingBossCineApplyByLevel.Clear();
             _suppressBossCineEchoByLevel.Clear();

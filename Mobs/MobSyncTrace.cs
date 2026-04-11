@@ -236,6 +236,184 @@ internal static class MobSyncTrace
             trackedBefore);
     }
 
+    public static void LogEntitiesPostCreateHookEntered(
+        string role,
+        string levelId,
+        string levelKey,
+        int entityCount,
+        int trackedBefore,
+        string currentLevelKey,
+        bool identityReady,
+        int currentIdentityToken,
+        string lastResetReason)
+    {
+        Log.Information(
+            "[MobSync] entitiesPostCreate hook entered level={LevelId} levelRef={LevelRef} role={Role} entityCount={EntityCount} trackedBefore={TrackedBefore} currentLevelRef={CurrentLevelRef} identityReady={IdentityReady} currentIdentityToken={CurrentIdentityToken} lastResetReason={LastResetReason}",
+            levelId ?? string.Empty,
+            levelKey ?? string.Empty,
+            role ?? string.Empty,
+            entityCount,
+            trackedBefore,
+            currentLevelKey ?? string.Empty,
+            identityReady,
+            currentIdentityToken,
+            lastResetReason ?? string.Empty);
+    }
+
+    public static void LogRebuildCandidate(
+        string role,
+        string levelId,
+        string levelKey,
+        int entityCount,
+        int candidateTracked,
+        int candidateIdentityToken,
+        int trackedBefore,
+        int currentIdentityToken,
+        string currentLevelKey,
+        string lastResetLevelKey,
+        int lastResetTrackedCount,
+        int lastResetIdentityToken,
+        string lastCommittedLevelKey,
+        int lastCommittedTrackedCount,
+        int lastCommittedIdentityToken,
+        string lastResetReason)
+    {
+        Log.Information(
+            "[MobSync] rebuild candidate entityCount={EntityCount} candidateTracked={CandidateTracked} level={LevelId} levelRef={LevelRef} role={Role} trackedBefore={TrackedBefore} candidateIdentityToken={CandidateIdentityToken} currentIdentityToken={CurrentIdentityToken} currentLevelRef={CurrentLevelRef} lastResetLevelRef={LastResetLevelRef} lastResetTracked={LastResetTracked} lastResetIdentityToken={LastResetIdentityToken} lastCommittedLevelRef={LastCommittedLevelRef} lastCommittedTracked={LastCommittedTracked} lastCommittedIdentityToken={LastCommittedIdentityToken} lastResetReason={LastResetReason}",
+            entityCount,
+            candidateTracked,
+            levelId ?? string.Empty,
+            levelKey ?? string.Empty,
+            role ?? string.Empty,
+            trackedBefore,
+            candidateIdentityToken,
+            currentIdentityToken,
+            currentLevelKey ?? string.Empty,
+            lastResetLevelKey ?? string.Empty,
+            lastResetTrackedCount,
+            lastResetIdentityToken,
+            lastCommittedLevelKey ?? string.Empty,
+            lastCommittedTrackedCount,
+            lastCommittedIdentityToken,
+            lastResetReason ?? string.Empty);
+    }
+
+    public static void LogRebuildDecision(
+        string role,
+        string levelId,
+        string levelKey,
+        string decision,
+        string reason,
+        int trackedBefore,
+        int trackedAfter,
+        int entityCount,
+        int candidateTracked,
+        int baselineTrackedCount,
+        string baselineSource,
+        bool currentIdentityReady,
+        int currentIdentityToken,
+        int candidateIdentityToken,
+        string currentLevelKey,
+        string lastResetLevelKey,
+        string lastCommittedLevelKey,
+        string lastResetReason)
+    {
+        Log.Information(
+            "[MobSync] rebuild decision {Decision} reason={Reason} level={LevelId} levelRef={LevelRef} role={Role} trackedBefore={TrackedBefore} trackedAfter={TrackedAfter} entityCount={EntityCount} candidateTracked={CandidateTracked} baselineTracked={BaselineTracked} baselineSource={BaselineSource} currentIdentityReady={CurrentIdentityReady} currentIdentityToken={CurrentIdentityToken} candidateIdentityToken={CandidateIdentityToken} currentLevelRef={CurrentLevelRef} lastResetLevelRef={LastResetLevelRef} lastCommittedLevelRef={LastCommittedLevelRef} lastResetReason={LastResetReason}",
+            decision ?? string.Empty,
+            reason ?? string.Empty,
+            levelId ?? string.Empty,
+            levelKey ?? string.Empty,
+            role ?? string.Empty,
+            trackedBefore,
+            trackedAfter,
+            entityCount,
+            candidateTracked,
+            baselineTrackedCount,
+            baselineSource ?? string.Empty,
+            currentIdentityReady,
+            currentIdentityToken,
+            candidateIdentityToken,
+            currentLevelKey ?? string.Empty,
+            lastResetLevelKey ?? string.Empty,
+            lastCommittedLevelKey ?? string.Empty,
+            lastResetReason ?? string.Empty);
+    }
+
+    public static void LogRebuildCommit(
+        string role,
+        string levelId,
+        string levelKey,
+        int trackedAfter,
+        int registryCount,
+        int generation,
+        int identityToken)
+    {
+        Log.Information(
+            "[MobSync] rebuild commit trackedAfter={TrackedAfter} level={LevelId} levelRef={LevelRef} role={Role} registryCount={RegistryCount} generation={Generation} identityToken={IdentityToken}",
+            trackedAfter,
+            levelId ?? string.Empty,
+            levelKey ?? string.Empty,
+            role ?? string.Empty,
+            registryCount,
+            generation,
+            identityToken);
+    }
+
+    public static void LogTrackingReset(
+        string reason,
+        string role,
+        string levelId,
+        string levelKey,
+        int trackedBefore,
+        bool identityReady,
+        int currentIdentityToken,
+        string lastResetLevelKey,
+        int lastResetTrackedCount,
+        int lastResetIdentityToken,
+        string lastCommittedLevelKey,
+        int lastCommittedTrackedCount,
+        int lastCommittedIdentityToken)
+    {
+        Log.Information(
+            "[MobSync] reset path reason={Reason} level={LevelId} levelRef={LevelRef} role={Role} trackedBefore={TrackedBefore} identityReady={IdentityReady} currentIdentityToken={CurrentIdentityToken} lastResetLevelRef={LastResetLevelRef} lastResetTracked={LastResetTracked} lastResetIdentityToken={LastResetIdentityToken} lastCommittedLevelRef={LastCommittedLevelRef} lastCommittedTracked={LastCommittedTracked} lastCommittedIdentityToken={LastCommittedIdentityToken}",
+            reason ?? string.Empty,
+            levelId ?? string.Empty,
+            levelKey ?? string.Empty,
+            role ?? string.Empty,
+            trackedBefore,
+            identityReady,
+            currentIdentityToken,
+            lastResetLevelKey ?? string.Empty,
+            lastResetTrackedCount,
+            lastResetIdentityToken,
+            lastCommittedLevelKey ?? string.Empty,
+            lastCommittedTrackedCount,
+            lastCommittedIdentityToken);
+    }
+
+    public static void LogRebuildRejected(
+        string reason,
+        string role,
+        string levelId,
+        int trackedCurrent,
+        int entityCount,
+        int candidateTracked,
+        int currentIdentityToken,
+        int candidateIdentityToken)
+    {
+        Log.Warning(
+            "[MobSync] REBUILD rejected reason={Reason} role={Role} level={LevelId} trackedCurrent={TrackedCurrent} entityCount={EntityCount} candidateTracked={CandidateTracked} currentIdentityToken={CurrentIdentityToken} candidateIdentityToken={CandidateIdentityToken}",
+            reason ?? string.Empty,
+            role ?? string.Empty,
+            levelId ?? string.Empty,
+            trackedCurrent,
+            entityCount,
+            candidateTracked,
+            currentIdentityToken,
+            candidateIdentityToken);
+    }
+
     public static void LogDeferredMobRegistration(string role, string levelId, string mobType)
     {
         if (!Enabled)
