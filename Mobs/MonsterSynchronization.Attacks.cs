@@ -534,6 +534,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             currentLevel = null;
             s_levelIdentityReady = false;
             s_levelIdentityToken = 0;
+            s_lastIgnoredDuplicateLevelId = string.Empty;
+            s_lastIgnoredDuplicateIdentityToken = 0;
         }
 
         private static bool IsLevelIdentityReadyLocked(Level? level)

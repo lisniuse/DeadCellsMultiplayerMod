@@ -85,6 +85,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static string s_lastCommittedLevelId = string.Empty;
         private static int s_lastCommittedIdentityToken;
         private static int s_lastCommittedTrackedCount;
+        private static string s_lastIgnoredDuplicateLevelId = string.Empty;
+        private static int s_lastIgnoredDuplicateIdentityToken;
         private static string s_lastResetReason = string.Empty;
         private static int forceExactNemesisTargetDepth;
         private static int clientNetworkQueuedAttackDepth;
@@ -538,6 +540,77 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             s_lastCommittedLevelId = GetLevelTraceIdSafe(level);
             s_lastCommittedIdentityToken = identityToken;
             s_lastCommittedTrackedCount = trackedCount;
+            s_lastIgnoredDuplicateLevelId = string.Empty;
+            s_lastIgnoredDuplicateIdentityToken = 0;
+        }
+
+        private static bool ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(Level? level, int candidateIdentityToken)
+        {
+            if (level == null ||
+                candidateIdentityToken <= 0 ||
+                !s_levelIdentityReady ||
+                currentLevel == null ||
+                trackedMobs.Count <= 0)
+            {
+                return false;
+            }
+
+            var candidateLevelId = GetLevelTraceIdSafe(level);
+            if (string.IsNullOrEmpty(candidateLevelId))
+                return false;
+
+            var currentLevelId = GetLevelTraceIdSafe(currentLevel);
+            if (!string.Equals(currentLevelId, candidateLevelId, StringComparison.Ordinal))
+                return false;
+
+            if (s_levelIdentityToken != candidateIdentityToken)
+                return false;
+
+            return s_lastCommittedIdentityToken == candidateIdentityToken &&
+                   s_lastCommittedTrackedCount > 0 &&
+                   string.Equals(s_lastCommittedLevelId, candidateLevelId, StringComparison.Ordinal);
+        }
+
+        private static bool TryIgnoreCommittedIdentityEntitiesPostCreate(Level? level)
+        {
+            var candidateIdentityToken = ComputeLevelIdentityToken(level);
+            var levelId = GetLevelTraceIdSafe(level);
+            var levelKey = GetLevelRuntimeKey(level);
+            var entityCount = GetEntityCountSafe(level);
+            var role = MobSyncNetRoleForTrace(GameMenu.NetRef);
+            var trackedCurrent = 0;
+            var currentLevelKey = string.Empty;
+            var shouldLog = false;
+
+            lock (Sync)
+            {
+                if (!ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(level, candidateIdentityToken))
+                    return false;
+
+                trackedCurrent = trackedMobs.Count;
+                currentLevelKey = GetLevelRuntimeKey(currentLevel);
+                shouldLog = s_lastIgnoredDuplicateIdentityToken != candidateIdentityToken ||
+                            !string.Equals(s_lastIgnoredDuplicateLevelId, levelId, StringComparison.Ordinal);
+                if (shouldLog)
+                {
+                    s_lastIgnoredDuplicateIdentityToken = candidateIdentityToken;
+                    s_lastIgnoredDuplicateLevelId = levelId;
+                }
+            }
+
+            if (shouldLog)
+            {
+                MobSyncTrace.LogEntitiesPostCreateDuplicateIgnored(
+                    role,
+                    levelId,
+                    levelKey,
+                    entityCount,
+                    trackedCurrent,
+                    candidateIdentityToken,
+                    currentLevelKey);
+            }
+
+            return true;
         }
 
         private static bool TryGetCurrentLevelIdentityToken(out int identityToken)
@@ -640,12 +713,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var levelId = GetLevelTraceIdSafe(self);
             var levelKey = GetLevelRuntimeKey(self);
             var entityCount = GetEntityCountSafe(self);
-            var role = MobSyncNetRoleForTrace(GameMenu.NetRef);
+            var net = GameMenu.NetRef;
+            var role = MobSyncNetRoleForTrace(net);
             var trackedBefore = 0;
             var currentLevelKey = string.Empty;
             var currentIdentityToken = 0;
             var identityReady = false;
             var lastResetReason = string.Empty;
+            var shouldSuppressEnteredLog = false;
             lock (Sync)
             {
                 trackedBefore = trackedMobs.Count;
@@ -653,20 +728,32 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 currentIdentityToken = s_levelIdentityToken;
                 identityReady = s_levelIdentityReady;
                 lastResetReason = s_lastResetReason;
+                if (IsHost(net))
+                {
+                    shouldSuppressEnteredLog = ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(
+                        self,
+                        ComputeLevelIdentityToken(self));
+                }
             }
 
-            MobSyncTrace.LogEntitiesPostCreateHookEntered(
-                role,
-                levelId,
-                levelKey,
-                entityCount,
-                trackedBefore,
-                currentLevelKey,
-                identityReady,
-                currentIdentityToken,
-                lastResetReason);
+            if (!shouldSuppressEnteredLog)
+            {
+                MobSyncTrace.LogEntitiesPostCreateHookEntered(
+                    role,
+                    levelId,
+                    levelKey,
+                    entityCount,
+                    trackedBefore,
+                    currentLevelKey,
+                    identityReady,
+                    currentIdentityToken,
+                    lastResetReason);
+            }
 
             orig(self);
+            if (IsHost(net) && TryIgnoreCommittedIdentityEntitiesPostCreate(self))
+                return;
+
             var rebuildAccepted = RebuildMobArray(self);
             // Drop pending mob packets only when a rebuild was actually accepted and the live sync-id map changed.
             if (rebuildAccepted)

@@ -27,8 +27,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!net.TryConsumeMobStates(out var states))
                 return;
 
-            MobSyncTrace.LogRecvStates("hostStatesFromHost", states);
-            ApplyIncomingHostMobStates(states);
+            try
+            {
+                MobSyncTrace.LogRecvStates("hostStatesFromHost", states);
+                ApplyIncomingHostMobStates(states);
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(states);
+            }
         }
 
         private static void ConsumeIncomingHostMobMoves(NetNode net)
@@ -36,8 +43,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!net.TryConsumeMobMoves(out var moves))
                 return;
 
-            MobSyncTrace.LogRecvMoves("hostMovesFromHost", moves);
-            ApplyIncomingHostMobMoves(moves);
+            try
+            {
+                MobSyncTrace.LogRecvMoves("hostMovesFromHost", moves);
+                ApplyIncomingHostMobMoves(moves);
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(moves);
+            }
         }
 
         private static void ConsumeIncomingClientMobStates(NetNode net)
@@ -45,8 +59,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!net.TryConsumeMobStates(out var states))
                 return;
 
-            MobSyncTrace.LogRecvStates("clientAffectFromClient", states);
-            ApplyIncomingClientMobStatesOnHost(states);
+            try
+            {
+                MobSyncTrace.LogRecvStates("clientAffectFromClient", states);
+                ApplyIncomingClientMobStatesOnHost(states);
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(states);
+            }
         }
 
         private static void ApplyIncomingClientMobStatesOnHost(IReadOnlyList<NetNode.MobStateSnapshot> states)
@@ -410,8 +431,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!net.TryConsumeMobAttacks(out var attacks))
                 return;
 
-            MobSyncTrace.LogRecvAttacks("hostAttacksFromHost", attacks);
-            ApplyIncomingHostMobAttacks(attacks);
+            try
+            {
+                MobSyncTrace.LogRecvAttacks("hostAttacksFromHost", attacks);
+                ApplyIncomingHostMobAttacks(attacks);
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(attacks);
+            }
         }
 
         private static void ApplyIncomingHostMobAttacks(IReadOnlyList<NetNode.MobAttack> attacks)
@@ -446,8 +474,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!net.TryConsumeMobDraws(out var draws))
                 return;
 
-            MobSyncTrace.LogRecvDraws("clientDrawsFromClient", draws);
-            ApplyIncomingMobDraws(draws);
+            try
+            {
+                MobSyncTrace.LogRecvDraws("clientDrawsFromClient", draws);
+                ApplyIncomingMobDraws(draws);
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(draws);
+            }
         }
 
         private static void ApplyIncomingMobDraws(IReadOnlyList<NetNode.MobDraw> draws)
@@ -1251,7 +1286,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             s_mobHitMergeScratch.Clear();
             if (net.TryConsumeMobHits(out var incoming) && incoming != null && incoming.Count > 0)
-                s_mobHitMergeScratch.AddRange(incoming);
+            {
+                try
+                {
+                    s_mobHitMergeScratch.AddRange(incoming);
+                }
+                finally
+                {
+                    NetNode.ReleaseConsumedList(incoming);
+                }
+            }
 
             if (s_mobHitMergeScratch.Count == 0)
                 return;
@@ -1266,13 +1310,20 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!net.TryConsumeMobDies(out var dies))
                 return;
 
-            MobSyncTrace.LogRecvDies(net.IsHost ? "diesOnHost" : "diesOnClient", dies);
+            try
+            {
+                MobSyncTrace.LogRecvDies(net.IsHost ? "diesOnHost" : "diesOnClient", dies);
 
-            // Host is authoritative for mob death. Ignore remote client die packets.
-            if (net.IsHost)
-                return;
+                // Host is authoritative for mob death. Ignore remote client die packets.
+                if (net.IsHost)
+                    return;
 
-            ApplyIncomingMobDies(dies);
+                ApplyIncomingMobDies(dies);
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(dies);
+            }
         }
 
         private static void ApplyIncomingMobDies(IReadOnlyList<NetNode.MobDie> dies)

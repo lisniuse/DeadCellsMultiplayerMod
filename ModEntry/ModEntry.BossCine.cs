@@ -238,27 +238,34 @@ namespace DeadCellsMultiplayerMod
 
             if (net.TryConsumeBossCineLevelIds(out var levelIds) && levelIds.Count > 0)
             {
-                var defaultExpiry = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossCineApplyPendingTtlSeconds);
-                for (int i = 0; i < levelIds.Count; i++)
+                try
                 {
-                    var receivedPayload = levelIds[i];
-                    if (!TryParseBossCinePayload(receivedPayload, out var receivedLevelId, out var receivedGenericEventId, out var receivedSnapX, out var receivedSnapY, out var _, out var _, out var _, out var _))
-                        continue;
+                    var defaultExpiry = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossCineApplyPendingTtlSeconds);
+                    for (int i = 0; i < levelIds.Count; i++)
+                    {
+                        var receivedPayload = levelIds[i];
+                        if (!TryParseBossCinePayload(receivedPayload, out var receivedLevelId, out var receivedGenericEventId, out var receivedSnapX, out var receivedSnapY, out var _, out var _, out var _, out var _))
+                            continue;
 
-                    ClearBossCineCompleted(receivedLevelId);
-                    if (!string.IsNullOrWhiteSpace(receivedGenericEventId) && receivedSnapX.HasValue && receivedSnapY.HasValue)
-                        SuppressBossCineSend(receivedLevelId);
+                        ClearBossCineCompleted(receivedLevelId);
+                        if (!string.IsNullOrWhiteSpace(receivedGenericEventId) && receivedSnapX.HasValue && receivedSnapY.HasValue)
+                            SuppressBossCineSend(receivedLevelId);
 
-                    var normalized = receivedPayload
-                        .Replace("\r", string.Empty, StringComparison.Ordinal)
-                        .Replace("\n", string.Empty, StringComparison.Ordinal)
-                        .Trim();
+                        var normalized = receivedPayload
+                            .Replace("\r", string.Empty, StringComparison.Ordinal)
+                            .Replace("\n", string.Empty, StringComparison.Ordinal)
+                            .Trim();
 
-                    var expiry = defaultExpiry;
-                    if (_pendingBossCineApplyByLevel.TryGetValue(normalized, out var oldExpiry) && oldExpiry > expiry)
-                        expiry = oldExpiry;
+                        var expiry = defaultExpiry;
+                        if (_pendingBossCineApplyByLevel.TryGetValue(normalized, out var oldExpiry) && oldExpiry > expiry)
+                            expiry = oldExpiry;
 
-                    _pendingBossCineApplyByLevel[normalized] = expiry;
+                        _pendingBossCineApplyByLevel[normalized] = expiry;
+                    }
+                }
+                finally
+                {
+                    NetNode.ReleaseConsumedList(levelIds);
                 }
             }
 
@@ -319,26 +326,33 @@ namespace DeadCellsMultiplayerMod
             if (!net.TryConsumeBossHeroTeleportEvents(out var teleports) || teleports.Count == 0)
                 return;
 
-            var localHero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
-            if (localHero == null)
-                return;
-
-            var localId = net.id;
-            var currentLevelId = GetCurrentLevelId();
-            foreach (var teleport in teleports)
+            try
             {
-                if (teleport.UserId > 0 && teleport.UserId == localId)
-                    continue;
-                if (HasAppliedBossHeroTeleport(currentLevelId))
-                    continue;
+                var localHero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+                if (localHero == null)
+                    return;
 
-                MarkBossHeroTeleportApplied(currentLevelId);
-                SuppressBossCineSend(currentLevelId);
-                _suppressBossTriggerNetSendUntilTick =
-                    Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossHeroTeleportEchoSuppressSeconds);
-                localHero.cancelVelocities();
-                localHero.setPosPixel(teleport.X, teleport.Y - BossHeroTeleportYOffsetPx);
-                localHero.dir = teleport.Dir;
+                var localId = net.id;
+                var currentLevelId = GetCurrentLevelId();
+                foreach (var teleport in teleports)
+                {
+                    if (teleport.UserId > 0 && teleport.UserId == localId)
+                        continue;
+                    if (HasAppliedBossHeroTeleport(currentLevelId))
+                        continue;
+
+                    MarkBossHeroTeleportApplied(currentLevelId);
+                    SuppressBossCineSend(currentLevelId);
+                    _suppressBossTriggerNetSendUntilTick =
+                        Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossHeroTeleportEchoSuppressSeconds);
+                    localHero.cancelVelocities();
+                    localHero.setPosPixel(teleport.X, teleport.Y - BossHeroTeleportYOffsetPx);
+                    localHero.dir = teleport.Dir;
+                }
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(teleports);
             }
         }
 

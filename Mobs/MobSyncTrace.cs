@@ -260,6 +260,26 @@ internal static class MobSyncTrace
             lastResetReason ?? string.Empty);
     }
 
+    public static void LogEntitiesPostCreateDuplicateIgnored(
+        string role,
+        string levelId,
+        string levelKey,
+        int entityCount,
+        int trackedCurrent,
+        int candidateIdentityToken,
+        string currentLevelKey)
+    {
+        Log.Information(
+            "[MobSync] entitiesPostCreate duplicate ignored reason=committed_identity_duplicate level={LevelId} levelRef={LevelRef} role={Role} entityCount={EntityCount} trackedCurrent={TrackedCurrent} candidateIdentityToken={CandidateIdentityToken} currentLevelRef={CurrentLevelRef}",
+            levelId ?? string.Empty,
+            levelKey ?? string.Empty,
+            role ?? string.Empty,
+            entityCount,
+            trackedCurrent,
+            candidateIdentityToken,
+            currentLevelKey ?? string.Empty);
+    }
+
     public static void LogRebuildCandidate(
         string role,
         string levelId,

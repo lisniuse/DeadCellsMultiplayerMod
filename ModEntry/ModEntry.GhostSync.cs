@@ -476,172 +476,179 @@ namespace DeadCellsMultiplayerMod
             if (!net.TryConsumeRemoteSnapshot(out var remotes))
                 return;
 
-            var localId = net.id;
-            var localLevelId = GetCurrentLevelId();
-            if (string.IsNullOrWhiteSpace(localLevelId))
-                localLevelId = me._level?.map?.id?.ToString() ?? string.Empty;
-
-            var createdSlots = 0;
-            var updatedLabels = 0;
-            var playedAnims = 0;
-            var playedHeadAnims = 0;
-            var disposedSlots = 0;
-
-            foreach (var remote in remotes)
+            try
             {
-                var remoteStart = RuntimeHitchWatch.Start();
-                if (!TryGetClientIndex(localId, remote.Id, out var index))
-                    continue;
+                var localId = net.id;
+                var localLevelId = GetCurrentLevelId();
+                if (string.IsNullOrWhiteSpace(localLevelId))
+                    localLevelId = me._level?.map?.id?.ToString() ?? string.Empty;
 
-                remotePlayerId = remote.Id;
-                clientIds[index] = remote.Id;
-                ProcessRemoteDoorMarker(remote);
-                if (!ShouldKeepRemoteKingVisibleInRoom(remote, localLevelId))
+                var createdSlots = 0;
+                var updatedLabels = 0;
+                var playedAnims = 0;
+                var playedHeadAnims = 0;
+                var disposedSlots = 0;
+
+                foreach (var remote in remotes)
                 {
-                    QueueClientDisposeWithTransition(index);
-                    disposedSlots++;
+                    var remoteStart = RuntimeHitchWatch.Start();
+                    if (!TryGetClientIndex(localId, remote.Id, out var index))
+                        continue;
+
+                    remotePlayerId = remote.Id;
+                    clientIds[index] = remote.Id;
+                    ProcessRemoteDoorMarker(remote);
+                    if (!ShouldKeepRemoteKingVisibleInRoom(remote, localLevelId))
+                    {
+                        QueueClientDisposeWithTransition(index);
+                        disposedSlots++;
+                        LogGhostRuntimeStepIfSlow(
+                            "ModEntry.ReceiveGhostCoords.Remote",
+                            remoteStart,
+                            string.Create(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                $"remoteId={remote.Id} slot={index} disposed=1 anim={(remote.HasAnim ? 1 : 0)} headAnim={(remote.HasHeadAnim ? 1 : 0)}"));
+                        continue;
+                    }
+
+                    CancelPendingClientDispose(index);
+
+                    var hadClientBefore = clients[index] != null;
+                    var client = EnsureClientKingSlot(index);
+                    if (client == null)
+                        continue;
+                    if (!hadClientBefore)
+                    {
+                        createdSlots++;
+                        MarkGhostHeadDirty(index, immediate: true);
+                    }
+
+                    var drawX = remote.X;
+                    var drawY = remote.Y - 0.2d;
+                    var useDownedOffset = false;
+                    var headDirty = !hadClientBefore;
+                    if (_remoteDowned.TryGetValue(remote.Id, out var downed))
+                    {
+                        var currentLevelId = GetCurrentLevelId();
+                        if (string.IsNullOrEmpty(currentLevelId) ||
+                            string.IsNullOrEmpty(downed.LevelId) ||
+                            string.Equals(currentLevelId, downed.LevelId, StringComparison.Ordinal))
+                        {
+                            drawX = downed.X;
+                            drawY = downed.Y;
+                            useDownedOffset = true;
+                            if (_remoteDownedCines.TryGetValue(remote.Id, out var downedCine) &&
+                                downedCine != null &&
+                                !downedCine.destroyed)
+                            {
+                                downedCine.UpdateTarget(drawX, drawY, remote.Dir);
+                            }
+                        }
+                    }
+
+                    if (useDownedOffset)
+                        drawY -= DownedGhostBodyYOffsetPx;
+
+                    if (clientLastDownedOffsets[index] != useDownedOffset)
+                    {
+                        client._targetable = !useDownedOffset;
+                        clientLastDownedOffsets[index] = useDownedOffset;
+                        headDirty = true;
+                    }
+
+                    if (rLastX[index] != drawX || rLastY[index] != drawY)
+                    {
+                        client.setPosPixel(drawX, drawY);
+                        rLastX[index] = drawX;
+                        rLastY[index] = drawY;
+                        headDirty = true;
+                    }
+
+                    if (clientLastDirs[index] != remote.Dir)
+                    {
+                        client.dir = remote.Dir;
+                        clientLastDirs[index] = remote.Dir;
+                        headDirty = true;
+                    }
+
+                    var newLabel = BuildRemoteLabel(remote.Id, remote.Username);
+                    if (!string.Equals(clientLabels[index], newLabel, StringComparison.Ordinal))
+                    {
+                        var labelStart = RuntimeHitchWatch.Start();
+                        ghost.SetLabel(client, newLabel);
+                        clientLabels[index] = newLabel;
+                        updatedLabels++;
+                        LogGhostRuntimeStepIfSlow(
+                            "ModEntry.ReceiveGhostCoords.SetLabel",
+                            labelStart,
+                            string.Create(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                $"remoteId={remote.Id} slot={index} label={newLabel}"));
+                    }
+
+                    if (remote.HasAnim &&
+                        !string.IsNullOrWhiteSpace(remote.Anim) &&
+                        (!string.Equals(clientLastBodyAnims[index], remote.Anim, StringComparison.Ordinal) ||
+                         clientLastBodyAnimQueues[index] != remote.AnimQueue ||
+                         clientLastBodyAnimGs[index] != remote.AnimG))
+                    {
+                        var animStart = RuntimeHitchWatch.Start();
+                        PlayGhostAnim(client, remote.Anim!, remote.AnimQueue, remote.AnimG);
+                        clientLastBodyAnims[index] = remote.Anim;
+                        clientLastBodyAnimQueues[index] = remote.AnimQueue;
+                        clientLastBodyAnimGs[index] = remote.AnimG;
+                        playedAnims++;
+                        headDirty = true;
+                        LogGhostRuntimeStepIfSlow(
+                            "ModEntry.ReceiveGhostCoords.PlayGhostAnim",
+                            animStart,
+                            string.Create(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                $"remoteId={remote.Id} slot={index} anim={remote.Anim}"));
+                    }
+                    if (remote.HasHeadAnim &&
+                        !string.IsNullOrWhiteSpace(remote.HeadAnim) &&
+                        !string.Equals(clientLastHeadAnims[index], remote.HeadAnim, StringComparison.Ordinal))
+                    {
+                        var headAnimStart = RuntimeHitchWatch.Start();
+                        PlayGhostHeadAnim(client, remote.HeadAnim);
+                        clientLastHeadAnims[index] = remote.HeadAnim;
+                        playedHeadAnims++;
+                        headDirty = true;
+                        LogGhostRuntimeStepIfSlow(
+                            "ModEntry.ReceiveGhostCoords.PlayGhostHeadAnim",
+                            headAnimStart,
+                            string.Create(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                $"remoteId={remote.Id} slot={index} anim={remote.HeadAnim}"));
+                    }
+
                     LogGhostRuntimeStepIfSlow(
                         "ModEntry.ReceiveGhostCoords.Remote",
                         remoteStart,
                         string.Create(
                             System.Globalization.CultureInfo.InvariantCulture,
-                            $"remoteId={remote.Id} slot={index} disposed=1 anim={(remote.HasAnim ? 1 : 0)} headAnim={(remote.HasHeadAnim ? 1 : 0)}"));
-                    continue;
+                            $"remoteId={remote.Id} slot={index} created={(hadClientBefore ? 0 : 1)} downed={(useDownedOffset ? 1 : 0)} anim={(remote.HasAnim ? 1 : 0)} headAnim={(remote.HasHeadAnim ? 1 : 0)}"));
+
+                    if (headDirty)
+                        MarkGhostHeadDirty(index, immediate: true);
                 }
 
-                CancelPendingClientDispose(index);
-
-                var hadClientBefore = clients[index] != null;
-                var client = EnsureClientKingSlot(index);
-                if (client == null)
-                    continue;
-                if (!hadClientBefore)
+                var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+                if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
                 {
-                    createdSlots++;
-                    MarkGhostHeadDirty(index, immediate: true);
-                }
-
-                var drawX = remote.X;
-                var drawY = remote.Y - 0.2d;
-                var useDownedOffset = false;
-                var headDirty = !hadClientBefore;
-                if (_remoteDowned.TryGetValue(remote.Id, out var downed))
-                {
-                    var currentLevelId = GetCurrentLevelId();
-                    if (string.IsNullOrEmpty(currentLevelId) ||
-                        string.IsNullOrEmpty(downed.LevelId) ||
-                        string.Equals(currentLevelId, downed.LevelId, StringComparison.Ordinal))
-                    {
-                        drawX = downed.X;
-                        drawY = downed.Y;
-                        useDownedOffset = true;
-                        if (_remoteDownedCines.TryGetValue(remote.Id, out var downedCine) &&
-                            downedCine != null &&
-                            !downedCine.destroyed)
-                        {
-                            downedCine.UpdateTarget(drawX, drawY, remote.Dir);
-                        }
-                    }
-                }
-
-                if (useDownedOffset)
-                    drawY -= DownedGhostBodyYOffsetPx;
-
-                if (clientLastDownedOffsets[index] != useDownedOffset)
-                {
-                    client._targetable = !useDownedOffset;
-                    clientLastDownedOffsets[index] = useDownedOffset;
-                    headDirty = true;
-                }
-
-                if (rLastX[index] != drawX || rLastY[index] != drawY)
-                {
-                    client.setPosPixel(drawX, drawY);
-                    rLastX[index] = drawX;
-                    rLastY[index] = drawY;
-                    headDirty = true;
-                }
-
-                if (clientLastDirs[index] != remote.Dir)
-                {
-                    client.dir = remote.Dir;
-                    clientLastDirs[index] = remote.Dir;
-                    headDirty = true;
-                }
-
-                var newLabel = BuildRemoteLabel(remote.Id, remote.Username);
-                if (!string.Equals(clientLabels[index], newLabel, StringComparison.Ordinal))
-                {
-                    var labelStart = RuntimeHitchWatch.Start();
-                    ghost.SetLabel(client, newLabel);
-                    clientLabels[index] = newLabel;
-                    updatedLabels++;
-                    LogGhostRuntimeStepIfSlow(
-                        "ModEntry.ReceiveGhostCoords.SetLabel",
-                        labelStart,
+                    RuntimeHitchWatch.LogSlow(
+                        Logger,
+                        "ModEntry.ReceiveGhostCoords",
+                        hitchMs,
                         string.Create(
                             System.Globalization.CultureInfo.InvariantCulture,
-                            $"remoteId={remote.Id} slot={index} label={newLabel}"));
+                            $"remotes={remotes.Count} createdSlots={createdSlots} updatedLabels={updatedLabels} playedAnims={playedAnims} playedHeadAnims={playedHeadAnims} disposedSlots={disposedSlots}"));
                 }
-
-                if (remote.HasAnim &&
-                    !string.IsNullOrWhiteSpace(remote.Anim) &&
-                    (!string.Equals(clientLastBodyAnims[index], remote.Anim, StringComparison.Ordinal) ||
-                     clientLastBodyAnimQueues[index] != remote.AnimQueue ||
-                     clientLastBodyAnimGs[index] != remote.AnimG))
-                {
-                    var animStart = RuntimeHitchWatch.Start();
-                    PlayGhostAnim(client, remote.Anim!, remote.AnimQueue, remote.AnimG);
-                    clientLastBodyAnims[index] = remote.Anim;
-                    clientLastBodyAnimQueues[index] = remote.AnimQueue;
-                    clientLastBodyAnimGs[index] = remote.AnimG;
-                    playedAnims++;
-                    headDirty = true;
-                    LogGhostRuntimeStepIfSlow(
-                        "ModEntry.ReceiveGhostCoords.PlayGhostAnim",
-                        animStart,
-                        string.Create(
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            $"remoteId={remote.Id} slot={index} anim={remote.Anim}"));
-                }
-                if (remote.HasHeadAnim &&
-                    !string.IsNullOrWhiteSpace(remote.HeadAnim) &&
-                    !string.Equals(clientLastHeadAnims[index], remote.HeadAnim, StringComparison.Ordinal))
-                {
-                    var headAnimStart = RuntimeHitchWatch.Start();
-                    PlayGhostHeadAnim(client, remote.HeadAnim);
-                    clientLastHeadAnims[index] = remote.HeadAnim;
-                    playedHeadAnims++;
-                    headDirty = true;
-                    LogGhostRuntimeStepIfSlow(
-                        "ModEntry.ReceiveGhostCoords.PlayGhostHeadAnim",
-                        headAnimStart,
-                        string.Create(
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            $"remoteId={remote.Id} slot={index} anim={remote.HeadAnim}"));
-                }
-
-                LogGhostRuntimeStepIfSlow(
-                    "ModEntry.ReceiveGhostCoords.Remote",
-                    remoteStart,
-                    string.Create(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        $"remoteId={remote.Id} slot={index} created={(hadClientBefore ? 0 : 1)} downed={(useDownedOffset ? 1 : 0)} anim={(remote.HasAnim ? 1 : 0)} headAnim={(remote.HasHeadAnim ? 1 : 0)}"));
-
-                if (headDirty)
-                    MarkGhostHeadDirty(index, immediate: true);
             }
-
-            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
-            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            finally
             {
-                RuntimeHitchWatch.LogSlow(
-                    Logger,
-                    "ModEntry.ReceiveGhostCoords",
-                    hitchMs,
-                    string.Create(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        $"remotes={remotes.Count} createdSlots={createdSlots} updatedLabels={updatedLabels} playedAnims={playedAnims} playedHeadAnims={playedHeadAnims} disposedSlots={disposedSlots}"));
+                NetNode.ReleaseConsumedList(remotes);
             }
         }
 
@@ -841,31 +848,38 @@ namespace DeadCellsMultiplayerMod
             if (!net.TryConsumeRemoteWeaponSnapshots(out var updates))
                 return;
 
-            var applied = 0;
-
-            foreach (var update in updates)
+            try
             {
-                var updateStart = RuntimeHitchWatch.Start();
-                ApplyRemoteWeaponUpdate(update.Id, update.Kind, update.Slot, update.PermanentId, update.Ammo);
-                applied++;
-                LogGhostRuntimeStepIfSlow(
-                    "ModEntry.ReceiveGhostWeapons.ApplyRemoteWeaponUpdate",
-                    updateStart,
-                    string.Create(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        $"remoteId={update.Id} slot={update.Slot} permanentId={update.PermanentId} ammo={(update.Ammo.HasValue ? update.Ammo.Value : -1)}"));
+                var applied = 0;
+
+                foreach (var update in updates)
+                {
+                    var updateStart = RuntimeHitchWatch.Start();
+                    ApplyRemoteWeaponUpdate(update.Id, update.Kind, update.Slot, update.PermanentId, update.Ammo);
+                    applied++;
+                    LogGhostRuntimeStepIfSlow(
+                        "ModEntry.ReceiveGhostWeapons.ApplyRemoteWeaponUpdate",
+                        updateStart,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"remoteId={update.Id} slot={update.Slot} permanentId={update.PermanentId} ammo={(update.Ammo.HasValue ? update.Ammo.Value : -1)}"));
+                }
+
+                var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+                if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+                {
+                    RuntimeHitchWatch.LogSlow(
+                        Logger,
+                        "ModEntry.ReceiveGhostWeapons",
+                        hitchMs,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"updates={updates.Count} applied={applied}"));
+                }
             }
-
-            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
-            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            finally
             {
-                RuntimeHitchWatch.LogSlow(
-                    Logger,
-                    "ModEntry.ReceiveGhostWeapons",
-                    hitchMs,
-                    string.Create(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        $"updates={updates.Count} applied={applied}"));
+                NetNode.ReleaseConsumedList(updates);
             }
         }
 
@@ -875,8 +889,10 @@ namespace DeadCellsMultiplayerMod
             if (net == null)
                 return;
 
-            net.TryConsumeRemoteWeaponSnapshots(out _);
-            net.TryConsumeRemoteAttacks(out _);
+            if (net.TryConsumeRemoteWeaponSnapshots(out var weaponUpdates))
+                NetNode.ReleaseConsumedList(weaponUpdates);
+            if (net.TryConsumeRemoteAttacks(out var attacks))
+                NetNode.ReleaseConsumedList(attacks);
         }
 
         private void ReceiveGhostAttacks()
@@ -888,61 +904,68 @@ namespace DeadCellsMultiplayerMod
             if (!net.TryConsumeRemoteAttacks(out var attacks))
                 return;
 
-            var localId = net.id;
-            var diveHandled = 0;
-            var queuedAttacks = 0;
-            foreach (var attack in attacks)
+            try
             {
-                var attackStart = RuntimeHitchWatch.Start();
-                if (TryHandleRemoteDiveAttack(attack, localId))
+                var localId = net.id;
+                var diveHandled = 0;
+                var queuedAttacks = 0;
+                foreach (var attack in attacks)
                 {
-                    diveHandled++;
+                    var attackStart = RuntimeHitchWatch.Start();
+                    if (TryHandleRemoteDiveAttack(attack, localId))
+                    {
+                        diveHandled++;
+                        LogGhostRuntimeStepIfSlow(
+                            "ModEntry.ReceiveGhostAttacks.Remote",
+                            attackStart,
+                            string.Create(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                $"remoteId={attack.Id} slot={attack.Slot} dive=1 action={attack.Action}"));
+                        continue;
+                    }
+
+                    if (attack.Slot < 0 &&
+                        (string.IsNullOrWhiteSpace(attack.Kind) ||
+                         attack.Kind.StartsWith("__", StringComparison.Ordinal)))
+                    {
+                        continue;
+                    }
+
+                    ApplyRemoteWeaponUpdate(attack.Id, attack.Kind, attack.Slot, attack.PermanentId, attack.Ammo);
+                    if (!TryGetClientIndex(localId, attack.Id, out var index))
+                        continue;
+
+                    var client = clients[index];
+                    if (client?.kingWeaponsManager == null) continue;
+                    if (attack.Action == RemoteAttackAction.Interrupt)
+                        client.kingWeaponsManager.queueInterrupt(attack.Slot);
+                    else
+                        client.kingWeaponsManager.queueAttack(attack.Slot);
+
+                    queuedAttacks++;
                     LogGhostRuntimeStepIfSlow(
                         "ModEntry.ReceiveGhostAttacks.Remote",
                         attackStart,
                         string.Create(
                             System.Globalization.CultureInfo.InvariantCulture,
-                            $"remoteId={attack.Id} slot={attack.Slot} dive=1 action={attack.Action}"));
-                    continue;
+                            $"remoteId={attack.Id} slot={attack.Slot} dive=0 action={attack.Action} kind={attack.Kind ?? string.Empty}"));
                 }
 
-                if (attack.Slot < 0 &&
-                    (string.IsNullOrWhiteSpace(attack.Kind) ||
-                     attack.Kind.StartsWith("__", StringComparison.Ordinal)))
+                var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+                if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
                 {
-                    continue;
+                    RuntimeHitchWatch.LogSlow(
+                        Logger,
+                        "ModEntry.ReceiveGhostAttacks",
+                        hitchMs,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"attacks={attacks.Count} diveHandled={diveHandled} queuedAttacks={queuedAttacks}"));
                 }
-
-                ApplyRemoteWeaponUpdate(attack.Id, attack.Kind, attack.Slot, attack.PermanentId, attack.Ammo);
-                if (!TryGetClientIndex(localId, attack.Id, out var index))
-                    continue;
-
-                var client = clients[index];
-                if (client?.kingWeaponsManager == null) continue;
-                if (attack.Action == RemoteAttackAction.Interrupt)
-                    client.kingWeaponsManager.queueInterrupt(attack.Slot);
-                else
-                    client.kingWeaponsManager.queueAttack(attack.Slot);
-
-                queuedAttacks++;
-                LogGhostRuntimeStepIfSlow(
-                    "ModEntry.ReceiveGhostAttacks.Remote",
-                    attackStart,
-                    string.Create(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        $"remoteId={attack.Id} slot={attack.Slot} dive=0 action={attack.Action} kind={attack.Kind ?? string.Empty}"));
             }
-
-            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
-            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            finally
             {
-                RuntimeHitchWatch.LogSlow(
-                    Logger,
-                    "ModEntry.ReceiveGhostAttacks",
-                    hitchMs,
-                    string.Create(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        $"attacks={attacks.Count} diveHandled={diveHandled} queuedAttacks={queuedAttacks}"));
+                NetNode.ReleaseConsumedList(attacks);
             }
         }
 
@@ -1178,6 +1201,8 @@ namespace DeadCellsMultiplayerMod
             var inv = client.inventory;
             var existing = permanentId != 0 ? inv.getByPermanentId(permanentId) : null;
             var currentSlotItem = slot >= 0 ? inv.getEquippedWeaponOn(slot) : null;
+            if (slot >= 0 && IsRemoteWeaponStateMatch(currentSlotItem, cleaned, permanentId, ammo))
+                return;
 
             if(existing == null && permanentId == 0)
             {
@@ -1229,11 +1254,18 @@ namespace DeadCellsMultiplayerMod
             if (slot >= 0)
                 existing.posID = slot;
 
+            var needsEquip = slot < 0 || !ReferenceEquals(currentSlotItem, existing);
+            var needsAmmoUpdate = !DoesWeaponAmmoMatch(existing, ammo);
+            if (!needsEquip && !needsAmmoUpdate)
+                return;
+
             _inventorySyncGuard = true;
             try
             {
-                inv.equip(existing);
-                ApplyRemoteWeaponAmmo(existing, ammo);
+                if (needsEquip)
+                    inv.equip(existing);
+                if (needsAmmoUpdate)
+                    ApplyRemoteWeaponAmmo(existing, ammo);
             }
             finally
             {
@@ -1261,6 +1293,32 @@ namespace DeadCellsMultiplayerMod
             if(value < 0) value = 0;
             if(value > maxAmmo) value = maxAmmo;
             item.ammo = value;
+        }
+
+        private static bool DoesWeaponAmmoMatch(InventItem? item, int? ammo)
+        {
+            if (item == null || !ammo.HasValue)
+                return true;
+
+            var maxAmmo = item.getMaxAmmo();
+            if (maxAmmo <= 0)
+                return true;
+
+            var expected = ammo.Value;
+            if (expected < 0)
+                expected = 0;
+            if (expected > maxAmmo)
+                expected = maxAmmo;
+            return item.ammo == expected;
+        }
+
+        private static bool IsRemoteWeaponStateMatch(InventItem? item, string expectedKindId, int expectedPermanentId, int? ammo)
+        {
+            if(item == null || !IsWeaponKindMatch(item, expectedKindId))
+                return false;
+            if(expectedPermanentId != 0 && item.permanentId != expectedPermanentId)
+                return false;
+            return DoesWeaponAmmoMatch(item, ammo);
         }
 
         private static bool IsWeaponKindMatch(InventItem? item, string expectedKindId)

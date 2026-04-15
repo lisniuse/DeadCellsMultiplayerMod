@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Buffers.Text;
 using System.Globalization;
 using System.Text;
 using dc;
@@ -679,12 +680,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static int GetInvariantWireLength(int value)
         {
-            return value.ToString(CultureInfo.InvariantCulture).Length;
+            Span<byte> buffer = stackalloc byte[16];
+            return Utf8Formatter.TryFormat(value, buffer, out var written) ? written : value.ToString(CultureInfo.InvariantCulture).Length;
         }
 
         private static int GetInvariantWireLength(double value)
         {
-            return value.ToString(CultureInfo.InvariantCulture).Length;
+            Span<byte> buffer = stackalloc byte[32];
+            return Utf8Formatter.TryFormat(value, buffer, out var written) ? written : value.ToString(CultureInfo.InvariantCulture).Length;
         }
     }
 }

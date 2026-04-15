@@ -19,6 +19,36 @@ public class InteractionSync :
     IOnAdvancedModuleInitializing,
     IOnHeroUpdate
 {
+    private sealed class LevelInteractionCache
+    {
+        public readonly List<Door> Doors = new();
+        public readonly List<Elevator> Elevators = new();
+        public readonly List<VineLadder> VineLadders = new();
+        public readonly List<Teleport> Teleports = new();
+        public readonly List<Portal> Portals = new();
+        public readonly List<PressurePlate> PressurePlates = new();
+        public readonly List<TreasureChest> TreasureChests = new();
+        public readonly List<SwitchBossRune> SwitchBossRunes = new();
+        public readonly List<Elevator> TriggerElevators = new();
+        public readonly List<Teleport> TriggerTeleports = new();
+        public readonly List<Portal> TriggerPortals = new();
+
+        public void Clear()
+        {
+            Doors.Clear();
+            Elevators.Clear();
+            VineLadders.Clear();
+            Teleports.Clear();
+            Portals.Clear();
+            PressurePlates.Clear();
+            TreasureChests.Clear();
+            SwitchBossRunes.Clear();
+            TriggerElevators.Clear();
+            TriggerTeleports.Clear();
+            TriggerPortals.Clear();
+        }
+    }
+
     private const double PosTolerance = 1.0;
     private const double PlatePosTolerance = 8.0;
     private const double ChestPosTolerance = 16.0;
@@ -40,6 +70,9 @@ public class InteractionSync :
     private readonly List<Door> _scratchDoorsToClose = new();
     private readonly HashSet<Elevator> _scratchAppliedElevators = new();
     private readonly List<(double X, double Y)> _scratchAppliedBreakableGround = new();
+    private static readonly PropertyInfo? LevelTriggersProperty = typeof(Level).GetProperty("triggers", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+    private static readonly LevelInteractionCache CachedInteractionLevelData = new();
+    private static Level? _cachedInteractionLevel;
     private bool _applyingRemoteDoorEvents;
     private bool _applyingRemoteChestEvents;
     private bool _applyingRemotePressurePlateEvents;
@@ -882,12 +915,15 @@ public class InteractionSync :
 
     private static T? FindNearestByPos<T>(Level level, double x, double y, double maxDistSq) where T : Entity
     {
-        if (level?.entities == null) return null;
+        var candidates = GetInteractionCandidates<T>(level);
+        if (candidates == null || candidates.Count == 0)
+            return null;
+
         T? nearest = null;
         double nearestSq = maxDistSq;
-        for (var i = 0; i < level.entities.length; i++)
+        for (var i = 0; i < candidates.Count; i++)
         {
-            var e = level.entities.getDyn(i) as T;
+            var e = candidates[i];
             if (e?.spr == null) continue;
             try
             {
@@ -930,12 +966,13 @@ public class InteractionSync :
 
     private static Elevator? FindElevatorByStableAnchor(Level level, double anchorX, double anchorY)
     {
-        if (level?.entities == null)
+        var elevators = GetInteractionCandidates<Elevator>(level);
+        if (elevators == null || elevators.Count == 0)
             return null;
 
-        for (var i = 0; i < level.entities.length; i++)
+        for (var i = 0; i < elevators.Count; i++)
         {
-            var e = level.entities.getDyn(i) as Elevator;
+            var e = elevators[i];
             if (e == null)
                 continue;
             try
@@ -956,15 +993,15 @@ public class InteractionSync :
 
     private static Elevator? FindElevatorByTrackBounds(Level level, double x, double y)
     {
-        if (level?.entities == null)
+        var elevators = GetInteractionCandidates<Elevator>(level);
+        if (elevators == null || elevators.Count == 0)
             return null;
 
         Elevator? nearest = null;
         double nearestSq = double.MaxValue;
-        var entities = level.entities;
-        for (var i = 0; i < entities.length; i++)
+        for (var i = 0; i < elevators.Count; i++)
         {
-            var elevator = entities.getDyn(i) as Elevator;
+            var elevator = elevators[i];
             if (elevator == null)
                 continue;
 
@@ -1002,8 +1039,7 @@ public class InteractionSync :
     {
         try
         {
-            var p = typeof(Level).GetProperty("triggers", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            return p?.GetValue(level);
+            return LevelTriggersProperty?.GetValue(level);
         }
         catch
         {
@@ -1029,19 +1065,19 @@ public class InteractionSync :
         return null;
     }
 
-    private static Elevator? FindElevatorInTriggers(Level level, double x, double y)
+    private static T? FindNearestTriggerByPos<T>(Level level, double x, double y, double maxDistSq) where T : Entity
     {
         try
         {
-            var triggers = TryGetLevelTriggers(level);
-            if (triggers == null)
+            var triggers = GetInteractionTriggerCandidates<T>(level);
+            if (triggers == null || triggers.Count == 0)
                 return null;
-            var len = GetTriggerArrayLength(triggers);
-            Elevator? nearest = null;
-            double nearestSq = ElevatorPosTolerance * ElevatorPosTolerance * 4;
-            for (var i = 0; i < len; i++)
+
+            T? nearest = null;
+            var nearestSq = maxDistSq;
+            for (var i = 0; i < triggers.Count; i++)
             {
-                var t = GetTriggerAt<Elevator>(triggers, i);
+                var t = triggers[i];
                 if (t?.spr == null) continue;
                 var dx = t.spr.x - x;
                 var dy = t.spr.y - y;
@@ -1059,6 +1095,9 @@ public class InteractionSync :
             return null;
         }
     }
+
+    private static Elevator? FindElevatorInTriggers(Level level, double x, double y) =>
+        FindNearestTriggerByPos<Elevator>(level, x, y, ElevatorPosTolerance * ElevatorPosTolerance * 4);
 
     private static VineLadder? FindVineLadderByPos(Level level, double x, double y)
     {
@@ -1087,67 +1126,11 @@ public class InteractionSync :
         return FindPortalInTriggers(level, x, y);
     }
 
-    private static Portal? FindPortalInTriggers(Level level, double x, double y)
-    {
-        try
-        {
-            var triggers = TryGetLevelTriggers(level);
-            if (triggers == null)
-                return null;
-            var len = GetTriggerArrayLength(triggers);
-            Portal? nearest = null;
-            double nearestSq = PortalPosTolerance * PortalPosTolerance * 4;
-            for (var i = 0; i < len; i++)
-            {
-                var t = GetTriggerAt<Portal>(triggers, i);
-                if (t?.spr == null) continue;
-                var dx = t.spr.x - x;
-                var dy = t.spr.y - y;
-                var dSq = dx * dx + dy * dy;
-                if (dSq < nearestSq)
-                {
-                    nearestSq = dSq;
-                    nearest = t;
-                }
-            }
-            return nearest;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private static Portal? FindPortalInTriggers(Level level, double x, double y) =>
+        FindNearestTriggerByPos<Portal>(level, x, y, PortalPosTolerance * PortalPosTolerance * 4);
 
-    private static Teleport? FindTeleportInTriggers(Level level, double x, double y)
-    {
-        try
-        {
-            var triggers = TryGetLevelTriggers(level);
-            if (triggers == null)
-                return null;
-            var len = GetTriggerArrayLength(triggers);
-            Teleport? nearest = null;
-            double nearestSq = TeleportPosTolerance * TeleportPosTolerance * 4;
-            for (var i = 0; i < len; i++)
-            {
-                var t = GetTriggerAt<Teleport>(triggers, i);
-                if (t?.spr == null) continue;
-                var dx = t.spr.x - x;
-                var dy = t.spr.y - y;
-                var dSq = dx * dx + dy * dy;
-                if (dSq < nearestSq)
-                {
-                    nearestSq = dSq;
-                    nearest = t;
-                }
-            }
-            return nearest;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private static Teleport? FindTeleportInTriggers(Level level, double x, double y) =>
+        FindNearestTriggerByPos<Teleport>(level, x, y, TeleportPosTolerance * TeleportPosTolerance * 4);
 
     private static PressurePlate? FindPressurePlateByPos(Level level, double x, double y)
     {
@@ -1202,13 +1185,13 @@ public class InteractionSync :
 
     private static T? FindInteractByPos<T>(Level level, double x, double y, double tolerance = PosTolerance) where T : Entity
     {
-        if (level?.entities == null)
+        var candidates = GetInteractionCandidates<T>(level);
+        if (candidates == null || candidates.Count == 0)
             return null;
 
-        var entities = level.entities;
-        for (var i = 0; i < entities.length; i++)
+        for (var i = 0; i < candidates.Count; i++)
         {
-            var e = entities.getDyn(i) as T;
+            var e = candidates[i];
             if (e == null)
                 continue;
             try
@@ -1226,6 +1209,110 @@ public class InteractionSync :
             }
         }
 
+        return null;
+    }
+
+    private static LevelInteractionCache GetInteractionCache(Level level)
+    {
+        if (!ReferenceEquals(_cachedInteractionLevel, level))
+            RebuildInteractionCache(level);
+
+        return CachedInteractionLevelData;
+    }
+
+    private static void RebuildInteractionCache(Level? level)
+    {
+        CachedInteractionLevelData.Clear();
+        _cachedInteractionLevel = level;
+
+        if (level == null)
+            return;
+
+        var entities = level.entities;
+        if (entities != null)
+        {
+            for (var i = 0; i < entities.length; i++)
+            {
+                switch (entities.getDyn(i))
+                {
+                    case Door door:
+                        CachedInteractionLevelData.Doors.Add(door);
+                        break;
+                    case Elevator elevator:
+                        CachedInteractionLevelData.Elevators.Add(elevator);
+                        break;
+                    case VineLadder vineLadder:
+                        CachedInteractionLevelData.VineLadders.Add(vineLadder);
+                        break;
+                    case Teleport teleport:
+                        CachedInteractionLevelData.Teleports.Add(teleport);
+                        break;
+                    case Portal portal:
+                        CachedInteractionLevelData.Portals.Add(portal);
+                        break;
+                    case PressurePlate pressurePlate:
+                        CachedInteractionLevelData.PressurePlates.Add(pressurePlate);
+                        break;
+                    case TreasureChest treasureChest:
+                        CachedInteractionLevelData.TreasureChests.Add(treasureChest);
+                        break;
+                    case SwitchBossRune switchBossRune:
+                        CachedInteractionLevelData.SwitchBossRunes.Add(switchBossRune);
+                        break;
+                }
+            }
+        }
+
+        var triggers = TryGetLevelTriggers(level);
+        var triggerCount = GetTriggerArrayLength(triggers);
+        for (var i = 0; i < triggerCount; i++)
+        {
+            switch (GetTriggerAt<Entity>(triggers, i))
+            {
+                case Elevator elevator:
+                    CachedInteractionLevelData.TriggerElevators.Add(elevator);
+                    break;
+                case Teleport teleport:
+                    CachedInteractionLevelData.TriggerTeleports.Add(teleport);
+                    break;
+                case Portal portal:
+                    CachedInteractionLevelData.TriggerPortals.Add(portal);
+                    break;
+            }
+        }
+    }
+
+    private static IReadOnlyList<T>? GetInteractionCandidates<T>(Level level) where T : Entity
+    {
+        var cache = GetInteractionCache(level);
+        if (typeof(T) == typeof(Door))
+            return (IReadOnlyList<T>)(object)cache.Doors;
+        if (typeof(T) == typeof(Elevator))
+            return (IReadOnlyList<T>)(object)cache.Elevators;
+        if (typeof(T) == typeof(VineLadder))
+            return (IReadOnlyList<T>)(object)cache.VineLadders;
+        if (typeof(T) == typeof(Teleport))
+            return (IReadOnlyList<T>)(object)cache.Teleports;
+        if (typeof(T) == typeof(Portal))
+            return (IReadOnlyList<T>)(object)cache.Portals;
+        if (typeof(T) == typeof(PressurePlate))
+            return (IReadOnlyList<T>)(object)cache.PressurePlates;
+        if (typeof(T) == typeof(TreasureChest))
+            return (IReadOnlyList<T>)(object)cache.TreasureChests;
+        if (typeof(T) == typeof(SwitchBossRune))
+            return (IReadOnlyList<T>)(object)cache.SwitchBossRunes;
+        return null;
+    }
+
+    private static IReadOnlyList<T>? GetInteractionTriggerCandidates<T>(Level level) where T : Entity
+    {
+        var cache = GetInteractionCache(level);
+        if (typeof(T) == typeof(Elevator))
+            return (IReadOnlyList<T>)(object)cache.TriggerElevators;
+        if (typeof(T) == typeof(Teleport))
+            return (IReadOnlyList<T>)(object)cache.TriggerTeleports;
+        if (typeof(T) == typeof(Portal))
+            return (IReadOnlyList<T>)(object)cache.TriggerPortals;
         return null;
     }
 }

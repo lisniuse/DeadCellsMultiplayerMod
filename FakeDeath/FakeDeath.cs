@@ -378,62 +378,69 @@ namespace DeadCellsMultiplayerMod
             if (!net.TryConsumePlayerDownStates(out var states))
                 return;
 
-            var localId = net.id;
-            if (localId <= 0)
-                return;
-            for (int i = 0; i < states.Count; i++)
+            try
             {
-                var state = states[i];
-                if (state.UserId <= 0 || state.UserId == localId)
-                    continue;
-
-                if (!state.IsDowned)
+                var localId = net.id;
+                if (localId <= 0)
+                    return;
+                for (int i = 0; i < states.Count; i++)
                 {
-                    if (TryGetClientIndex(localId, state.UserId, out var revivedIdx))
+                    var state = states[i];
+                    if (state.UserId <= 0 || state.UserId == localId)
+                        continue;
+
+                    if (!state.IsDowned)
                     {
-                        var revivedClient = clients[revivedIdx];
-                        if (revivedClient != null)
+                        if (TryGetClientIndex(localId, state.UserId, out var revivedIdx))
                         {
-                            try { revivedClient._targetable = true; } catch { }
+                            var revivedClient = clients[revivedIdx];
+                            if (revivedClient != null)
+                            {
+                                try { revivedClient._targetable = true; } catch { }
+                            }
+                        }
+
+                        _remoteDowned.Remove(state.UserId);
+                        _downedAnnouncements.Remove(state.UserId);
+                        DisposeRemoteDownedCine(state.UserId);
+                        continue;
+                    }
+
+                    if (!_remoteDowned.TryGetValue(state.UserId, out var existing))
+                    {
+                        existing = new RemoteDownedState
+                        {
+                            UserId = state.UserId
+                        };
+                        _remoteDowned[state.UserId] = existing;
+                    }
+
+                    if (_downedAnnouncements.Add(state.UserId))
+                        NotifyRemotePlayerDowned(net, state.UserId);
+
+                    existing.X = state.X;
+                    existing.Y = state.Y;
+                    existing.HasHeadPosition = state.HasHeadPosition;
+                    existing.HeadX = state.HeadX;
+                    existing.HeadY = state.HeadY;
+                    existing.HasHeadAnim = state.HasHeadAnim;
+                    existing.HeadAnim = state.HasHeadAnim ? (state.HeadAnim ?? string.Empty) : string.Empty;
+                    existing.LevelId = state.LevelId ?? string.Empty;
+                    existing.UpdatedAtTicks = Stopwatch.GetTimestamp();
+
+                    if (TryGetClientIndex(localId, state.UserId, out var downedIdx))
+                    {
+                        var downedClient = clients[downedIdx];
+                        if (downedClient != null)
+                        {
+                            try { downedClient._targetable = false; } catch { }
                         }
                     }
-
-                    _remoteDowned.Remove(state.UserId);
-                    _downedAnnouncements.Remove(state.UserId);
-                    DisposeRemoteDownedCine(state.UserId);
-                    continue;
                 }
-
-                if (!_remoteDowned.TryGetValue(state.UserId, out var existing))
-                {
-                    existing = new RemoteDownedState
-                    {
-                        UserId = state.UserId
-                    };
-                    _remoteDowned[state.UserId] = existing;
-                }
-
-                if (_downedAnnouncements.Add(state.UserId))
-                    NotifyRemotePlayerDowned(net, state.UserId);
-
-                existing.X = state.X;
-                existing.Y = state.Y;
-                existing.HasHeadPosition = state.HasHeadPosition;
-                existing.HeadX = state.HeadX;
-                existing.HeadY = state.HeadY;
-                existing.HasHeadAnim = state.HasHeadAnim;
-                existing.HeadAnim = state.HasHeadAnim ? (state.HeadAnim ?? string.Empty) : string.Empty;
-                existing.LevelId = state.LevelId ?? string.Empty;
-                existing.UpdatedAtTicks = Stopwatch.GetTimestamp();
-
-                if (TryGetClientIndex(localId, state.UserId, out var downedIdx))
-                {
-                    var downedClient = clients[downedIdx];
-                    if (downedClient != null)
-                    {
-                        try { downedClient._targetable = false; } catch { }
-                    }
-                }
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(states);
             }
         }
 
@@ -476,28 +483,33 @@ namespace DeadCellsMultiplayerMod
         {
             if (!_localFakeDead)
             {
-                if (net.TryConsumePlayerReviveRequests(out _))
-                {
-                    // Intentionally ignored: local player is alive, revive requests target other players.
-                }
+                if (net.TryConsumePlayerReviveRequests(out var ignoredRequests))
+                    NetNode.ReleaseConsumedList(ignoredRequests);
                 return;
             }
 
             if (!net.TryConsumePlayerReviveRequests(out var requests))
                 return;
 
-            var localId = net.id;
-            for (int i = 0; i < requests.Count; i++)
+            try
             {
-                var req = requests[i];
-                if (req.TargetId != localId)
-                    continue;
+                var localId = net.id;
+                for (int i = 0; i < requests.Count; i++)
+                {
+                    var req = requests[i];
+                    if (req.TargetId != localId)
+                        continue;
 
-                if (_localDeadCine == null || !_localDeadCine.IsHomunculusNearCorpse(ReviveHomunculusBodyMaxDistancePx))
-                    continue;
+                    if (_localDeadCine == null || !_localDeadCine.IsHomunculusNearCorpse(ReviveHomunculusBodyMaxDistancePx))
+                        continue;
 
-                ReviveLocalPlayer(net);
-                return;
+                    ReviveLocalPlayer(net);
+                    return;
+                }
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(requests);
             }
         }
 

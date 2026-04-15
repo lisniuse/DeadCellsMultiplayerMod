@@ -436,42 +436,49 @@ public class LevelExitSync :
         if (!net.TryConsumeExitReadyStates(out var states))
             return false;
 
-        var currentLevel = ModEntry.me?._level ?? _lastLevel;
-        var localId = net.id;
-        var anyChanged = false;
-        for (int i = 0; i < states.Count; i++)
+        try
         {
-            var state = states[i];
-            if (state.UserId <= 0 || state.UserId == localId)
-                continue;
-
-            var wasReady = _playerStates.TryGetValue(state.UserId, out var prev) &&
-                           prev.Pressed &&
-                           prev.InsideCircle &&
-                           prev.DoorCx == state.DoorCx &&
-                           prev.DoorCy == state.DoorCy;
-            var isReady = state.Pressed && state.InsideCircle;
-
-            var trackedState = GetOrCreatePlayerState(state.UserId);
-            anyChanged |= ApplyPlayerState(
-                trackedState,
-                BuildDoorKey(state.DoorCx, state.DoorCy),
-                state.DoorCx,
-                state.DoorCy,
-                state.Pressed,
-                state.InsideCircle,
-                state.IsOutOfGame,
-                state.IsOnScreen);
-            trackedState.LastTick = Stopwatch.GetTimestamp();
-
-            if (!wasReady && isReady)
+            var currentLevel = ModEntry.me?._level ?? _lastLevel;
+            var localId = net.id;
+            var anyChanged = false;
+            for (int i = 0; i < states.Count; i++)
             {
-                var target = FindExitTargetByCoordinates(currentLevel, state.DoorCx, state.DoorCy);
-                PushReachedExitMessage(state.UserId, target, net);
-            }
-        }
+                var state = states[i];
+                if (state.UserId <= 0 || state.UserId == localId)
+                    continue;
 
-        return anyChanged;
+                var wasReady = _playerStates.TryGetValue(state.UserId, out var prev) &&
+                               prev.Pressed &&
+                               prev.InsideCircle &&
+                               prev.DoorCx == state.DoorCx &&
+                               prev.DoorCy == state.DoorCy;
+                var isReady = state.Pressed && state.InsideCircle;
+
+                var trackedState = GetOrCreatePlayerState(state.UserId);
+                anyChanged |= ApplyPlayerState(
+                    trackedState,
+                    BuildDoorKey(state.DoorCx, state.DoorCy),
+                    state.DoorCx,
+                    state.DoorCy,
+                    state.Pressed,
+                    state.InsideCircle,
+                    state.IsOutOfGame,
+                    state.IsOnScreen);
+                trackedState.LastTick = Stopwatch.GetTimestamp();
+
+                if (!wasReady && isReady)
+                {
+                    var target = FindExitTargetByCoordinates(currentLevel, state.DoorCx, state.DoorCy);
+                    PushReachedExitMessage(state.UserId, target, net);
+                }
+            }
+
+            return anyChanged;
+        }
+        finally
+        {
+            NetNode.ReleaseConsumedList(states);
+        }
     }
 
     private bool RefreshActivePlayers(NetNode net)

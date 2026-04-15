@@ -232,40 +232,46 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
                 return;
             }
 
-            System.Array.Clear(_slotActive, 0, _slotActive.Length);
-            var localId = net.id;
-            foreach (var remote in snapshots)
+            try
             {
-                if (!ModEntry.TryGetClientIndex(localId, remote.Id, out var slotIndex))
-                    continue;
-
-                if (slotIndex < 0 || slotIndex >= _slots.Length)
-                    continue;
-
-                var slot = _slots[slotIndex];
-                if (slot == null)
+                System.Array.Clear(_slotActive, 0, _slotActive.Length);
+                var localId = net.id;
+                foreach (var remote in snapshots)
                 {
-                    var hud = _hud;
-                    if (hud == null)
+                    if (!ModEntry.TryGetClientIndex(localId, remote.Id, out var slotIndex))
                         continue;
-                    var lifeBar = new dc.ui.hud.LifeBar(new LifeBarColorMode.Normal(), null);
-                    slot = initkingLife(hud, slotIndex, lifeBar);
-                    _slots[slotIndex] = slot;
-                }
+                    if (slotIndex < 0 || slotIndex >= _slots.Length)
+                        continue;
 
-                var displayName = ModEntry.GetClientLabel(slotIndex);
-                if (string.IsNullOrWhiteSpace(displayName) ||
-                    string.Equals(displayName, "Guest", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(displayName, GameMenu.RemoteUsername, StringComparison.Ordinal))
-                {
-                    if (!string.IsNullOrWhiteSpace(remote.Username))
-                        displayName = remote.Username.Trim();
+                    var slot = _slots[slotIndex];
+                    if (slot == null)
+                    {
+                        var hud = _hud;
+                        if (hud == null)
+                            continue;
+                        var lifeBar = new dc.ui.hud.LifeBar(new LifeBarColorMode.Normal(), null);
+                        slot = initkingLife(hud, slotIndex, lifeBar);
+                        _slots[slotIndex] = slot;
+                    }
+
+                    var displayName = ModEntry.GetClientLabel(slotIndex);
+                    if (string.IsNullOrWhiteSpace(displayName) ||
+                        string.Equals(displayName, "Guest", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(displayName, GameMenu.RemoteUsername, StringComparison.Ordinal))
+                    {
+                        if (!string.IsNullOrWhiteSpace(remote.Username))
+                            displayName = remote.Username.Trim();
+                    }
+                    if (string.IsNullOrWhiteSpace(displayName))
+                        displayName = "Guest";
+                    UpdateSlotLabel(slot, displayName);
+                    UpdateLifeBar(slot, remote.Life, remote.MaxLife, remote.Lif, remote.BonusLife, remote.Recover);
+                    _slotActive[slotIndex] = true;
                 }
-                if (string.IsNullOrWhiteSpace(displayName))
-                    displayName = "Guest";
-                UpdateSlotLabel(slot, displayName);
-                UpdateLifeBar(slot, remote.Life, remote.MaxLife, remote.Lif, remote.BonusLife, remote.Recover);
-                _slotActive[slotIndex] = true;
+            }
+            finally
+            {
+                NetNode.ReleaseConsumedList(snapshots);
             }
 
             RemoveInactiveSlots();

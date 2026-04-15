@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 
@@ -39,15 +40,15 @@ internal static class MobWireCodec
                     sb.Append(EntrySep);
 
                 var m = moves[i];
-                sb.Append(m.Index.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, m.Index);
                 sb.Append(',');
-                sb.Append(m.X.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, m.X);
                 sb.Append(',');
-                sb.Append(m.Y.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, m.Y);
                 sb.Append(',');
-                sb.Append(m.Dir.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, m.Dir);
                 sb.Append(',');
-                sb.Append(m.Generation.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, m.Generation);
                 sb.Append(',');
                 sb.Append(m.AnimPayload ?? string.Empty);
             }
@@ -69,13 +70,13 @@ internal static class MobWireCodec
                     sb.Append(EntrySep);
 
                 var c = charges[i];
-                sb.Append(c.Index.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, c.Index);
                 sb.Append(',');
-                sb.Append(c.Generation.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, c.Generation);
                 sb.Append(',');
                 sb.Append(c.SkillId ?? string.Empty);
                 sb.Append(',');
-                sb.Append(c.Ratio.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, c.Ratio);
             }
         }
         sb.Append('\n');
@@ -117,15 +118,15 @@ internal static class MobWireCodec
                     sb.Append(EntrySep);
 
                 var u = updates[i];
-                sb.Append(u.Index.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, u.Index);
                 sb.Append(',');
-                sb.Append(u.X.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, u.X);
                 sb.Append(',');
-                sb.Append(u.Y.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, u.Y);
                 sb.Append(',');
-                sb.Append(u.Dir.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, u.Dir);
                 sb.Append(',');
-                sb.Append(u.Generation.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, u.Generation);
                 if (!string.IsNullOrWhiteSpace(u.Type))
                 {
                     sb.Append(',');
@@ -166,15 +167,15 @@ internal static class MobWireCodec
                     sb.Append(EntrySep);
 
                 var d = draws[i];
-                sb.Append(d.UserId.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, d.UserId);
                 sb.Append('|');
-                sb.Append(d.MobIndex.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, d.MobIndex);
                 sb.Append('|');
                 sb.Append(d.IsOutOfGame ? '1' : '0');
                 sb.Append('|');
                 sb.Append(d.IsOnScreen ? '1' : '0');
                 sb.Append('|');
-                sb.Append(d.Generation.ToString(CultureInfo.InvariantCulture));
+                AppendInvariant(sb, d.Generation);
             }
         }
         sb.Append('\n');
@@ -199,19 +200,19 @@ internal static class MobWireCodec
                 sb.Append(EntrySep);
 
             var s = states[i];
-            sb.Append(s.Index.ToString(CultureInfo.InvariantCulture));
+            AppendInvariant(sb, s.Index);
             sb.Append(',');
-            sb.Append(s.X.ToString(CultureInfo.InvariantCulture));
+            AppendInvariant(sb, s.X);
             sb.Append(',');
-            sb.Append(s.Y.ToString(CultureInfo.InvariantCulture));
+            AppendInvariant(sb, s.Y);
             sb.Append(',');
-            sb.Append(s.Dir.ToString(CultureInfo.InvariantCulture));
+            AppendInvariant(sb, s.Dir);
             sb.Append(',');
-            sb.Append(s.Life.ToString(CultureInfo.InvariantCulture));
+            AppendInvariant(sb, s.Life);
             sb.Append(',');
-            sb.Append(s.MaxLife.ToString(CultureInfo.InvariantCulture));
+            AppendInvariant(sb, s.MaxLife);
             sb.Append(',');
-            sb.Append(s.Generation.ToString(CultureInfo.InvariantCulture));
+            AppendInvariant(sb, s.Generation);
             sb.Append(',');
             sb.Append(s.AnimPayload ?? string.Empty);
             sb.Append(',');
@@ -219,6 +220,32 @@ internal static class MobWireCodec
             sb.Append(',');
             sb.Append(s.StatePayload ?? string.Empty);
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AppendInvariant(StringBuilder sb, int value)
+    {
+        Span<char> buffer = stackalloc char[16];
+        if (value.TryFormat(buffer, out var written, provider: CultureInfo.InvariantCulture))
+        {
+            sb.Append(buffer[..written]);
+            return;
+        }
+
+        sb.Append(value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AppendInvariant(StringBuilder sb, double value)
+    {
+        Span<char> buffer = stackalloc char[32];
+        if (value.TryFormat(buffer, out var written, provider: CultureInfo.InvariantCulture))
+        {
+            sb.Append(buffer[..written]);
+            return;
+        }
+
+        sb.Append(value.ToString(CultureInfo.InvariantCulture));
     }
 }
 

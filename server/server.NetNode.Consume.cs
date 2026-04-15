@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using DeadCellsMultiplayerMod.Interaction;
 
 public sealed partial class NetNode
@@ -5,6 +6,36 @@ public sealed partial class NetNode
     private static class EmptyListCache<T>
     {
         internal static readonly List<T> Instance = new(0);
+    }
+
+    private static class ConsumedListPool<T>
+    {
+        internal static readonly ConcurrentBag<List<T>> Pool = new();
+    }
+
+    private const int RetainedConsumedListCapacity = 1024;
+
+    private static List<T> RentConsumedList<T>(int minCapacity = 0)
+    {
+        if (!ConsumedListPool<T>.Pool.TryTake(out var list))
+            return minCapacity > 0 ? new List<T>(minCapacity) : new List<T>();
+
+        if (list.Capacity < minCapacity)
+            list.Capacity = minCapacity;
+
+        return list;
+    }
+
+    public static void ReleaseConsumedList<T>(List<T>? list)
+    {
+        if (list == null || ReferenceEquals(list, EmptyListCache<T>.Instance))
+            return;
+
+        list.Clear();
+        if (list.Capacity > RetainedConsumedListCapacity)
+            list = new List<T>(RetainedConsumedListCapacity);
+
+        ConsumedListPool<T>.Pool.Add(list);
     }
 
     public bool TryGetRemote(out int remoteId, out double rx, out double ry)
@@ -35,7 +66,7 @@ public sealed partial class NetNode
                 return false;
             }
 
-            snapshot = new List<RemoteSnapshot>(_remotes.Count);
+            snapshot = RentConsumedList<RemoteSnapshot>(_remotes.Count);
             foreach (var state in _remotes.Values)
             {
                 if (!state.HasRemote)
@@ -88,7 +119,7 @@ public sealed partial class NetNode
                 return false;
             }
 
-            snapshot = new List<RemoteWeaponSnapshot>();
+            snapshot = RentConsumedList<RemoteWeaponSnapshot>(_remotes.Count);
             foreach (var state in _remotes.Values)
             {
                 if (!state.HasRemote || !state.HasWeaponUpdate)
@@ -198,7 +229,7 @@ public sealed partial class NetNode
         }
 
         snapshot = pending;
-        pending = new List<T>(snapshot.Count);
+        pending = RentConsumedList<T>(snapshot.Count);
         return true;
     }
 
@@ -324,7 +355,7 @@ public sealed partial class NetNode
                 return false;
             }
 
-            snapshot = new List<RemoteHpSnapshot>(_remotes.Count);
+            snapshot = RentConsumedList<RemoteHpSnapshot>(_remotes.Count);
             foreach (var state in _remotes.Values)
             {
                 if (!state.HasRemote)
@@ -347,7 +378,7 @@ public sealed partial class NetNode
                 return false;
             }
 
-            snapshot = new List<RemoteUserSnapshot>(_remotes.Count);
+            snapshot = RentConsumedList<RemoteUserSnapshot>(_remotes.Count);
             foreach (var state in _remotes.Values)
             {
                 if (!state.HasRemote)
