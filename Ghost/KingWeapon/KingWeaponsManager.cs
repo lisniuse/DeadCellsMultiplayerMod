@@ -3,6 +3,7 @@ using dc.tool;
 using dc.tool.hero;
 using dc.tool.weap;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
+using DeadCellsMultiplayerMod.Tools;
 using ModCore.Utilities;
 using System.Diagnostics;
 
@@ -45,6 +46,7 @@ namespace DeadCellsMultiplayerMod.Ghost
 
         public void update()
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             if(hero == null) return;
             var inv = king.inventory;
             if(inventory == null && inv != null)
@@ -55,6 +57,7 @@ namespace DeadCellsMultiplayerMod.Ghost
 
             if(NeedsWeaponRebuild(item))
             {
+                var rebuildStart = RuntimeHitchWatch.Start();
                 if(weapon != null && !weapon.destroyed)
                 {
                     try { weapon.dispose(); } catch { }
@@ -67,19 +70,30 @@ namespace DeadCellsMultiplayerMod.Ghost
                 _lastShieldReleaseTimestamp = 0;
                 pendingInterrupts = 0;
                 ClearShieldAffects();
+                LogKingWeaponsStepIfSlow(
+                    "KingWeaponsManager.Rebuild",
+                    rebuildStart,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"pendingSlot={pendingSlot} permanentId={item.permanentId} weapon={weapon?.GetType().Name ?? "null"}"));
             }
 
+            var activeWeapon = weapon;
+            if(activeWeapon == null)
+                return;
+
             var game = dc.pr.Game.Class.ME;
-            if(game != null) weapon.cd.update(game.tmod);
+            if(game != null) activeWeapon.cd.update(game.tmod);
             var now = Stopwatch.GetTimestamp();
 
-            if(weapon is BaseShield)
+            if(activeWeapon is BaseShield)
             {
+                var shieldStart = RuntimeHitchWatch.Start();
                 if(pendingInterrupts > 0)
                 {
                     pendingInterrupts = 0;
                     pendingAttacks = 0;
-                    if(_shieldActive || weapon.isCharging())
+                    if(_shieldActive || activeWeapon.isCharging())
                         ReleaseShield(now);
                 }
 
@@ -96,26 +110,26 @@ namespace DeadCellsMultiplayerMod.Ghost
                     {
                         _shieldLastPulseTicks = now;
 
-                        if(!_shieldActive && weapon.isReady())
+                        if(!_shieldActive && activeWeapon.isReady())
                         {
                             ClearShieldAffects();
-                            KingWeaponSupport.SyncSource(weapon);
-                            weapon.prepare(getWeaponAttackSpeed(weapon));
+                            KingWeaponSupport.SyncSource(activeWeapon);
+                            activeWeapon.prepare(getWeaponAttackSpeed(activeWeapon));
                             _shieldActive = true;
                         }
                     }
                 }
 
-                if(_shieldActive && !weapon.destroyed)
+                if(_shieldActive && !activeWeapon.destroyed)
                 {
                     // Keep the shield logic running while we receive pulses; when pulses stop, release.
-                    if(weapon is BaseShield shield)
+                    if(activeWeapon is BaseShield shield)
                     {
                         try { shield.onShieldHolding(1.0); } catch { }
                     }
 
-                    weapon.fixedUpdate();
-                    weapon.postUpdate();
+                    activeWeapon.fixedUpdate();
+                    activeWeapon.postUpdate();
 
                     var sincePulseS = _shieldLastPulseTicks != 0
                         ? Stopwatch.GetElapsedTime(_shieldLastPulseTicks, now).TotalSeconds
@@ -126,14 +140,33 @@ namespace DeadCellsMultiplayerMod.Ghost
                     }
                 }
 
+                LogKingWeaponsStepIfSlow(
+                    "KingWeaponsManager.ShieldUpdate",
+                    shieldStart,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"shieldActive={(_shieldActive ? 1 : 0)} pendingAttacks={pendingAttacks} pendingInterrupts={pendingInterrupts} weapon={activeWeapon.GetType().Name}"));
+
+                var shieldTotalMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+                if(shieldTotalMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+                {
+                    RuntimeHitchWatch.LogSlow(
+                        ModEntry.Instance?.Logger,
+                        "KingWeaponsManager.Update",
+                        shieldTotalMs,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"pendingAttacks={pendingAttacks} pendingInterrupts={pendingInterrupts} shieldActive={(_shieldActive ? 1 : 0)} weapon={activeWeapon.GetType().Name}"));
+                }
+
                 return;
             }
 
-            if(pendingAttacks > 0 && weapon.isReady())
+            if(pendingAttacks > 0 && activeWeapon.isReady())
             {
-                KingWeaponSupport.SyncSource(weapon);
+                KingWeaponSupport.SyncSource(activeWeapon);
 
-                weapon.prepare(getWeaponAttackSpeed(weapon));
+                activeWeapon.prepare(getWeaponAttackSpeed(activeWeapon));
 
                 pendingAttacks--;
             }
@@ -141,30 +174,42 @@ namespace DeadCellsMultiplayerMod.Ghost
             if(pendingAttacks > 1)
                 pendingAttacks = 1;
 
-            if(!weapon.destroyed)
+            if(!activeWeapon.destroyed)
             {
-                if(weapon is BaseBow)
+                if(activeWeapon is BaseBow)
                 {
                     // Keep ranged recoveries (mini-arrows/boomerangs) bound to KingSkin context
                     // without re-triggering full bow fixed logic each tick.
-                    weapon.postUpdate();
+                    activeWeapon.postUpdate();
                 }
                 else
                 {
-                    weapon.fixedUpdate();
-                    weapon.postUpdate();
+                    activeWeapon.fixedUpdate();
+                    activeWeapon.postUpdate();
                 }
             }
 
             if(pendingInterrupts > 0)
             {
                 pendingInterrupts = 0;
-                if(!weapon.destroyed && weapon.isCharging())
+                if(!activeWeapon.destroyed && activeWeapon.isCharging())
                 {
-                    try { weapon.interrupt(); } catch { }
-                    try { weapon.fixedUpdate(); } catch { }
-                    try { weapon.postUpdate(); } catch { }
+                    try { activeWeapon.interrupt(); } catch { }
+                    try { activeWeapon.fixedUpdate(); } catch { }
+                    try { activeWeapon.postUpdate(); } catch { }
                 }
+            }
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if(hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    ModEntry.Instance?.Logger,
+                    "KingWeaponsManager.Update",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"pendingAttacks={pendingAttacks} pendingInterrupts={pendingInterrupts} shieldActive={(_shieldActive ? 1 : 0)} weapon={activeWeapon.GetType().Name}"));
             }
         }
 
@@ -241,6 +286,7 @@ namespace DeadCellsMultiplayerMod.Ghost
 
         private void ReleaseShield(long now)
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             if(weapon is BaseShield shieldToRelease)
             {
                 try { shieldToRelease.tryToCancel(false); } catch { }
@@ -255,6 +301,21 @@ namespace DeadCellsMultiplayerMod.Ghost
             _lastShieldReleaseTimestamp = now;
             ClearShieldAffects();
             try { king.spr?._animManager?.play("idle".AsHaxeString(), null, null)?.loop(null); } catch { }
+            LogKingWeaponsStepIfSlow(
+                "KingWeaponsManager.ReleaseShield",
+                hitchStart,
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"weapon={weapon?.GetType().Name ?? "null"}"));
+        }
+
+        private static void LogKingWeaponsStepIfSlow(string key, long stepStart, string? details)
+        {
+            var stepMs = RuntimeHitchWatch.GetElapsedMilliseconds(stepStart);
+            if(stepMs < RuntimeHitchWatch.GhostRuntimeStepSlowThresholdMs)
+                return;
+
+            RuntimeHitchWatch.LogSlow(ModEntry.Instance?.Logger, key, stepMs, details);
         }
 
         private InventItem? GetWeaponItem(int slot)

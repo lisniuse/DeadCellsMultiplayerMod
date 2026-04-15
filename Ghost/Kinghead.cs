@@ -1,3 +1,4 @@
+using System;
 using dc.en;
 using dc.haxe.ds;
 using dc.hl.types;
@@ -25,6 +26,10 @@ namespace DeadCellsMultiplayerMod.KingHead
         private bool? useLocalSpace;
         private FPoint? kingLastHeadPos;
         private bool usesCustomRemoteHead;
+        private string _cachedHeadSkeletonGroup = string.Empty;
+        private double _lastForcedPosX = double.NaN;
+        private double _lastForcedPosY = double.NaN;
+        private const double ForcedPositionEpsilon = 0.05;
 
         private Serilog.ILogger? _log;
 
@@ -250,11 +255,11 @@ namespace DeadCellsMultiplayerMod.KingHead
 
             if (sprite != null && UseLocalSpace())
             {
-                this.setForcedPos(headX - sprite.x, headY - sprite.y);
+                TrySetForcedPos(headX - sprite.x, headY - sprite.y);
             }
             else
             {
-                this.setForcedPos(headX, headY);
+                TrySetForcedPos(headX, headY);
             }
             UpdateHeadFxWithKingContext(c1);
             if (usesCustomRemoteHead)
@@ -316,7 +321,12 @@ namespace DeadCellsMultiplayerMod.KingHead
                 return false;
             }
 
-            headSkeleton = ResolveHeadSkeleton(sprite);
+            var groupName = sprite.groupName?.ToString() ?? string.Empty;
+            if (headSkeleton == null || !string.Equals(_cachedHeadSkeletonGroup, groupName, StringComparison.Ordinal))
+            {
+                headSkeleton = ResolveHeadSkeleton(sprite);
+                _cachedHeadSkeletonGroup = groupName;
+            }
             if (headSkeleton == null)
             {
                 return false;
@@ -387,6 +397,19 @@ namespace DeadCellsMultiplayerMod.KingHead
             var distWorld = global::System.Math.Abs(forced.x - heroHeadX) + global::System.Math.Abs(forced.y - heroHeadY);
             useLocalSpace = distLocal <= distWorld;
             return useLocalSpace.Value;
+        }
+
+        private void TrySetForcedPos(double x, double y)
+        {
+            if (global::System.Math.Abs(_lastForcedPosX - x) <= ForcedPositionEpsilon &&
+                global::System.Math.Abs(_lastForcedPosY - y) <= ForcedPositionEpsilon)
+            {
+                return;
+            }
+
+            this.setForcedPos(x, y);
+            _lastForcedPosX = x;
+            _lastForcedPosY = y;
         }
 
     }

@@ -239,11 +239,20 @@ public sealed partial class NetNode
                 continue;
             if (!int.TryParse(parts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxLife))
                 continue;
-            var animPayload = parts[6];
-            var type = parts.Length > 7 ? parts[7] : string.Empty;
-            var statePayload = parts.Length > 8 ? parts[8] : string.Empty;
+            var generation = 0;
+            var valueOffset = 6;
+            if (parts.Length > 7 &&
+                int.TryParse(parts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedGeneration))
+            {
+                generation = parsedGeneration;
+                valueOffset = 7;
+            }
 
-            states.Add(new MobStateSnapshot(index, x, y, dir, life, maxLife, animPayload, type, statePayload));
+            var animPayload = parts.Length > valueOffset ? parts[valueOffset] : string.Empty;
+            var type = parts.Length > valueOffset + 1 ? parts[valueOffset + 1] : string.Empty;
+            var statePayload = parts.Length > valueOffset + 2 ? parts[valueOffset + 2] : string.Empty;
+
+            states.Add(new MobStateSnapshot(index, x, y, dir, life, maxLife, animPayload, type, statePayload, generation));
         }
 
         return states;
@@ -270,9 +279,18 @@ public sealed partial class NetNode
                 continue;
             if (!int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dir))
                 continue;
-            var animPayload = parts.Length > 4 ? parts[4] : string.Empty;
+            var generation = 0;
+            var animIndex = 4;
+            if (parts.Length > 5 &&
+                int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedGeneration))
+            {
+                generation = parsedGeneration;
+                animIndex = 5;
+            }
 
-            moves.Add(new MobMoveSnapshot(index, x, y, dir, animPayload));
+            var animPayload = parts.Length > animIndex ? parts[animIndex] : string.Empty;
+
+            moves.Add(new MobMoveSnapshot(index, x, y, dir, animPayload, generation));
         }
 
         return moves;
@@ -293,11 +311,20 @@ public sealed partial class NetNode
 
             if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var index))
                 continue;
-            var skillId = parts.Length > 1 ? parts[1] : string.Empty;
-            if (!double.TryParse(parts.Length > 2 ? parts[2] : "0", NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio))
+            var generation = 0;
+            var valueOffset = 1;
+            if (parts.Length > 3 &&
+                int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedGeneration))
+            {
+                generation = parsedGeneration;
+                valueOffset = 2;
+            }
+
+            var skillId = parts.Length > valueOffset ? parts[valueOffset] : string.Empty;
+            if (!double.TryParse(parts.Length > valueOffset + 1 ? parts[valueOffset + 1] : "0", NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio))
                 ratio = 0;
 
-            charges.Add(new MobChargeSnapshot(index, skillId, ratio));
+            charges.Add(new MobChargeSnapshot(index, skillId, ratio, generation));
         }
 
         return charges;
@@ -329,8 +356,17 @@ public sealed partial class NetNode
         if (!double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
             return false;
 
-        var type = parts.Length > 5 ? parts[5] : string.Empty;
-        hit = new MobHit(parsedUserId, mobIndex, hp, x, y, type);
+        var generation = 0;
+        var typeIndex = 5;
+        if (parts.Length > 5 &&
+            int.TryParse(parts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedGeneration))
+        {
+            generation = parsedGeneration;
+            typeIndex = 6;
+        }
+
+        var type = parts.Length > typeIndex ? parts[typeIndex] : string.Empty;
+        hit = new MobHit(parsedUserId, mobIndex, hp, x, y, type, generation);
         return true;
     }
 
@@ -358,7 +394,11 @@ public sealed partial class NetNode
         if (!double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
             return false;
 
-        die = new MobDie(parsedUserId, mobIndex, x, y);
+        var generation = 0;
+        if (parts.Length > 4)
+            int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out generation);
+
+        die = new MobDie(parsedUserId, mobIndex, x, y, generation);
         return true;
     }
 
@@ -412,12 +452,16 @@ public sealed partial class NetNode
         if (parts.Length > 8)
             int.TryParse(parts[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out dir);
 
-        attack = new MobAttack(mobIndex, skillId, requiresTargetInArea, data, x, y, targetUserId, dir);
+        var generation = 0;
+        if (parts.Length > 9)
+            int.TryParse(parts[9], NumberStyles.Integer, CultureInfo.InvariantCulture, out generation);
+
+        attack = new MobAttack(mobIndex, skillId, requiresTargetInArea, data, x, y, targetUserId, dir, generation: generation);
         return true;
     }
 
     /// <summary>Parse attack event: attack|skillId|blockSec|forcedDirSec|reqTarget|data|targetUid|dir (8 parts)</summary>
-    private static bool TryParseMobAttackEvent(string ev, int index, double x, double y, int dir, string type, out MobAttack attack)
+    private static bool TryParseMobAttackEvent(string ev, int index, double x, double y, int dir, string type, int generation, out MobAttack attack)
     {
         attack = default;
         if (string.IsNullOrEmpty(ev) || !ev.StartsWith("attack|", StringComparison.Ordinal))
@@ -454,12 +498,12 @@ public sealed partial class NetNode
         if (parts.Length > 7)
             int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out attackDir);
 
-        attack = new MobAttack(index, skillId, requiresTargetInArea, data, x, y, targetUserId, attackDir != 0 ? attackDir : dir, blockSec, forcedDirSec, type ?? string.Empty);
+        attack = new MobAttack(index, skillId, requiresTargetInArea, data, x, y, targetUserId, attackDir != 0 ? attackDir : dir, blockSec, forcedDirSec, type ?? string.Empty, generation);
         return true;
     }
 
     /// <summary>Parse hit event: hit|life or hit|life|maxLife</summary>
-    private static bool TryParseMobHitEvent(string ev, int index, double x, double y, int userId, string? mobType, out MobHit hit)
+    private static bool TryParseMobHitEvent(string ev, int index, double x, double y, int userId, string? mobType, int generation, out MobHit hit)
     {
         hit = default;
         if (string.IsNullOrEmpty(ev) || !ev.StartsWith("hit|", StringComparison.Ordinal))
@@ -472,7 +516,7 @@ public sealed partial class NetNode
         if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
             return false;
 
-        hit = new MobHit(userId, index, life, x, y, mobType ?? string.Empty);
+        hit = new MobHit(userId, index, life, x, y, mobType ?? string.Empty, generation);
         return true;
     }
 
@@ -504,7 +548,16 @@ public sealed partial class NetNode
             if (!int.TryParse(baseParts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dir))
                 continue;
 
-            var type = baseParts.Length >= 5 ? string.Join(",", baseParts.Skip(4)) : string.Empty;
+            var generation = 0;
+            var typeStart = 4;
+            if (baseParts.Length >= 5 &&
+                int.TryParse(baseParts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedGeneration))
+            {
+                generation = parsedGeneration;
+                typeStart = 5;
+            }
+
+            var type = baseParts.Length > typeStart ? string.Join(",", baseParts.Skip(typeStart)) : string.Empty;
 
             var events = new List<string>();
             foreach (var ev in eventsPart.Split(EventSep, StringSplitOptions.RemoveEmptyEntries))
@@ -513,7 +566,7 @@ public sealed partial class NetNode
                     events.Add(ev);
             }
 
-            result.Add(new MobEventUpdate(index, x, y, dir, events, type));
+            result.Add(new MobEventUpdate(index, x, y, dir, events, type, generation));
         }
 
         return result;
@@ -561,7 +614,11 @@ public sealed partial class NetNode
         if (!TryParseBool(parts[3], out var isOnScreen))
             return false;
 
-        draw = new MobDraw(parsedUserId, mobIndex, isOutOfGame, isOnScreen);
+        var generation = 0;
+        if (parts.Length > 4)
+            int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out generation);
+
+        draw = new MobDraw(parsedUserId, mobIndex, isOutOfGame, isOnScreen, generation);
         return true;
     }
 

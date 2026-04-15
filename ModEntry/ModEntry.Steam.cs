@@ -1,4 +1,5 @@
 using Steamworks;
+using DeadCellsMultiplayerMod.Tools;
 
 
 namespace DeadCellsMultiplayerMod
@@ -14,7 +15,7 @@ namespace DeadCellsMultiplayerMod
                     ulong.TryParse(args[i + 1], out var lobbyId) && lobbyId > 0)
                 {
                     Instance?.Logger.Information("[NetMod][Steam] Launch parameter +connect_lobby detected lobbyId={LobbyId}", lobbyId);
-                    GameMenu.EnqueueMainThread(() => GameMenu.HandleSteamOverlayJoinRequest(lobbyId));
+                    GameMenu.EnqueueMainThreadCoalesced("steam:overlay-join", () => GameMenu.HandleSteamOverlayJoinRequest(lobbyId));
                     return;
                 }
             }
@@ -120,7 +121,7 @@ namespace DeadCellsMultiplayerMod
             s_lastOverlayJoinLobbyId = lobbyId;
             s_lastOverlayJoinTicks = nowTicks;
             Instance?.Logger.Information("[NetMod][Steam] Queueing overlay join request lobbyId={LobbyId} source={Source}", lobbyId, source);
-            GameMenu.EnqueueMainThread(() => GameMenu.HandleSteamOverlayJoinRequest(lobbyId));
+            GameMenu.EnqueueMainThreadCoalesced("steam:overlay-join", () => GameMenu.HandleSteamOverlayJoinRequest(lobbyId));
         }
 
         private static ulong TryParseLobbyIdFromConnectString(string connect)
@@ -149,9 +150,34 @@ namespace DeadCellsMultiplayerMod
         /// </summary>
         internal static void PumpSteamCallbacksForOverlay()
         {
+            var callbacksStart = RuntimeHitchWatch.Start();
             TryRunSteamCallbacks();
+            var callbacksMs = RuntimeHitchWatch.GetElapsedMilliseconds(callbacksStart);
+            if (callbacksMs >= RuntimeHitchWatch.InteractionSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Instance?.Logger,
+                    "ModEntry.TryRunSteamCallbacks",
+                    callbacksMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"steamReady={(s_steamApiReady ? 1 : 0)} pendingOverlay={(s_steamOverlayCallbackPending ? 1 : 0)}"));
+            }
+
+            var auxStart = RuntimeHitchWatch.Start();
             TryDeferredSteamOverlayCallbackRegistration();
             TryPollSteamOverlayJoinFromLaunchData();
+            var auxMs = RuntimeHitchWatch.GetElapsedMilliseconds(auxStart);
+            if (auxMs >= RuntimeHitchWatch.InteractionSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Instance?.Logger,
+                    "ModEntry.PumpSteamCallbacksForOverlay",
+                    auxMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"steamReady={(s_steamApiReady ? 1 : 0)} pendingOverlay={(s_steamOverlayCallbackPending ? 1 : 0)}"));
+            }
         }
 
         private static bool TryEnsureSteamApiInitialized(string source, bool logFailure)

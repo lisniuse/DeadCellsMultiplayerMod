@@ -33,6 +33,7 @@ using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
 using DeadCellsMultiplayerMod.MultiplayerModUI.LevelExit;
 using DeadCellsMultiplayerMod.MultiplayerModUI.Connection;
 using DeadCellsMultiplayerMod.Tools.ModLang;
+using DeadCellsMultiplayerMod.Tools;
 using DeadCellsMultiplayerMod.KingHead;
 using DeadCellsMultiplayerMod.Mobs.Levelinit;
 using dc.en.inter.door;
@@ -79,6 +80,15 @@ namespace DeadCellsMultiplayerMod
         public static string?[] clientSkins = new string?[NetNode.MaxClientSlots];
         public static string?[] clientHeadSkins = new string?[NetNode.MaxClientSlots];
         private static bool[] pendingClientHeadRecreate = new bool[NetNode.MaxClientSlots];
+        private static string?[] clientLastBodyAnims = new string?[NetNode.MaxClientSlots];
+        private static int?[] clientLastBodyAnimQueues = new int?[NetNode.MaxClientSlots];
+        private static bool?[] clientLastBodyAnimGs = new bool?[NetNode.MaxClientSlots];
+        private static string?[] clientLastHeadAnims = new string?[NetNode.MaxClientSlots];
+        private static int[] clientLastDirs = new int[NetNode.MaxClientSlots];
+        private static bool[] clientLastDownedOffsets = new bool[NetNode.MaxClientSlots];
+        private static bool[] clientHeadDirty = new bool[NetNode.MaxClientSlots];
+        private static long[] clientNextHeadFxTick = new long[NetNode.MaxClientSlots];
+        private static long[] clientNextHeadRecreateTick = new long[NetNode.MaxClientSlots];
         public static Hero me = null!;
         public static GhostHero _ghost = null!;
 
@@ -136,7 +146,6 @@ namespace DeadCellsMultiplayerMod
         private int _reviveHoldTargetId;
         private long _reviveHoldStartedTicks;
         private const double ReviveUseDistancePx = 48.0;
-        private const int ReviveInteractKey = 82; // R
         private const double ReviveAttemptCooldownSeconds = 0.2;
         private const double ReviveHoldSeconds = 0.7;
         private const double ReviveHomunculusBodyMaxDistancePx = 64.0;
@@ -180,6 +189,8 @@ namespace DeadCellsMultiplayerMod
         private readonly Dictionary<int, long> _pendingClientDisposeTicks = new();
         private const double ClientDisposeTransitionSeconds = 0.28;
         private const double PendingDoorMarkerHideMaxSeconds = 1.5;
+        private const double GhostHeadDormantUpdateSeconds = 0.20;
+        private const double GhostHeadRecreateRetrySeconds = 0.25;
 
         private static readonly HashSet<string> BossLevelIds = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -291,16 +302,21 @@ namespace DeadCellsMultiplayerMod
                 clientSkins[i] = null;
                 clientHeadSkins[i] = null;
                 pendingClientHeadRecreate[i] = false;
+                clientLastBodyAnims[i] = null;
+                clientLastBodyAnimQueues[i] = null;
+                clientLastBodyAnimGs[i] = null;
+                clientLastHeadAnims[i] = null;
+                clientLastDirs[i] = 0;
+                clientLastDownedOffsets[i] = false;
                 rLastX[i] = 0;
                 rLastY[i] = 0;
+                ResetGhostHeadRuntimeState(i);
             }
         }
 
         private static string BuildRemoteLabel(int remoteId, string? username)
         {
             var clean = string.IsNullOrWhiteSpace(username) ? "Guest" : username.Trim();
-            if (remoteId > 0)
-                return $"{clean}";
             return clean;
         }
 
@@ -500,7 +516,7 @@ namespace DeadCellsMultiplayerMod
                 ReferenceEquals(lp, me))
             {
                 SendCurrentRoomTarget(force: true);
-                GameMenu.EnqueueMainThread(() => ReceiveGhostCoords());
+                GameMenu.EnqueueMainThreadCoalesced("ghost:receive-coords", ReceiveGhostCoords);
             }
         }
 
@@ -774,6 +790,7 @@ namespace DeadCellsMultiplayerMod
         private void hook_boot_update(Hook_Boot.orig_update orig, Boot self, double dt)
         {
             orig(self, dt);
+            PumpSteamCallbacksForOverlay();
             GameMenu.ProcessMainThreadQueue();
             GameMenu.HandleTextInputClipboardShortcuts();
             _ghost?.UpdateLabels();
@@ -900,7 +917,6 @@ namespace DeadCellsMultiplayerMod
         public void hook_level_changed(Hook_Hero.orig_onLevelChanged orig, Hero self, Level oldLevel)
         {
             kingInitialized = false;
-            DeadCellsMultiplayerMod.Mobs.MobsSynchronization.MobsSynchronization.ClearTrackingForLevelChange();
             _net?.ClearMobSyncQueues();
             _pendingBossCineApplyByLevel.Clear();
             _suppressBossCineEchoByLevel.Clear();
@@ -923,16 +939,16 @@ namespace DeadCellsMultiplayerMod
             var localId = net?.id ?? 0;
             _ghost = new GhostHero(localId, game!, me, Logger, this);
             _ghost.SetLabel(me, GameMenu.Username);
-
             for (int i = 0; i < clients.Length; i++)
             {
                 DisposeClientSlot(i, clearIdentity: false);
                 rLastX[i] = 0;
                 rLastY[i] = 0;
+                ResetGhostHeadRuntimeState(i);
             }
 
             DrainRemoteCombatQueuesAfterLevelChange();
-            GameMenu.EnqueueMainThread(() => ReceiveGhostCoords());
+            GameMenu.EnqueueMainThreadCoalesced("ghost:receive-coords", ReceiveGhostCoords);
             MarkDiveNetGuardAfterSpawnOrRoomChange();
 
             _debugExplorerRevealAppliedSignature = string.Empty;
@@ -969,31 +985,105 @@ namespace DeadCellsMultiplayerMod
         public void OnFrameUpdate(double dt)
         {
             if (!_ready) return;
+            var hitchStart = RuntimeHitchWatch.Start();
+            PumpSteamCallbacksForOverlay();
             GameMenu.ProcessMainThreadQueue();
             GameMenu.TickMenu(dt);
             DetectAndSendBossCine();
             ApplyReceivedBossHeroTeleport();
             ApplyReceivedBossCine();
             SuppressRemoteBossDeathCineIfNeeded();
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.ModFrameSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Logger,
+                    "ModEntry.OnFrameUpdate",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"role={_netRole} ready={(_ready ? 1 : 0)} remoteDowned={_remoteDowned.Count} pendingDispose={_pendingClientDisposeTicks.Count}"));
+            }
         }
         void IOnHeroUpdate.OnHeroUpdate(double dt)
         {
             if (me == null) return;
+            var hitchStart = RuntimeHitchWatch.Start();
+            var stepStart = RuntimeHitchWatch.Start();
             ApplyDebugHeroRuntimeOptions();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.ApplyDebugHeroRuntimeOptions", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             TryRecoverMissedFakeDeathFromLife();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.TryRecoverMissedFakeDeathFromLife", stepStart, null);
+
             if (_netRole == NetRole.None || _net == null)
                 return;
+
+            stepStart = RuntimeHitchWatch.Start();
             TrySendCurrentDiveSkillInfoSnapshot();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.TrySendCurrentDiveSkillInfoSnapshot", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             SendCurrentRoomTarget(force: false);
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.SendCurrentRoomTarget", stepStart, null);
+
             if (!_localFakeDead)
+            {
+                stepStart = RuntimeHitchWatch.Start();
                 SendHeroCoords();
+                LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.SendHeroCoords", stepStart, null);
+            }
+
+            stepStart = RuntimeHitchWatch.Start();
             ReceiveGhostCoords();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.ReceiveGhostCoords", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             UpdateFakeDeathFlow(dt);
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.UpdateFakeDeathFlow", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             MaintainPostRevivePositionLock();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.MaintainPostRevivePositionLock", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             ReceiveGhostWeapons();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.ReceiveGhostWeapons", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             ReceiveGhostAttacks();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.ReceiveGhostAttacks", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             UpdateGhostWeapons();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.UpdateGhostWeapons", stepStart, null);
+
+            stepStart = RuntimeHitchWatch.Start();
             UpdateGhostHeads();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.UpdateGhostHeads", stepStart, null);
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.ModHeroSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Logger,
+                    "ModEntry.OnHeroUpdate",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"role={_netRole} localFakeDead={(_localFakeDead ? 1 : 0)} remoteDowned={_remoteDowned.Count} clients={clients.Length}"));
+            }
+        }
+
+        private void LogHeroUpdateStepIfSlow(string key, long stepStart, string? details)
+        {
+            var stepMs = RuntimeHitchWatch.GetElapsedMilliseconds(stepStart);
+            if (stepMs < RuntimeHitchWatch.ModHeroStepSlowThresholdMs)
+                return;
+
+            RuntimeHitchWatch.LogSlow(Logger, key, stepMs, details);
         }
 
 

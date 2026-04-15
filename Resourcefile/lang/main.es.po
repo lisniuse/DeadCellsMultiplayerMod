@@ -19,6 +19,14 @@ msgstr "DeadCellsMultiplayerMod"
 msgid "Lobby menu"
 msgstr "Menú del lobby"
 
+#: ConnectionUI.cs
+msgid "Lobby code"
+msgstr "Código del lobby"
+
+#: GameMenu.MultiplayerSaveSlots.cs
+msgid "Save: Slot {0}"
+msgstr "Guardar: ranura {0}"
+
 msgid "{0} connected to the server."
 msgstr "{0} se conectó al servidor."
 
@@ -142,6 +150,18 @@ msgstr "Multiplicador de PV de jefes"
 #: SettingsUI.cs
 msgid "Sync vertical position"
 msgstr "Sincronizar posición vertical"
+
+#: SettingsUI.cs
+msgid "Mobs settings"
+msgstr "Ajustes de enemigos"
+
+#: SettingsUI.cs
+msgid "Debug"
+msgstr "Depuración"
+
+#: SettingsUI.cs
+msgid "Applies host vertical position to gravity mobs. Off: X-only for walkers; flying mobs still sync Y. On: can reduce desync but may snap ground mobs."
+msgstr "Aplica la posición vertical del anfitrión a los enemigos con gravedad. Desactivado: solo X para los que caminan; los voladores siguen sincronizando Y. Activado: puede reducir el desfase pero provocar saltos en enemigos en el suelo."
 
 #: SettingsUI.cs
 msgid "Module: language"

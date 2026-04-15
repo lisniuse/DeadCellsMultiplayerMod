@@ -40,7 +40,7 @@ public sealed partial class NetNode
         while (!ct.IsCancellationRequested && attempt < maxAttempts)
         {
             attempt++;
-            GameMenu.EnqueueMainThread(() => GameMenu.NotifyClientConnectAttempt(attempt));
+            GameMenu.EnqueueMainThreadCoalesced("net:client-connect-attempt", () => GameMenu.NotifyClientConnectAttempt(attempt));
             try
             {
                 _log.Information("[NetNode] Client connecting to {dest}", _destEp);
@@ -83,7 +83,7 @@ public sealed partial class NetNode
                 _log.Warning("[NetNode] Client connect error: {msg}", ex.Message);
                 if (attempt >= maxAttempts)
                 {
-                    GameMenu.EnqueueMainThread(GameMenu.NotifyClientConnectFailed);
+                    GameMenu.EnqueueMainThreadCoalesced("net:client-connect-failed", GameMenu.NotifyClientConnectFailed);
                     break;
                 }
                 await Task.Delay(3000, ct).ConfigureAwait(false);
@@ -167,7 +167,7 @@ public sealed partial class NetNode
                         await SendLineToClientSafe(connection, $"LGRAPH|{cachedLevelGraphPayload}\n").ConfigureAwait(false);
                 }
 
-                GameMenu.EnqueueMainThread(() =>
+                GameMenu.EnqueueMainThreadCoalesced("net:remote-connected", () =>
                 {
                     GameMenu.NetRef = this;
                     GameMenu.SetRole(_role);
@@ -368,7 +368,7 @@ public sealed partial class NetNode
                 stillEmpty = _clients.Count == 0;
             }
             if (stillEmpty)
-                GameMenu.EnqueueMainThread(() => GameMenu.NotifyRemoteDisconnected(_role));
+                GameMenu.EnqueueMainThreadCoalesced("net:remote-disconnected", () => GameMenu.NotifyRemoteDisconnected(_role));
         }
     }
 

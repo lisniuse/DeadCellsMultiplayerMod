@@ -256,6 +256,7 @@ public sealed partial class NetNode : IDisposable
     public readonly struct MobStateSnapshot
     {
         public readonly int Index;
+        public readonly int Generation;
         public readonly double X;
         public readonly double Y;
         public readonly int Dir;
@@ -265,9 +266,10 @@ public sealed partial class NetNode : IDisposable
         public readonly string Type;
         public readonly string StatePayload;
 
-        public MobStateSnapshot(int index, double x, double y, int dir, int life, int maxLife, string animPayload, string type, string statePayload = "")
+        public MobStateSnapshot(int index, double x, double y, int dir, int life, int maxLife, string animPayload, string type, string statePayload = "", int generation = 0)
         {
             Index = index;
+            Generation = generation;
             X = x;
             Y = y;
             Dir = dir;
@@ -282,14 +284,16 @@ public sealed partial class NetNode : IDisposable
     public readonly struct MobMoveSnapshot
     {
         public readonly int Index;
+        public readonly int Generation;
         public readonly double X;
         public readonly double Y;
         public readonly int Dir;
         public readonly string AnimPayload;
 
-        public MobMoveSnapshot(int index, double x, double y, int dir, string animPayload)
+        public MobMoveSnapshot(int index, double x, double y, int dir, string animPayload, int generation = 0)
         {
             Index = index;
+            Generation = generation;
             X = x;
             Y = y;
             Dir = dir;
@@ -300,12 +304,14 @@ public sealed partial class NetNode : IDisposable
     public readonly struct MobChargeSnapshot
     {
         public readonly int Index;
+        public readonly int Generation;
         public readonly string SkillId;
         public readonly double Ratio;
 
-        public MobChargeSnapshot(int index, string skillId, double ratio)
+        public MobChargeSnapshot(int index, string skillId, double ratio, int generation = 0)
         {
             Index = index;
+            Generation = generation;
             SkillId = skillId ?? string.Empty;
             Ratio = ratio;
         }
@@ -315,16 +321,18 @@ public sealed partial class NetNode : IDisposable
     {
         public readonly int UserId;
         public readonly int MobIndex;
+        public readonly int Generation;
         public readonly int Hp;
         public readonly double X;
         public readonly double Y;
         /// <summary>Mob type signature from MOBEVENT row (for host hit routing when syncId was rebound to a nearby same-type mob).</summary>
         public readonly string Type;
 
-        public MobHit(int userId, int mobIndex, int hp, double x, double y, string type = "")
+        public MobHit(int userId, int mobIndex, int hp, double x, double y, string type = "", int generation = 0)
         {
             UserId = userId;
             MobIndex = mobIndex;
+            Generation = generation;
             Hp = hp;
             X = x;
             Y = y;
@@ -336,13 +344,15 @@ public sealed partial class NetNode : IDisposable
     {
         public readonly int UserId;
         public readonly int MobIndex;
+        public readonly int Generation;
         public readonly double X;
         public readonly double Y;
 
-        public MobDie(int userId, int mobIndex, double x, double y)
+        public MobDie(int userId, int mobIndex, double x, double y, int generation = 0)
         {
             UserId = userId;
             MobIndex = mobIndex;
+            Generation = generation;
             X = x;
             Y = y;
         }
@@ -351,6 +361,7 @@ public sealed partial class NetNode : IDisposable
     public readonly struct MobAttack
     {
         public readonly int Index;
+        public readonly int Generation;
         public readonly string SkillId;
         public readonly bool RequiresTargetInArea;
         public readonly int? Data;
@@ -365,9 +376,10 @@ public sealed partial class NetNode : IDisposable
         /// <summary>Mob type for rebind when syncId mapping is missing. From MOBEVENT.</summary>
         public readonly string Type;
 
-        public MobAttack(int index, string skillId, bool requiresTargetInArea, int? data, double x, double y, int targetUserId, int dir = 0, double blockSeconds = 0, double forcedDirSeconds = 0, string type = "")
+        public MobAttack(int index, string skillId, bool requiresTargetInArea, int? data, double x, double y, int targetUserId, int dir = 0, double blockSeconds = 0, double forcedDirSeconds = 0, string type = "", int generation = 0)
         {
             Index = index;
+            Generation = generation;
             SkillId = skillId ?? string.Empty;
             RequiresTargetInArea = requiresTargetInArea;
             Data = data;
@@ -385,6 +397,7 @@ public sealed partial class NetNode : IDisposable
     public readonly struct MobEventUpdate
     {
         public readonly int Index;
+        public readonly int Generation;
         public readonly double X;
         public readonly double Y;
         public readonly int Dir;
@@ -392,9 +405,10 @@ public sealed partial class NetNode : IDisposable
         /// <summary>Mob type for rebind when syncId mapping is missing. Optional.</summary>
         public readonly string Type;
 
-        public MobEventUpdate(int index, double x, double y, int dir, IReadOnlyList<string> events, string type = "")
+        public MobEventUpdate(int index, double x, double y, int dir, IReadOnlyList<string> events, string type = "", int generation = 0)
         {
             Index = index;
+            Generation = generation;
             X = x;
             Y = y;
             Dir = dir;
@@ -407,13 +421,15 @@ public sealed partial class NetNode : IDisposable
     {
         public readonly int UserId;
         public readonly int MobIndex;
+        public readonly int Generation;
         public readonly bool IsOutOfGame;
         public readonly bool IsOnScreen;
 
-        public MobDraw(int userId, int mobIndex, bool isOutOfGame, bool isOnScreen)
+        public MobDraw(int userId, int mobIndex, bool isOutOfGame, bool isOnScreen, int generation = 0)
         {
             UserId = userId;
             MobIndex = mobIndex;
+            Generation = generation;
             IsOutOfGame = isOutOfGame;
             IsOnScreen = isOnScreen;
         }
@@ -529,8 +545,8 @@ public sealed partial class NetNode : IDisposable
     private readonly Dictionary<int, SteamClientConnection> _steamClients = new();
     private readonly Dictionary<ulong, int> _steamClientIdsBySteam = new();
     private readonly Dictionary<int, RemoteState> _remotes = new();
-    private readonly List<RemoteAttack> _pendingAttacks = new();
-    private readonly List<RemoteChatMessage> _pendingChatMessages = new();
+    private List<RemoteAttack> _pendingAttacks = new();
+    private List<RemoteChatMessage> _pendingChatMessages = new();
     private List<MobStateSnapshot> _pendingMobStates = new();
     private List<MobMoveSnapshot> _pendingMobMoves = new();
     private List<MobChargeSnapshot> _pendingMobCharges = new();
@@ -538,20 +554,20 @@ public sealed partial class NetNode : IDisposable
     private List<MobDie> _pendingMobDies = new();
     private List<MobAttack> _pendingMobAttacks = new();
     private List<MobDraw> _pendingMobDraws = new();
-    private readonly List<ExitReadyState> _pendingExitReadyStates = new();
-    private readonly List<PlayerDownState> _pendingPlayerDownStates = new();
-    private readonly List<PlayerReviveRequest> _pendingPlayerReviveRequests = new();
-    private readonly List<string> _pendingBossCineLevelIds = new();
-    private readonly List<BossHeroTeleportEvent> _pendingBossHeroTeleports = new();
-    private readonly List<InterDoorEvent> _pendingInterDoorEvents = new();
-    private readonly List<InterElevatorEvent> _pendingInterElevatorEvents = new();
-    private readonly List<InterPressurePlateEvent> _pendingInterPressurePlateEvents = new();
-    private readonly List<InterTreasureChestEvent> _pendingInterTreasureChestEvents = new();
-    private readonly List<InterVineLadderEvent> _pendingInterVineLadderEvents = new();
-    private readonly List<InterTeleportEvent> _pendingInterTeleportEvents = new();
-    private readonly List<InterBreakableGroundEvent> _pendingInterBreakableGroundEvents = new();
-    private readonly List<InterBossRuneUpdateCellsEvent> _pendingBossRuneUpdateCells = new();
-    private readonly List<InterPortalEvent> _pendingInterPortalEvents = new();
+    private List<ExitReadyState> _pendingExitReadyStates = new();
+    private List<PlayerDownState> _pendingPlayerDownStates = new();
+    private List<PlayerReviveRequest> _pendingPlayerReviveRequests = new();
+    private List<string> _pendingBossCineLevelIds = new();
+    private List<BossHeroTeleportEvent> _pendingBossHeroTeleports = new();
+    private List<InterDoorEvent> _pendingInterDoorEvents = new();
+    private List<InterElevatorEvent> _pendingInterElevatorEvents = new();
+    private List<InterPressurePlateEvent> _pendingInterPressurePlateEvents = new();
+    private List<InterTreasureChestEvent> _pendingInterTreasureChestEvents = new();
+    private List<InterVineLadderEvent> _pendingInterVineLadderEvents = new();
+    private List<InterTeleportEvent> _pendingInterTeleportEvents = new();
+    private List<InterBreakableGroundEvent> _pendingInterBreakableGroundEvents = new();
+    private List<InterBossRuneUpdateCellsEvent> _pendingBossRuneUpdateCells = new();
+    private List<InterPortalEvent> _pendingInterPortalEvents = new();
     private int _primaryRemoteId;
 
     private readonly IPEndPoint _bindEp;   // host bind

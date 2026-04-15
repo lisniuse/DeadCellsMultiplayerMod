@@ -44,7 +44,7 @@ public sealed partial class NetNode
         {
             CloseClientConnection();
         }
-        GameMenu.EnqueueMainThread(() => GameMenu.NotifyRemoteDisconnected(_role));
+        GameMenu.EnqueueMainThreadCoalesced("net:remote-disconnected", () => GameMenu.NotifyRemoteDisconnected(_role));
     }
 
     private RemoteState GetOrCreateRemoteLocked(int id)

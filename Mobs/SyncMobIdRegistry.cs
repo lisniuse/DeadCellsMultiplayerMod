@@ -8,6 +8,34 @@ namespace DeadCellsMultiplayerMod.Mobs.Levelinit;
 
 internal static class SyncMobIdRegistry
 {
+    internal readonly struct DebugMapping
+    {
+        public readonly int SyncId;
+        public readonly Mob Mob;
+
+        public DebugMapping(int syncId, Mob mob)
+        {
+            SyncId = syncId;
+            Mob = mob;
+        }
+    }
+
+    internal readonly struct Stats
+    {
+        public readonly int Count;
+        public readonly int MinSyncId;
+        public readonly int MaxSyncId;
+        public readonly int NextRuntimeSyncId;
+
+        public Stats(int count, int minSyncId, int maxSyncId, int nextRuntimeSyncId)
+        {
+            Count = count;
+            MinSyncId = minSyncId;
+            MaxSyncId = maxSyncId;
+            NextRuntimeSyncId = nextRuntimeSyncId;
+        }
+    }
+
     private static readonly object Sync = new();
     private static readonly Dictionary<int, Mob> IdToMob = new();
     private static readonly Dictionary<Mob, int> MobToId = new(ReferenceEqualityComparer.Instance);
@@ -151,6 +179,50 @@ internal static class SyncMobIdRegistry
                 MobToId.Remove(mob);
                 IdToMob.Remove(syncId);
             }
+        }
+    }
+
+    public static Stats GetStats()
+    {
+        lock (Sync)
+        {
+            if (IdToMob.Count <= 0)
+                return new Stats(0, -1, -1, nextRuntimeSyncId);
+
+            var minSyncId = int.MaxValue;
+            var maxSyncId = int.MinValue;
+            foreach (var syncId in IdToMob.Keys)
+            {
+                if (syncId < minSyncId)
+                    minSyncId = syncId;
+                if (syncId > maxSyncId)
+                    maxSyncId = syncId;
+            }
+
+            if (minSyncId == int.MaxValue)
+            {
+                minSyncId = -1;
+                maxSyncId = -1;
+            }
+
+            return new Stats(IdToMob.Count, minSyncId, maxSyncId, nextRuntimeSyncId);
+        }
+    }
+
+    public static List<DebugMapping> GetDebugMappings()
+    {
+        lock (Sync)
+        {
+            var snapshot = new List<DebugMapping>(IdToMob.Count);
+            foreach (var pair in IdToMob)
+            {
+                if (pair.Value == null)
+                    continue;
+
+                snapshot.Add(new DebugMapping(pair.Key, pair.Value));
+            }
+
+            return snapshot;
         }
     }
 

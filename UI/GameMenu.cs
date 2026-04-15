@@ -1,11 +1,14 @@
 using System.Runtime.InteropServices;
 using System.Collections.Concurrent;
+using System.Globalization;
+using System.Reflection;
 using dc.pr;
 using dc.ui;
 using Newtonsoft.Json;
 using Serilog;
 using DeadCellsMultiplayerMod.MultiplayerModUI.Connection;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
+using DeadCellsMultiplayerMod.Tools;
 using ModCore.Modules;
 
 
@@ -21,7 +24,32 @@ namespace DeadCellsMultiplayerMod
         private static int? _remoteSeed;
         private const int MaxSeed = 999_999;
         public static NetNode? NetRef { get; set; }
-        private static readonly ConcurrentQueue<Action> _mainThreadQueue = new();
+        private readonly struct MainThreadWorkItem
+        {
+            public readonly Action? Action;
+            public readonly string? CoalesceKey;
+
+            public MainThreadWorkItem(Action action)
+            {
+                Action = action;
+                CoalesceKey = null;
+            }
+
+            public MainThreadWorkItem(string coalesceKey)
+            {
+                Action = null;
+                CoalesceKey = coalesceKey;
+            }
+        }
+
+        private static readonly ConcurrentQueue<MainThreadWorkItem> _mainThreadQueue = new();
+        private static readonly ConcurrentDictionary<MethodInfo, string> _mainThreadActionLabelCache = new();
+        private static readonly object MainThreadCoalesceSync = new();
+        private static readonly Dictionary<string, Action> _coalescedMainThreadActions = new(StringComparer.Ordinal);
+        private static readonly HashSet<string> _pendingCoalescedMainThreadKeys = new(StringComparer.Ordinal);
+        private static int _mainThreadQueueDepth;
+        private const int MainThreadQueueMaxActionsPerPump = 64;
+        private const double MainThreadQueueBudgetMs = 4.0;
 
         private static bool _menuHooksAttached;
         private static bool _addMenuHookRegistered;
@@ -157,6 +185,12 @@ namespace DeadCellsMultiplayerMod
                 _steamLobbyId = 0;
                 _steamLobbyCode = string.Empty;
                 _steamHostSteamId = 0UL;
+                _mainThreadQueueDepth = _mainThreadQueue.Count;
+                lock (MainThreadCoalesceSync)
+                {
+                    _coalescedMainThreadActions.Clear();
+                    _pendingCoalescedMainThreadKeys.Clear();
+                }
             }
 
             InitializeMenuUiHooks();
@@ -165,14 +199,66 @@ namespace DeadCellsMultiplayerMod
         internal static void EnqueueMainThread(Action action)
         {
             if (action == null) return;
-            _mainThreadQueue.Enqueue(action);
+            _mainThreadQueue.Enqueue(new MainThreadWorkItem(action));
+            Interlocked.Increment(ref _mainThreadQueueDepth);
+        }
+
+        internal static void EnqueueMainThreadCoalesced(string coalesceKey, Action action)
+        {
+            if (action == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(coalesceKey))
+            {
+                EnqueueMainThread(action);
+                return;
+            }
+
+            var shouldEnqueue = false;
+            lock (MainThreadCoalesceSync)
+            {
+                _coalescedMainThreadActions[coalesceKey] = action;
+                if (_pendingCoalescedMainThreadKeys.Add(coalesceKey))
+                    shouldEnqueue = true;
+            }
+
+            if (!shouldEnqueue)
+                return;
+
+            _mainThreadQueue.Enqueue(new MainThreadWorkItem(coalesceKey));
+            Interlocked.Increment(ref _mainThreadQueueDepth);
         }
 
         internal static void ProcessMainThreadQueue()
         {
-            ModEntry.PumpSteamCallbacksForOverlay();
-            while (_mainThreadQueue.TryDequeue(out var action))
+            var hitchStart = RuntimeHitchWatch.Start();
+            var perfEnabled = RuntimeHitchWatch.Enabled;
+            var startDepth = Volatile.Read(ref _mainThreadQueueDepth);
+            var processed = 0;
+            var slowActions = 0;
+            var maxActionMs = 0.0;
+            var maxActionLabel = string.Empty;
+            var actionsStart = RuntimeHitchWatch.Start();
+            while (_mainThreadQueue.TryDequeue(out var workItem))
             {
+                Interlocked.Decrement(ref _mainThreadQueueDepth);
+                Action? action = workItem.Action;
+                var actionLabel = workItem.CoalesceKey;
+                if (actionLabel != null)
+                {
+                    lock (MainThreadCoalesceSync)
+                    {
+                        _pendingCoalescedMainThreadKeys.Remove(actionLabel);
+                        _coalescedMainThreadActions.TryGetValue(actionLabel, out action);
+                        _coalescedMainThreadActions.Remove(actionLabel);
+                    }
+                }
+
+                if (action == null)
+                    continue;
+
+                processed++;
+                var actionStart = perfEnabled ? RuntimeHitchWatch.Start() : 0;
                 try
                 {
                     action();
@@ -181,7 +267,88 @@ namespace DeadCellsMultiplayerMod
                 {
                     _log?.Warning("[NetMod] Main thread task failed: {Message}", ex.Message);
                 }
+                finally
+                {
+                    if (perfEnabled)
+                    {
+                        var actionMs = RuntimeHitchWatch.GetElapsedMilliseconds(actionStart);
+                        if (actionMs > maxActionMs)
+                        {
+                            actionLabel ??= DescribeMainThreadAction(action);
+                            maxActionMs = actionMs;
+                            maxActionLabel = actionLabel;
+                        }
+
+                        if (actionMs >= RuntimeHitchWatch.MainThreadQueueActionSlowThresholdMs)
+                        {
+                            slowActions++;
+                            actionLabel ??= DescribeMainThreadAction(action);
+                            RuntimeHitchWatch.LogSlow(
+                                _log,
+                                $"GameMenu.MainThreadQueueAction:{actionLabel}",
+                                actionMs,
+                                string.Create(
+                                    CultureInfo.InvariantCulture,
+                                    $"action={actionLabel} processed={processed} startDepth={startDepth}"));
+                        }
+                    }
+                }
+
+                if (processed >= MainThreadQueueMaxActionsPerPump)
+                    break;
+                if (RuntimeHitchWatch.GetElapsedMilliseconds(actionsStart) >= MainThreadQueueBudgetMs)
+                    break;
             }
+            var actionsMs = RuntimeHitchWatch.GetElapsedMilliseconds(actionsStart);
+
+            var remainingDepth = Volatile.Read(ref _mainThreadQueueDepth);
+            var observedDepth = System.Math.Max(startDepth, remainingDepth);
+            if (perfEnabled && observedDepth >= RuntimeHitchWatch.MainThreadQueueDepthThreshold)
+            {
+                RuntimeHitchWatch.LogCount(
+                    _log,
+                    "GameMenu.MainThreadQueueDepth",
+                    observedDepth,
+                    RuntimeHitchWatch.MainThreadQueueDepthThreshold,
+                    string.Create(CultureInfo.InvariantCulture, $"processed={processed} remaining={remainingDepth}"));
+            }
+
+            if (actionsMs >= RuntimeHitchWatch.MainThreadQueueActionsSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    _log,
+                    "GameMenu.ExecuteMainThreadActions",
+                    actionsMs,
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"processed={processed} slowActions={slowActions} maxAction={maxActionLabel} maxMs={maxActionMs:0.00} remaining={remainingDepth}"));
+            }
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.MainThreadQueueSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    _log,
+                    "GameMenu.ProcessMainThreadQueue",
+                    hitchMs,
+                    string.Create(CultureInfo.InvariantCulture, $"processed={processed} startDepth={startDepth} remaining={remainingDepth}"));
+            }
+        }
+
+        private static string DescribeMainThreadAction(Action? action)
+        {
+            if (action == null)
+                return "null";
+
+            var method = action.Method;
+            return _mainThreadActionLabelCache.GetOrAdd(method, static m =>
+            {
+                var declaringType = m.DeclaringType?.FullName;
+                if (!string.IsNullOrWhiteSpace(declaringType))
+                    return $"{declaringType}.{m.Name}";
+
+                return m.Name;
+            });
         }
 
         public static void MarkInRun()

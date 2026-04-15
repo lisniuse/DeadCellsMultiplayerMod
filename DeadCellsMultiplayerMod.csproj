@@ -7,7 +7,8 @@
     <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
     <SupportedOSPlatform>Windows</SupportedOSPlatform>
     <NoWarn>$(NoWarn);CA1416;CS0414;CS9107</NoWarn>
-    <Version>0.3.1</Version>
+    <!-- don't change this version -->
+    <Version>0.3.2</Version> 
     <ModType>mod</ModType>
     <ModMain>DeadCellsMultiplayerMod.ModEntry</ModMain>
     <AutoInstallMod Condition="'$(Configuration)' == 'Debug'">true</AutoInstallMod>
@@ -16,7 +17,7 @@
 
     <SteamApi64HintPath Condition="'$(SteamApi64HintPath)' == '' and '$(DCCM_MDK_ROOT)' != ''">$(DCCM_MDK_ROOT)\..\native\win-x64\steam_api64.dll</SteamApi64HintPath>
   </PropertyGroup>
-
+  
   <ItemGroup>
     <PackageReference Include="DeadCellsCoreModding.MDK" Version="1.0.1" />
     <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.3" />
@@ -36,7 +37,9 @@
   <PropertyGroup>
     <GenerateSinglePakFile>true</GenerateSinglePakFile>
   </PropertyGroup>
-
+  <PropertyGroup>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
   <ItemGroup>
     <PackAssets Include="Resourcefile\**\*" RootInPak="DeadCellsMultiplayerModLang" />
   </ItemGroup>

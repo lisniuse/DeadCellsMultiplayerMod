@@ -9,6 +9,7 @@ using dc.pr;
 using dc.ui;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
+using DeadCellsMultiplayerMod.Tools;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game.Hero;
@@ -25,8 +26,13 @@ public class LevelExitSync :
     private sealed class DoorVisual
     {
         public Entity? Door;
+        public string DoorKey = string.Empty;
         public Graphics? Circle;
         public dc.h2d.Text? Counter;
+        public bool? LastActive;
+        public int LastTextWidth = -1;
+        public int LastReadyCount = -1;
+        public int LastExpectedCount = -1;
     }
 
     private sealed class PlayerExitState
@@ -58,7 +64,13 @@ public class LevelExitSync :
     private readonly Dictionary<string, DoorVisual> _doorVisuals = new(StringComparer.Ordinal);
     private readonly Dictionary<int, PlayerExitState> _playerStates = new();
     private readonly HashSet<int> _activePlayerIds = new();
+    private readonly HashSet<int> _activePlayerScratchIds = new();
+    private readonly Dictionary<string, int> _readyPlayerCounts = new(StringComparer.Ordinal);
+    private readonly List<int> _stalePlayerIds = new();
+    private readonly List<string> _staleDoorVisualKeys = new();
+    private readonly Dictionary<string, Entity> _exitTargetsByDoorKey = new(StringComparer.Ordinal);
     private Pointer? _exitPointer;
+    private string _exitPointerDoorKey = string.Empty;
 
     private Level? _lastLevel;
     private string _localDoorKey = string.Empty;
@@ -68,11 +80,38 @@ public class LevelExitSync :
     private bool _localInsideCircle;
     private bool _localDoorOutOfGame;
     private bool _localDoorOnScreen;
-    private string _lastSentStateSignature = string.Empty;
+    private bool _hasLastSentState;
+    private int _lastSentDoorCx;
+    private int _lastSentDoorCy;
+    private byte _lastSentStateFlags;
     private long _lastLocalStateSendTick;
     private bool _suppressDoorActivateHook;
     private string _transitionDoorKey = string.Empty;
     private bool _timerPausedByExit;
+
+    /// <summary>Exit/portal/boss-door entities only — avoids scanning <c>level.entities</c> every hero frame.</summary>
+    private readonly List<Entity?> _exitTargetCandidates = new();
+
+    private Level? _exitCandidatesLevel;
+    private int _exitTargetCandidatesVersion;
+    private Level? _nearestExitCacheLevel;
+    private bool _nearestExitCacheHasValue;
+    private double _nearestExitCacheHeroX = double.NaN;
+    private double _nearestExitCacheHeroY = double.NaN;
+    private bool _nearestExitCacheInsideCircle;
+    private int _nearestExitCacheCandidatesVersion = -1;
+    private Entity? _nearestExitCacheTarget;
+    private bool _readyStateCacheDirty = true;
+    private bool _watchedDoorCacheDirty = true;
+    private bool _doorVisualRefreshDirty = true;
+    private bool _exitPointerDirty = true;
+    private int _cachedExpectedPlayerCount = 1;
+    private string _cachedWatchedDoorKey = string.Empty;
+    private int _cachedDownedSignature;
+    private bool _hasCachedDownedSignature;
+
+    private const double NearestExitCacheReuseDistancePx = 18.0;
+    private const double NearestExitCacheReuseDistanceSq = NearestExitCacheReuseDistancePx * NearestExitCacheReuseDistancePx;
 
     public LevelExitSync(ModEntry entry)
     {
@@ -87,14 +126,15 @@ public class LevelExitSync :
         Hook_Exit.onActivate += Hook_Exit_onActivate;
         Hook_Portal.onActivate += Hook_Portal_onActivate;
         Hook_BossRushDoor.onActivate += Hook_BossRushDoor_onActivate;
+        Hook_Level.registerEntity += Hook_Level_registerEntity;
+        Hook_Level.unregisterEntity += Hook_Level_unregisterEntity;
+        Hook_Level.onDispose += Hook_Level_onDispose;
     }
 
     private void Hook_Exit_postUpdate(Hook_Exit.orig_postUpdate orig, Exit self)
     {
         orig(self);
-
-        var visual = EnsureDoorVisual(self);
-        UpdateDoorVisual(visual);
+        EnsureDoorVisual(self);
     }
 
     private void Hook_Exit_onActivate(Hook_Exit.orig_onActivate orig, Exit self, Hero by, bool inf)
@@ -118,6 +158,32 @@ public class LevelExitSync :
             by,
             () => orig(self, by, cine),
             target => !SafeRead(() => target.locked, true));
+    }
+
+    private void Hook_Level_registerEntity(Hook_Level.orig_registerEntity orig, Level self, Entity clid)
+    {
+        orig(self, clid);
+        TryTrackExitTargetCandidate(self, clid);
+    }
+
+    private void Hook_Level_unregisterEntity(Hook_Level.orig_unregisterEntity orig, Level self, Entity clid)
+    {
+        TryUntrackExitTargetCandidate(self, clid);
+        orig(self, clid);
+    }
+
+    private void Hook_Level_onDispose(Hook_Level.orig_onDispose orig, Level self)
+    {
+        if (ReferenceEquals(_exitCandidatesLevel, self))
+        {
+            _exitCandidatesLevel = null;
+            _exitTargetCandidates.Clear();
+            _exitTargetsByDoorKey.Clear();
+            InvalidateNearestExitCache();
+            _exitPointerDirty = true;
+        }
+
+        orig(self);
     }
 
     private void HandleExitTargetActivate<T>(T target, Hero by, Action origActivate, Func<T, bool>? canCoordinate)
@@ -189,6 +255,8 @@ public class LevelExitSync :
 
     void IOnHeroUpdate.OnHeroUpdate(double dt)
     {
+        var hitchStart = RuntimeHitchWatch.Start();
+        long stepStart;
         var hero = ModEntry.me;
         var net = GameMenu.NetRef;
         if (hero == null || net == null || !net.IsAlive || net.id <= 0)
@@ -201,43 +269,91 @@ public class LevelExitSync :
 
         var currentLevel = hero._level;
         if (!ReferenceEquals(_lastLevel, currentLevel))
+        {
+            stepStart = RuntimeHitchWatch.Start();
             ResetLevelState(currentLevel);
+            LogLevelExitStepIfSlow(
+                "LevelExitSync.ResetLevelState",
+                stepStart,
+                string.Create(CultureInfo.InvariantCulture, $"visuals={_doorVisuals.Count} players={_playerStates.Count}"));
+        }
 
-        ConsumeIncomingExitReadyStates(net);
-        RefreshActivePlayers(net);
-        PrunePlayerStates(net.id);
+        stepStart = RuntimeHitchWatch.Start();
+        var remoteStatesChanged = ConsumeIncomingExitReadyStates(net);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.ConsumeIncomingExitReadyStates",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"players={_playerStates.Count}"));
+        if (remoteStatesChanged)
+            MarkExitUiStateDirty();
+
+        stepStart = RuntimeHitchWatch.Start();
+        var activePlayersChanged = RefreshActivePlayers(net);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.RefreshActivePlayers",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"activePlayers={_activePlayerIds.Count}"));
+        if (activePlayersChanged)
+            MarkExitUiStateDirty();
+
+        stepStart = RuntimeHitchWatch.Start();
+        var playerStatesPruned = PrunePlayerStates(net.id);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.PrunePlayerStates",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"players={_playerStates.Count}"));
+        if (playerStatesPruned)
+            MarkExitUiStateDirty();
+
+        stepStart = RuntimeHitchWatch.Start();
         PruneDoorVisuals(currentLevel);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.PruneDoorVisuals",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"visuals={_doorVisuals.Count}"));
 
+        if (RefreshDownedSignature(net.id))
+            MarkExitUiStateDirty();
+
+        stepStart = RuntimeHitchWatch.Start();
         var nearestTarget = FindNearestExitTarget(hero, currentLevel, out var insideCircle);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.FindNearestExitTarget",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"candidates={_exitTargetCandidates.Count} visuals={_doorVisuals.Count}"));
+        var localSelectionChanged = ApplyNearestExitSelection(nearestTarget, insideCircle);
+        if (localSelectionChanged)
+            MarkExitUiStateDirty();
         if (nearestTarget != null)
-        {
-            _localDoorKey = BuildDoorKey(nearestTarget.cx, nearestTarget.cy);
-            _localDoorCx = nearestTarget.cx;
-            _localDoorCy = nearestTarget.cy;
-            _localDoorOutOfGame = SafeRead(() => nearestTarget.isOutOfGame, false);
-            _localDoorOnScreen = SafeRead(() => nearestTarget.isOnScreen, false);
-            _localInsideCircle = insideCircle;
             EnsureDoorVisual(nearestTarget);
-        }
-        else
-        {
-            _localDoorKey = string.Empty;
-            _localDoorCx = 0;
-            _localDoorCy = 0;
-            _localDoorOutOfGame = true;
-            _localDoorOnScreen = false;
-            _localInsideCircle = false;
-        }
 
         if (_localPressed && (!_localInsideCircle || string.IsNullOrEmpty(_localDoorKey)))
         {
             _localPressed = false;
             _transitionDoorKey = string.Empty;
+            MarkExitUiStateDirty();
         }
 
+        stepStart = RuntimeHitchWatch.Start();
         UpdateLocalPlayerState(net, forceSend: false);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.UpdateLocalPlayerState",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"door={_localDoorKey} pressed={(_localPressed ? 1 : 0)} inside={(_localInsideCircle ? 1 : 0)}"));
+
+        stepStart = RuntimeHitchWatch.Start();
         ApplyLocalTimerPause(_localPressed && _localInsideCircle);
-        RefreshDoorVisuals();
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.ApplyLocalTimerPause",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"paused={((_localPressed && _localInsideCircle) ? 1 : 0)}"));
+
+        stepStart = RuntimeHitchWatch.Start();
+        RefreshDoorVisuals(net);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.RefreshDoorVisuals",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"visuals={_doorVisuals.Count}"));
 
         if (_localPressed &&
             _localInsideCircle &&
@@ -261,7 +377,24 @@ public class LevelExitSync :
             }
         }
 
-        UpdateExitPointer();
+        stepStart = RuntimeHitchWatch.Start();
+        UpdateExitPointer(net);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.UpdateExitPointer",
+            stepStart,
+            string.Create(CultureInfo.InvariantCulture, $"pointer={(_exitPointer != null ? 1 : 0)} visuals={_doorVisuals.Count}"));
+
+        var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+        if (hitchMs >= RuntimeHitchWatch.LevelExitSlowThresholdMs)
+        {
+            RuntimeHitchWatch.LogSlow(
+                _log,
+                "LevelExitSync.OnHeroUpdate",
+                hitchMs,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"players={_playerStates.Count} visuals={_doorVisuals.Count} exits={_exitTargetCandidates.Count} localPressed={(_localPressed ? 1 : 0)}"));
+        }
     }
 
     private void TriggerExitTransition(Entity target, Hero hero, Action? origActivate)
@@ -298,13 +431,14 @@ public class LevelExitSync :
             interactive.onActivate(hero, false);
     }
 
-    private void ConsumeIncomingExitReadyStates(NetNode net)
+    private bool ConsumeIncomingExitReadyStates(NetNode net)
     {
         if (!net.TryConsumeExitReadyStates(out var states))
-            return;
+            return false;
 
         var currentLevel = ModEntry.me?._level ?? _lastLevel;
         var localId = net.id;
+        var anyChanged = false;
         for (int i = 0; i < states.Count; i++)
         {
             var state = states[i];
@@ -318,18 +452,17 @@ public class LevelExitSync :
                            prev.DoorCy == state.DoorCy;
             var isReady = state.Pressed && state.InsideCircle;
 
-            _playerStates[state.UserId] = new PlayerExitState
-            {
-                UserId = state.UserId,
-                DoorKey = BuildDoorKey(state.DoorCx, state.DoorCy),
-                DoorCx = state.DoorCx,
-                DoorCy = state.DoorCy,
-                Pressed = state.Pressed,
-                InsideCircle = state.InsideCircle,
-                IsOutOfGame = state.IsOutOfGame,
-                IsOnScreen = state.IsOnScreen,
-                LastTick = Stopwatch.GetTimestamp()
-            };
+            var trackedState = GetOrCreatePlayerState(state.UserId);
+            anyChanged |= ApplyPlayerState(
+                trackedState,
+                BuildDoorKey(state.DoorCx, state.DoorCy),
+                state.DoorCx,
+                state.DoorCy,
+                state.Pressed,
+                state.InsideCircle,
+                state.IsOutOfGame,
+                state.IsOnScreen);
+            trackedState.LastTick = Stopwatch.GetTimestamp();
 
             if (!wasReady && isReady)
             {
@@ -337,56 +470,55 @@ public class LevelExitSync :
                 PushReachedExitMessage(state.UserId, target, net);
             }
         }
+
+        return anyChanged;
     }
 
-    private void RefreshActivePlayers(NetNode net)
+    private bool RefreshActivePlayers(NetNode net)
     {
-        _activePlayerIds.Clear();
+        _activePlayerScratchIds.Clear();
         if (net.id > 0)
-            _activePlayerIds.Add(net.id);
+            _activePlayerScratchIds.Add(net.id);
 
-        if (net.TryGetRemoteUserSnapshots(out var users))
-        {
-            for (int i = 0; i < users.Count; i++)
-            {
-                var id = users[i].Id;
-                if (id > 0)
-                    _activePlayerIds.Add(id);
-            }
-        }
+        net.CopyRemoteUserIdsTo(_activePlayerScratchIds);
 
         for (int i = 0; i < ModEntry.clientIds.Length; i++)
         {
             var id = ModEntry.clientIds[i];
             if (id > 0)
-                _activePlayerIds.Add(id);
+                _activePlayerScratchIds.Add(id);
         }
+
+        if (_activePlayerIds.SetEquals(_activePlayerScratchIds))
+            return false;
+
+        _activePlayerIds.Clear();
+        _activePlayerIds.UnionWith(_activePlayerScratchIds);
+        return true;
     }
 
-    private void PrunePlayerStates(int localId)
+    private bool PrunePlayerStates(int localId)
     {
         if (_playerStates.Count == 0)
-            return;
+            return false;
 
-        List<int>? stale = null;
+        _stalePlayerIds.Clear();
         foreach (var pair in _playerStates)
         {
             if (pair.Key == localId)
                 continue;
             if (_activePlayerIds.Contains(pair.Key))
                 continue;
-            stale ??= new List<int>();
-            stale.Add(pair.Key);
+            _stalePlayerIds.Add(pair.Key);
         }
 
-        if (stale == null)
-            return;
+        if (_stalePlayerIds.Count == 0)
+            return false;
 
-        for (int i = 0; i < stale.Count; i++)
-        {
-            var id = stale[i];
-            _playerStates.Remove(id);
-        }
+        for (int i = 0; i < _stalePlayerIds.Count; i++)
+            _playerStates.Remove(_stalePlayerIds[i]);
+
+        return true;
     }
 
     private void UpdateLocalPlayerState(NetNode net, bool forceSend)
@@ -395,32 +527,36 @@ public class LevelExitSync :
         if (localId <= 0)
             return;
 
-        _playerStates[localId] = new PlayerExitState
-        {
-            UserId = localId,
-            DoorKey = _localDoorKey,
-            DoorCx = _localDoorCx,
-            DoorCy = _localDoorCy,
-            Pressed = _localPressed,
-            InsideCircle = _localInsideCircle,
-            IsOutOfGame = _localDoorOutOfGame,
-            IsOnScreen = _localDoorOnScreen,
-            LastTick = Stopwatch.GetTimestamp()
-        };
-
-        var signature = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{localId}|{_localDoorCx}|{_localDoorCy}|{(_localPressed ? 1 : 0)}|{(_localInsideCircle ? 1 : 0)}|{(_localDoorOutOfGame ? 1 : 0)}|{(_localDoorOnScreen ? 1 : 0)}");
+        var trackedState = GetOrCreatePlayerState(localId);
+        var localStateChanged = ApplyPlayerState(
+            trackedState,
+            _localDoorKey,
+            _localDoorCx,
+            _localDoorCy,
+            _localPressed,
+            _localInsideCircle,
+            _localDoorOutOfGame,
+            _localDoorOnScreen);
+        trackedState.LastTick = Stopwatch.GetTimestamp();
+        if (localStateChanged)
+            MarkExitUiStateDirty();
 
         var now = Stopwatch.GetTimestamp();
         var resendTicks = (long)(Stopwatch.Frequency * ExitStateResendSeconds);
-        var changed = !string.Equals(signature, _lastSentStateSignature, StringComparison.Ordinal);
+        var stateFlags = BuildLocalStateFlags();
+        var changed = !_hasLastSentState ||
+                      _lastSentDoorCx != _localDoorCx ||
+                      _lastSentDoorCy != _localDoorCy ||
+                      _lastSentStateFlags != stateFlags;
         var timedOut = _lastLocalStateSendTick == 0 || now - _lastLocalStateSendTick >= resendTicks;
         if (!forceSend && !changed && !timedOut)
             return;
 
         net.SendExitReady(_localDoorCx, _localDoorCy, _localPressed, _localInsideCircle, _localDoorOutOfGame, _localDoorOnScreen);
-        _lastSentStateSignature = signature;
+        _hasLastSentState = true;
+        _lastSentDoorCx = _localDoorCx;
+        _lastSentDoorCy = _localDoorCy;
+        _lastSentStateFlags = stateFlags;
         _lastLocalStateSendTick = now;
     }
 
@@ -429,51 +565,16 @@ public class LevelExitSync :
         if (string.IsNullOrWhiteSpace(doorKey))
             return false;
 
-        var expected = GetExpectedPlayerCount(net);
+        EnsureReadyStateCache(net);
+        var expected = _cachedExpectedPlayerCount;
         if (expected <= 1)
             return true;
 
-        var ready = 0;
-        foreach (var state in _playerStates.Values)
-        {
-            if (state.UserId <= 0)
-                continue;
-            if (IsPlayerDownedForExit(state.UserId, net.id))
-                continue;
-            if (!state.Pressed || !state.InsideCircle)
-                continue;
-            if (!string.Equals(state.DoorKey, doorKey, StringComparison.Ordinal))
-                continue;
-            ready++;
-        }
-
+        _readyPlayerCounts.TryGetValue(doorKey, out var ready);
         return ready >= expected;
     }
 
-    private int CountReadyPlayersForDoor(string doorKey)
-    {
-        if (string.IsNullOrWhiteSpace(doorKey))
-            return 0;
-
-        var localId = GameMenu.NetRef?.id ?? 0;
-        var ready = 0;
-        foreach (var state in _playerStates.Values)
-        {
-            if (state.UserId <= 0)
-                continue;
-            if (IsPlayerDownedForExit(state.UserId, localId))
-                continue;
-            if (!state.Pressed || !state.InsideCircle)
-                continue;
-            if (!string.Equals(state.DoorKey, doorKey, StringComparison.Ordinal))
-                continue;
-            ready++;
-        }
-
-        return ready;
-    }
-
-    private int GetExpectedPlayerCount(NetNode net)
+    private int ComputeExpectedPlayerCount(NetNode net)
     {
         var localId = net.id;
         var expected = 0;
@@ -527,6 +628,7 @@ public class LevelExitSync :
 
     private string ResolveAutoFollowDoorKey(NetNode net)
     {
+        EnsureReadyStateCache(net);
         foreach (var state in _playerStates.Values)
         {
             if (state.UserId <= 0)
@@ -608,18 +710,11 @@ public class LevelExitSync :
         if (net.id > 0 && userId == net.id)
             return string.IsNullOrWhiteSpace(GameMenu.Username) ? Localize("Guest") : GameMenu.Username.Trim();
 
-        if (net.TryGetRemoteUserSnapshots(out var users))
+        if (net.TryGetRemoteUsername(userId, out var username))
         {
-            for (int i = 0; i < users.Count; i++)
-            {
-                var user = users[i];
-                if (user.Id != userId)
-                    continue;
-
-                var name = user.Username?.Trim();
-                if (!string.IsNullOrWhiteSpace(name))
-                    return name;
-            }
+            var name = username?.Trim();
+            if (!string.IsNullOrWhiteSpace(name))
+                return name;
         }
 
         if (userId == 1 && !string.IsNullOrWhiteSpace(GameMenu.RemoteUsername))
@@ -676,28 +771,79 @@ public class LevelExitSync :
                int.TryParse(key.AsSpan(sep + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out cy);
     }
 
-    private static Entity? FindExitTargetByDoorKey(Level? level, string key)
+    private Entity? FindExitTargetByDoorKey(Level? level, string key)
     {
+        if (level == null || string.IsNullOrWhiteSpace(key))
+            return null;
+
+        EnsureExitTargetCandidates(level);
+        if (_exitTargetsByDoorKey.TryGetValue(key, out var direct))
+        {
+            if (IsTrackedExitTargetCandidate(level, direct))
+                return direct;
+
+            _exitTargetsByDoorKey.Remove(key);
+        }
+
         if (!TryParseDoorKey(key, out var cx, out var cy))
             return null;
         return FindExitTargetByCoordinates(level, cx, cy);
     }
 
-    private static Entity? FindExitTargetByCoordinates(Level? level, int cx, int cy)
+    private Entity? FindExitTargetByCoordinates(Level? level, int cx, int cy)
     {
-        if (level?.entities == null)
+        var hitchStart = RuntimeHitchWatch.Start();
+        if (level == null)
             return null;
 
-        var entities = level.entities;
-        for (int i = 0; i < entities.length; i++)
+        EnsureExitTargetCandidates(level);
+        var key = BuildDoorKey(cx, cy);
+        if (_exitTargetsByDoorKey.TryGetValue(key, out var direct))
         {
-            var entity = entities.getDyn(i) as Entity;
-            if (!IsSupportedExitTarget(entity))
-                continue;
-            if (entity!.cx == cx && entity.cy == cy)
-                return entity;
+            if (IsTrackedExitTargetCandidate(level, direct))
+            {
+                LogLevelExitStepIfSlow(
+                    "LevelExitSync.FindExitTargetByCoordinates",
+                    hitchStart,
+                    string.Create(CultureInfo.InvariantCulture, $"cx={cx} cy={cy} candidates={_exitTargetCandidates.Count} removed=0 found=1"));
+                return direct;
+            }
+
+            _exitTargetsByDoorKey.Remove(key);
         }
 
+        var removedCandidates = 0;
+        for (int i = _exitTargetCandidates.Count - 1; i >= 0; i--)
+        {
+            var entity = _exitTargetCandidates[i];
+            if (!IsTrackedExitTargetCandidate(level, entity))
+            {
+                UnindexExitTargetCandidate(entity);
+                _exitTargetCandidates.RemoveAt(i);
+                removedCandidates++;
+                continue;
+            }
+
+            if (entity!.cx == cx && entity.cy == cy)
+            {
+                _exitTargetsByDoorKey[key] = entity;
+                if (removedCandidates > 0)
+                    HandleRemovedExitTargetCandidates();
+                LogLevelExitStepIfSlow(
+                    "LevelExitSync.FindExitTargetByCoordinates",
+                    hitchStart,
+                    string.Create(CultureInfo.InvariantCulture, $"cx={cx} cy={cy} candidates={_exitTargetCandidates.Count} removed={removedCandidates} found=1"));
+                return entity;
+            }
+        }
+
+        if (removedCandidates > 0)
+            HandleRemovedExitTargetCandidates();
+
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.FindExitTargetByCoordinates",
+            hitchStart,
+            string.Create(CultureInfo.InvariantCulture, $"cx={cx} cy={cy} candidates={_exitTargetCandidates.Count} removed={removedCandidates} found=0"));
         return null;
     }
 
@@ -723,12 +869,14 @@ public class LevelExitSync :
         if (_doorVisuals.TryGetValue(key, out var existing))
         {
             existing.Door = target;
+            existing.DoorKey = key;
             return existing;
         }
 
         var visual = new DoorVisual
         {
-            Door = target
+            Door = target,
+            DoorKey = key
         };
 
         var parent = target.spr;
@@ -748,13 +896,17 @@ public class LevelExitSync :
             try
             {
                 var net = GameMenu.NetRef;
-                var expected = net != null && net.IsAlive ? GetExpectedPlayerCount(net) : System.Math.Max(1, _activePlayerIds.Count);
+                if (net != null && net.IsAlive)
+                    EnsureReadyStateCache(net);
+
+                var expected = net != null && net.IsAlive ? _cachedExpectedPlayerCount : System.Math.Max(1, _activePlayerIds.Count);
                 var initialLabel = BuildCounterLabel(0, expected);
                 visual.Counter = Assets.Class.makeText(initialLabel.AsHaxeString(), dc.ui.Text.Class.COLORS.get("WO".AsHaxeString()), false, parent);
                 visual.Counter.textColor = CounterColor;
                 visual.Counter.scaleX = CounterScale;
                 visual.Counter.scaleY = CounterScale;
                 visual.Counter.alpha = 1.0;
+                visual.Counter.y = -ExitCounterYOffsetPx;
                 visual.Counter.visible = true;
             }
             catch
@@ -764,6 +916,7 @@ public class LevelExitSync :
         }
 
         _doorVisuals[key] = visual;
+        _doorVisualRefreshDirty = true;
         return visual;
     }
 
@@ -772,38 +925,64 @@ public class LevelExitSync :
         if (visual.Door == null)
             return;
 
-        var door = visual.Door;
-        var key = BuildDoorKey(door.cx, door.cy);
-        var isActive = !string.IsNullOrEmpty(_localDoorKey) && string.Equals(_localDoorKey, key, StringComparison.Ordinal) && _localInsideCircle;
-        var ready = CountReadyPlayersForDoor(key);
-        var net = GameMenu.NetRef;
-        var expected = net != null ? GetExpectedPlayerCount(net) : System.Math.Max(1, _activePlayerIds.Count);
-        var label = BuildCounterLabel(ready, expected);
-
         if (visual.Circle != null)
         {
-            DrawDoorCircle(visual.Circle, isActive);
+            var isActive = !string.IsNullOrEmpty(_localDoorKey) &&
+                           string.Equals(_localDoorKey, visual.DoorKey, StringComparison.Ordinal) &&
+                           _localInsideCircle;
+            if (!visual.LastActive.HasValue || visual.LastActive.Value != isActive)
+            {
+                DrawDoorCircle(visual.Circle, isActive);
+                visual.LastActive = isActive;
+            }
             visual.Circle.visible = true;
-            visual.Circle.y = 0;
-        }
-
-        if (visual.Counter != null)
-        {
-            visual.Counter.set_text(label.AsHaxeString());
-            visual.Counter.y = -ExitCounterYOffsetPx;
-            var textWidth = SafeRead(() => visual.Counter.textWidth, label.Length * 10);
-            visual.Counter.x = -(textWidth * visual.Counter.scaleX) * 0.5;
-            visual.Counter.visible = true;
         }
     }
 
-    private void RefreshDoorVisuals()
+    private void RefreshDoorVisuals(NetNode? net)
     {
         if (_doorVisuals.Count == 0)
+        {
+            _doorVisualRefreshDirty = false;
+            return;
+        }
+
+        if (!_doorVisualRefreshDirty)
             return;
 
+        if (net != null && net.IsAlive)
+            EnsureReadyStateCache(net);
+
+        var expected = net != null && net.IsAlive ? _cachedExpectedPlayerCount : System.Math.Max(1, _activePlayerIds.Count);
+
         foreach (var visual in _doorVisuals.Values)
+        {
             UpdateDoorVisual(visual);
+            UpdateDoorCounterVisual(visual, expected);
+        }
+
+        _doorVisualRefreshDirty = false;
+    }
+
+    private void UpdateDoorCounterVisual(DoorVisual visual, int expected)
+    {
+        var counter = visual.Counter;
+        if (counter == null)
+            return;
+
+        _readyPlayerCounts.TryGetValue(visual.DoorKey, out var ready);
+        if (visual.LastReadyCount != ready || visual.LastExpectedCount != expected)
+        {
+            var label = BuildCounterLabel(ready, expected);
+            counter.set_text(label.AsHaxeString());
+            visual.LastReadyCount = ready;
+            visual.LastExpectedCount = expected;
+            visual.LastTextWidth = SafeRead(() => counter.textWidth, label.Length * 10);
+            var textWidth = visual.LastTextWidth > 0 ? visual.LastTextWidth : label.Length * 10;
+            counter.x = -(textWidth * counter.scaleX) * 0.5;
+        }
+
+        counter.visible = true;
     }
 
     private static string BuildCounterLabel(int ready, int expected)
@@ -837,23 +1016,127 @@ public class LevelExitSync :
         }
     }
 
+    private void EnsureExitTargetCandidates(Level? level)
+    {
+        var hitchStart = RuntimeHitchWatch.Start();
+        if (level == null || level.entities == null)
+        {
+            _exitTargetCandidates.Clear();
+            _exitTargetsByDoorKey.Clear();
+            _exitCandidatesLevel = null;
+            InvalidateNearestExitCache();
+            return;
+        }
+
+        if (ReferenceEquals(_exitCandidatesLevel, level))
+            return;
+
+        _exitCandidatesLevel = level;
+        _exitTargetCandidates.Clear();
+        _exitTargetsByDoorKey.Clear();
+        var entities = level.entities;
+        for (int i = 0; i < entities.length; i++)
+        {
+            var e = entities.getDyn(i) as Entity;
+            if (IsSupportedExitTarget(e))
+            {
+                _exitTargetCandidates.Add(e);
+                IndexExitTargetCandidate(e);
+            }
+        }
+        _exitTargetCandidatesVersion++;
+        InvalidateNearestExitCache();
+        _exitPointerDirty = true;
+
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.CandidateRebuild",
+            hitchStart,
+            string.Create(CultureInfo.InvariantCulture, $"candidates={_exitTargetCandidates.Count}"));
+    }
+
+    private void TryTrackExitTargetCandidate(Level? level, Entity? entity)
+    {
+        if (!ReferenceEquals(_exitCandidatesLevel, level) || !IsSupportedExitTarget(entity))
+            return;
+
+        if (_exitTargetCandidates.Contains(entity))
+            return;
+
+        _exitTargetCandidates.Add(entity);
+        IndexExitTargetCandidate(entity);
+        _exitTargetCandidatesVersion++;
+        InvalidateNearestExitCache();
+        _exitPointerDirty = true;
+    }
+
+    private void TryUntrackExitTargetCandidate(Level? level, Entity? entity)
+    {
+        if (!ReferenceEquals(_exitCandidatesLevel, level) || entity == null)
+            return;
+
+        var removed = false;
+        for (int i = _exitTargetCandidates.Count - 1; i >= 0; i--)
+        {
+            if (ReferenceEquals(_exitTargetCandidates[i], entity))
+            {
+                UnindexExitTargetCandidate(entity);
+                _exitTargetCandidates.RemoveAt(i);
+                removed = true;
+            }
+        }
+
+        if (removed)
+        {
+            _exitTargetCandidatesVersion++;
+            InvalidateNearestExitCache();
+            _exitPointerDirty = true;
+        }
+    }
+
+    private static bool IsTrackedExitTargetCandidate(Level level, Entity? entity)
+    {
+        if (!IsSupportedExitTarget(entity))
+            return false;
+        if (!ReferenceEquals(entity!._level, level))
+            return false;
+        if (SafeRead(() => entity.destroyed, false))
+            return false;
+        return true;
+    }
+
     private Entity? FindNearestExitTarget(Hero hero, Level? level, out bool insideCircle)
     {
+        var hitchStart = RuntimeHitchWatch.Start();
         insideCircle = false;
-        if (hero == null || level == null || level.entities == null)
+        if (hero == null || level == null)
             return null;
+
+        EnsureExitTargetCandidates(level);
+        if (TryGetCachedNearestExitTarget(hero, level, out var cachedTarget, out insideCircle))
+            return cachedTarget;
 
         var heroX = GetEntityX(hero);
         var heroY = GetEntityY(hero);
 
         Entity? best = null;
         var bestDistSq = double.MaxValue;
-        var entities = level.entities;
-        for (int i = 0; i < entities.length; i++)
+        var removedCandidates = 0;
+        var availableCandidates = 0;
+        for (int i = _exitTargetCandidates.Count - 1; i >= 0; i--)
         {
-            var target = entities.getDyn(i) as Entity;
+            var target = _exitTargetCandidates[i];
+            if (!IsTrackedExitTargetCandidate(level, target))
+            {
+                UnindexExitTargetCandidate(target);
+                _exitTargetCandidates.RemoveAt(i);
+                removedCandidates++;
+                continue;
+            }
+
             if (!IsAvailableExitTarget(target))
                 continue;
+
+            availableCandidates++;
 
             var dx = GetEntityX(target!) - heroX;
             var dy = GetEntityY(target!) - heroY;
@@ -866,9 +1149,25 @@ public class LevelExitSync :
         }
 
         if (best == null)
+        {
+            if (removedCandidates > 0)
+                HandleRemovedExitTargetCandidates();
+            CacheNearestExitTarget(level, hero, null, false);
+            LogLevelExitStepIfSlow(
+                "LevelExitSync.FindNearestExitTarget.Scan",
+                hitchStart,
+                string.Create(CultureInfo.InvariantCulture, $"candidates={_exitTargetCandidates.Count} removed={removedCandidates} available={availableCandidates} found=0"));
             return null;
+        }
 
+        if (removedCandidates > 0)
+            HandleRemovedExitTargetCandidates();
         insideCircle = bestDistSq <= ExitCircleRadiusPx * ExitCircleRadiusPx;
+        CacheNearestExitTarget(level, hero, best, insideCircle);
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.FindNearestExitTarget.Scan",
+            hitchStart,
+            string.Create(CultureInfo.InvariantCulture, $"candidates={_exitTargetCandidates.Count} removed={removedCandidates} available={availableCandidates} found=1 inside={(insideCircle ? 1 : 0)}"));
         return best;
     }
 
@@ -883,22 +1182,39 @@ public class LevelExitSync :
         return distSq <= ExitCircleRadiusPx * ExitCircleRadiusPx;
     }
 
-    private void UpdateExitPointer()
+    private void UpdateExitPointer(NetNode net)
     {
+        var hitchStart = RuntimeHitchWatch.Start();
         if (_exitPointer != null && SafeRead(() => _exitPointer.destroyed, true))
+        {
             _exitPointer = null;
+            _exitPointerDoorKey = string.Empty;
+            _exitPointerDirty = true;
+        }
 
-        var watchedDoor = ResolveWatchedDoorKey();
+        if (!_exitPointerDirty && _exitPointer != null)
+            return;
+
+        var watchedDoor = ResolveWatchedDoorKey(net);
         if (string.IsNullOrWhiteSpace(watchedDoor))
         {
             ClearExitPointer();
+            _exitPointerDirty = false;
             return;
         }
 
-        var net = GameMenu.NetRef;
-        if (net == null || AreAllPlayersReadyForDoor(watchedDoor, net))
+        if (net == null || !net.IsAlive || AreAllPlayersReadyForDoor(watchedDoor, net))
         {
             ClearExitPointer();
+            _exitPointerDirty = false;
+            return;
+        }
+
+        if (_exitPointer != null &&
+            !SafeRead(() => _exitPointer.destroyed, true) &&
+            string.Equals(_exitPointerDoorKey, watchedDoor, StringComparison.Ordinal))
+        {
+            _exitPointerDirty = false;
             return;
         }
 
@@ -907,42 +1223,74 @@ public class LevelExitSync :
         if (door == null)
         {
             ClearExitPointer();
+            _exitPointerDirty = false;
             return;
         }
 
         if (_exitPointer != null && !SafeRead(() => _exitPointer.destroyed, true))
         {
             _exitPointer.e = door;
+            _exitPointerDoorKey = watchedDoor;
+            _exitPointerDirty = false;
             return;
         }
 
         try
         {
             _exitPointer = new Pointer(door, "".AsHaxeString(), 99999.0, MarkerColor);
+            _exitPointerDoorKey = watchedDoor;
             PointerFxHelper.SuppressPointerFx(_exitPointer, PointerFxSuppressionKey);
         }
         catch
         {
             _exitPointer = null;
+            _exitPointerDoorKey = string.Empty;
         }
+        finally
+        {
+            _exitPointerDirty = false;
+        }
+
+        LogLevelExitStepIfSlow(
+            "LevelExitSync.UpdateExitPointer.Internal",
+            hitchStart,
+            string.Create(CultureInfo.InvariantCulture, $"watchedDoor={watchedDoor} pointer={(_exitPointer != null ? 1 : 0)}"));
     }
 
-    private string ResolveWatchedDoorKey()
+    private string ResolveWatchedDoorKey(NetNode? net)
     {
-        if (_localPressed && _localInsideCircle && !string.IsNullOrWhiteSpace(_localDoorKey))
-            return _localDoorKey;
+        if (!_watchedDoorCacheDirty)
+            return _cachedWatchedDoorKey;
 
-        foreach (var pair in _playerStates)
+        if (net != null && net.IsAlive)
+            EnsureReadyStateCache(net);
+
+        var watchedDoor = string.Empty;
+        if (_localPressed && _localInsideCircle && !string.IsNullOrWhiteSpace(_localDoorKey))
         {
-            var state = pair.Value;
-            if (!state.Pressed || !state.InsideCircle)
-                continue;
-            if (string.IsNullOrWhiteSpace(state.DoorKey))
-                continue;
-            return state.DoorKey;
+            watchedDoor = _localDoorKey;
+        }
+        else
+        {
+            var localId = net?.id ?? 0;
+            foreach (var pair in _playerStates)
+            {
+                var state = pair.Value;
+                if (!state.Pressed || !state.InsideCircle)
+                    continue;
+                if (string.IsNullOrWhiteSpace(state.DoorKey))
+                    continue;
+                if (state.UserId > 0 && IsPlayerDownedForExit(state.UserId, localId))
+                    continue;
+
+                watchedDoor = state.DoorKey;
+                break;
+            }
         }
 
-        return string.Empty;
+        _cachedWatchedDoorKey = watchedDoor;
+        _watchedDoorCacheDirty = false;
+        return watchedDoor;
     }
 
     private void ClearExitPointer()
@@ -960,6 +1308,7 @@ public class LevelExitSync :
         finally
         {
             _exitPointer = null;
+            _exitPointerDoorKey = string.Empty;
         }
     }
 
@@ -968,7 +1317,7 @@ public class LevelExitSync :
         if (_doorVisuals.Count == 0)
             return;
 
-        List<string>? stale = null;
+        _staleDoorVisualKeys.Clear();
         foreach (var pair in _doorVisuals)
         {
             var door = pair.Value.Door;
@@ -981,15 +1330,17 @@ public class LevelExitSync :
             if (!remove)
                 continue;
 
-            stale ??= new List<string>();
-            stale.Add(pair.Key);
+            _staleDoorVisualKeys.Add(pair.Key);
         }
 
-        if (stale == null)
+        if (_staleDoorVisualKeys.Count == 0)
             return;
 
-        for (int i = 0; i < stale.Count; i++)
-            RemoveDoorVisual(stale[i]);
+        for (int i = 0; i < _staleDoorVisualKeys.Count; i++)
+            RemoveDoorVisual(_staleDoorVisualKeys[i]);
+
+        _doorVisualRefreshDirty = true;
+        _exitPointerDirty = true;
     }
 
     private void RemoveDoorVisual(string key)
@@ -1000,11 +1351,17 @@ public class LevelExitSync :
         try { visual.Circle?.remove(); } catch { }
         try { visual.Counter?.remove(); } catch { }
         _doorVisuals.Remove(key);
+        _doorVisualRefreshDirty = true;
     }
 
     private void ResetLevelState(Level? newLevel)
     {
         _lastLevel = newLevel;
+        _exitCandidatesLevel = null;
+        _exitTargetCandidates.Clear();
+        _exitTargetsByDoorKey.Clear();
+        _exitTargetCandidatesVersion = 0;
+        InvalidateNearestExitCache();
         _localDoorKey = string.Empty;
         _localDoorCx = 0;
         _localDoorCy = 0;
@@ -1013,15 +1370,91 @@ public class LevelExitSync :
         _localDoorOutOfGame = true;
         _localDoorOnScreen = false;
         _lastLocalStateSendTick = 0;
-        _lastSentStateSignature = string.Empty;
+        _hasLastSentState = false;
+        _lastSentDoorCx = 0;
+        _lastSentDoorCy = 0;
+        _lastSentStateFlags = 0;
         _transitionDoorKey = string.Empty;
+        _readyStateCacheDirty = true;
+        _watchedDoorCacheDirty = true;
+        _doorVisualRefreshDirty = true;
+        _exitPointerDirty = true;
+        _cachedExpectedPlayerCount = 1;
+        _cachedWatchedDoorKey = string.Empty;
+        _hasCachedDownedSignature = false;
+        _cachedDownedSignature = 0;
+        _exitPointerDoorKey = string.Empty;
 
-        foreach (var key in new List<string>(_doorVisuals.Keys))
-            RemoveDoorVisual(key);
+        _staleDoorVisualKeys.Clear();
+        foreach (var key in _doorVisuals.Keys)
+            _staleDoorVisualKeys.Add(key);
+        for (int i = 0; i < _staleDoorVisualKeys.Count; i++)
+            RemoveDoorVisual(_staleDoorVisualKeys[i]);
 
         _playerStates.Clear();
+        _activePlayerIds.Clear();
+        _activePlayerScratchIds.Clear();
+        _readyPlayerCounts.Clear();
         ClearExitPointer();
         ApplyLocalTimerPause(false);
+    }
+
+    private void InvalidateNearestExitCache()
+    {
+        _nearestExitCacheLevel = null;
+        _nearestExitCacheHasValue = false;
+        _nearestExitCacheHeroX = double.NaN;
+        _nearestExitCacheHeroY = double.NaN;
+        _nearestExitCacheInsideCircle = false;
+        _nearestExitCacheCandidatesVersion = -1;
+        _nearestExitCacheTarget = null;
+    }
+
+    private bool TryGetCachedNearestExitTarget(Hero hero, Level level, out Entity? target, out bool insideCircle)
+    {
+        target = null;
+        insideCircle = false;
+        if (!_nearestExitCacheHasValue ||
+            !ReferenceEquals(_nearestExitCacheLevel, level) ||
+            _nearestExitCacheCandidatesVersion != _exitTargetCandidatesVersion)
+        {
+            return false;
+        }
+
+        var heroX = GetEntityX(hero);
+        var heroY = GetEntityY(hero);
+        var dx = heroX - _nearestExitCacheHeroX;
+        var dy = heroY - _nearestExitCacheHeroY;
+        if (dx * dx + dy * dy > NearestExitCacheReuseDistanceSq)
+            return false;
+
+        target = _nearestExitCacheTarget;
+        if (target == null)
+        {
+            insideCircle = _nearestExitCacheInsideCircle;
+            return true;
+        }
+        if (!IsTrackedExitTargetCandidate(level, target) || !IsAvailableExitTarget(target))
+        {
+            InvalidateNearestExitCache();
+            target = null;
+            return false;
+        }
+
+        insideCircle = IsEntityInsideExitCircle(hero, target);
+        _nearestExitCacheInsideCircle = insideCircle;
+        return true;
+    }
+
+    private void CacheNearestExitTarget(Level level, Hero hero, Entity? target, bool insideCircle)
+    {
+        _nearestExitCacheLevel = level;
+        _nearestExitCacheHasValue = true;
+        _nearestExitCacheHeroX = GetEntityX(hero);
+        _nearestExitCacheHeroY = GetEntityY(hero);
+        _nearestExitCacheInsideCircle = insideCircle;
+        _nearestExitCacheCandidatesVersion = _exitTargetCandidatesVersion;
+        _nearestExitCacheTarget = target;
     }
 
     private void ApplyLocalTimerPause(bool paused)
@@ -1064,5 +1497,187 @@ public class LevelExitSync :
     private static T SafeRead<T>(Func<T> getter, T fallback)
     {
         try { return getter(); } catch { return fallback; }
+    }
+
+    private void MarkExitUiStateDirty()
+    {
+        _readyStateCacheDirty = true;
+        _watchedDoorCacheDirty = true;
+        _doorVisualRefreshDirty = true;
+        _exitPointerDirty = true;
+    }
+
+    private bool RefreshDownedSignature(int localId)
+    {
+        unchecked
+        {
+            var signature = 17;
+            foreach (var userId in _activePlayerIds)
+            {
+                var downed = IsPlayerDownedForExit(userId, localId) ? 1 : 0;
+                var combined = (userId * 397) ^ downed;
+                signature += combined;
+                signature ^= combined;
+            }
+
+            if (_hasCachedDownedSignature && signature == _cachedDownedSignature)
+                return false;
+
+            _cachedDownedSignature = signature;
+            _hasCachedDownedSignature = true;
+            return true;
+        }
+    }
+
+    private void EnsureReadyStateCache(NetNode net)
+    {
+        if (!_readyStateCacheDirty)
+            return;
+
+        _readyPlayerCounts.Clear();
+        foreach (var state in _playerStates.Values)
+        {
+            if (state.UserId <= 0)
+                continue;
+            if (IsPlayerDownedForExit(state.UserId, net.id))
+                continue;
+            if (!state.Pressed || !state.InsideCircle)
+                continue;
+            if (string.IsNullOrWhiteSpace(state.DoorKey))
+                continue;
+
+            if (_readyPlayerCounts.TryGetValue(state.DoorKey, out var count))
+                _readyPlayerCounts[state.DoorKey] = count + 1;
+            else
+                _readyPlayerCounts[state.DoorKey] = 1;
+        }
+
+        _cachedExpectedPlayerCount = ComputeExpectedPlayerCount(net);
+        _readyStateCacheDirty = false;
+    }
+
+    private bool ApplyNearestExitSelection(Entity? nearestTarget, bool insideCircle)
+    {
+        var newDoorKey = nearestTarget != null ? BuildDoorKey(nearestTarget.cx, nearestTarget.cy) : string.Empty;
+        var newDoorCx = nearestTarget?.cx ?? 0;
+        var newDoorCy = nearestTarget?.cy ?? 0;
+        var newDoorOutOfGame = nearestTarget == null || SafeRead(() => nearestTarget.isOutOfGame, false);
+        var newDoorOnScreen = nearestTarget != null && SafeRead(() => nearestTarget.isOnScreen, false);
+        var newInsideCircle = nearestTarget != null && insideCircle;
+
+        if (string.Equals(_localDoorKey, newDoorKey, StringComparison.Ordinal) &&
+            _localDoorCx == newDoorCx &&
+            _localDoorCy == newDoorCy &&
+            _localDoorOutOfGame == newDoorOutOfGame &&
+            _localDoorOnScreen == newDoorOnScreen &&
+            _localInsideCircle == newInsideCircle)
+        {
+            return false;
+        }
+
+        _localDoorKey = newDoorKey;
+        _localDoorCx = newDoorCx;
+        _localDoorCy = newDoorCy;
+        _localDoorOutOfGame = newDoorOutOfGame;
+        _localDoorOnScreen = newDoorOnScreen;
+        _localInsideCircle = newInsideCircle;
+        return true;
+    }
+
+    private static bool ApplyPlayerState(
+        PlayerExitState trackedState,
+        string doorKey,
+        int doorCx,
+        int doorCy,
+        bool pressed,
+        bool insideCircle,
+        bool isOutOfGame,
+        bool isOnScreen)
+    {
+        if (trackedState == null)
+            return false;
+
+        var changed =
+            !string.Equals(trackedState.DoorKey, doorKey, StringComparison.Ordinal) ||
+            trackedState.DoorCx != doorCx ||
+            trackedState.DoorCy != doorCy ||
+            trackedState.Pressed != pressed ||
+            trackedState.InsideCircle != insideCircle ||
+            trackedState.IsOutOfGame != isOutOfGame ||
+            trackedState.IsOnScreen != isOnScreen;
+
+        trackedState.DoorKey = doorKey;
+        trackedState.DoorCx = doorCx;
+        trackedState.DoorCy = doorCy;
+        trackedState.Pressed = pressed;
+        trackedState.InsideCircle = insideCircle;
+        trackedState.IsOutOfGame = isOutOfGame;
+        trackedState.IsOnScreen = isOnScreen;
+        return changed;
+    }
+
+    private PlayerExitState GetOrCreatePlayerState(int userId)
+    {
+        if (!_playerStates.TryGetValue(userId, out var state))
+        {
+            state = new PlayerExitState
+            {
+                UserId = userId
+            };
+            _playerStates[userId] = state;
+        }
+
+        return state;
+    }
+
+    private byte BuildLocalStateFlags()
+    {
+        byte flags = 0;
+        if (_localPressed)
+            flags |= 1;
+        if (_localInsideCircle)
+            flags |= 2;
+        if (_localDoorOutOfGame)
+            flags |= 4;
+        if (_localDoorOnScreen)
+            flags |= 8;
+        return flags;
+    }
+
+    private void IndexExitTargetCandidate(Entity? entity)
+    {
+        if (!IsSupportedExitTarget(entity))
+            return;
+
+        var key = BuildDoorKey(entity!.cx, entity.cy);
+        _exitTargetsByDoorKey[key] = entity;
+    }
+
+    private void UnindexExitTargetCandidate(Entity? entity)
+    {
+        if (!IsSupportedExitTarget(entity))
+            return;
+
+        var key = BuildDoorKey(entity!.cx, entity.cy);
+        if (_exitTargetsByDoorKey.TryGetValue(key, out var indexed) && ReferenceEquals(indexed, entity))
+            _exitTargetsByDoorKey.Remove(key);
+    }
+
+    private void HandleRemovedExitTargetCandidates()
+    {
+        _exitTargetCandidatesVersion++;
+        InvalidateNearestExitCache();
+        _watchedDoorCacheDirty = true;
+        _doorVisualRefreshDirty = true;
+        _exitPointerDirty = true;
+    }
+
+    private void LogLevelExitStepIfSlow(string key, long stepStart, string? details)
+    {
+        var stepMs = RuntimeHitchWatch.GetElapsedMilliseconds(stepStart);
+        if (stepMs < RuntimeHitchWatch.LevelExitStepSlowThresholdMs)
+            return;
+
+        RuntimeHitchWatch.LogSlow(_log, key, stepMs, details);
     }
 }

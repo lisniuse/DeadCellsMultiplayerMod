@@ -267,7 +267,7 @@ public sealed partial class NetNode
 
                 var skinId = effectiveId.Value;
                 var skinValue = skin;
-                GameMenu.EnqueueMainThread(() =>
+                GameMenu.EnqueueMainThreadCoalesced(string.Create(CultureInfo.InvariantCulture, $"net:skin:{skinId}"), () =>
                 {
                     try
                     {
@@ -310,7 +310,7 @@ public sealed partial class NetNode
 
                 var headId = effectiveId.Value;
                 var headSkinValue = skinHead;
-                GameMenu.EnqueueMainThread(() =>
+                GameMenu.EnqueueMainThreadCoalesced(string.Create(CultureInfo.InvariantCulture, $"net:head:{headId}"), () =>
                 {
                     try
                     {
@@ -917,19 +917,19 @@ public sealed partial class NetNode
                                 continue;
                             if (ev.StartsWith("attack|", StringComparison.Ordinal) && _role != NetRole.Host)
                             {
-                                if (TryParseMobAttackEvent(ev, u.Index, u.X, u.Y, u.Dir, u.Type, out var attack))
+                                if (TryParseMobAttackEvent(ev, u.Index, u.X, u.Y, u.Dir, u.Type, u.Generation, out var attack))
                                     _pendingMobAttacks.Add(attack);
                             }
                             else if (ev.StartsWith("hit|", StringComparison.Ordinal))
                             {
-                                if (TryParseMobHitEvent(ev, u.Index, u.X, u.Y, effectiveUserId, u.Type, out var hit))
+                                if (TryParseMobHitEvent(ev, u.Index, u.X, u.Y, effectiveUserId, u.Type, u.Generation, out var hit))
                                 {
                                     _pendingMobHits.Add(hit);
                                 }
                             }
                             else if (ev == "die")
                             {
-                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y);
+                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y, u.Generation);
                                 _pendingMobDies.Add(die);
                                 if (_role == NetRole.Host && senderId.HasValue)
                                     hasDieToForward = true;

@@ -5,6 +5,7 @@ using dc.hl.types;
 using dc.pr;
 using dc.tool.atk;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
+using DeadCellsMultiplayerMod.Tools;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game.Hero;
@@ -35,6 +36,10 @@ public class InteractionSync :
     private readonly ILogger _log;
     private readonly HashSet<Door> _openedDoors = new();
     private readonly Dictionary<Door, bool> _doorHadAutoClose = new();
+    private readonly List<Door> _scratchDoorsToRemove = new();
+    private readonly List<Door> _scratchDoorsToClose = new();
+    private readonly HashSet<Elevator> _scratchAppliedElevators = new();
+    private readonly List<(double X, double Y)> _scratchAppliedBreakableGround = new();
     private bool _applyingRemoteDoorEvents;
     private bool _applyingRemoteChestEvents;
     private bool _applyingRemotePressurePlateEvents;
@@ -389,6 +394,7 @@ public class InteractionSync :
 
     void IOnHeroUpdate.OnHeroUpdate(double dt)
     {
+        var hitchStart = RuntimeHitchWatch.Start();
         var net = GameMenu.NetRef;
         if (net == null || !net.IsAlive)
             return;
@@ -439,6 +445,18 @@ public class InteractionSync :
         {
             ApplyRemoteBossRuneUpdateCells(updateCellsEvents);
         }
+
+        var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+        if (hitchMs >= RuntimeHitchWatch.InteractionSlowThresholdMs)
+        {
+            RuntimeHitchWatch.LogSlow(
+                _log,
+                "InteractionSync.OnHeroUpdate",
+                hitchMs,
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"openedDoors={_openedDoors.Count} elevatorSends={_elevatorLastInterSendTickMs.Count}"));
+        }
     }
 
     private void CheckAndCloseDoorsWhenNoOneNearby()
@@ -447,15 +465,15 @@ public class InteractionSync :
         if (level == null)
             return;
 
-        var toRemove = default(List<Door>?);
+        _scratchDoorsToRemove.Clear();
+        _scratchDoorsToClose.Clear();
         foreach (var door in _openedDoors)
         {
             try
             {
                 if (door == null || SafeRead(() => door.destroyed, true) || SafeRead(() => door.broken, false))
                 {
-                    toRemove ??= new List<Door>();
-                    toRemove.Add(door!);
+                    _scratchDoorsToRemove.Add(door!);
                     continue;
                 }
                 if (!_doorHadAutoClose.TryGetValue(door, out var hadAutoClose) || !hadAutoClose)
@@ -469,6 +487,19 @@ public class InteractionSync :
                 if (SafeRead(() => door.broken, false))
                     continue;
 
+                _scratchDoorsToClose.Add(door);
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "[InteractionSync] Door auto-close check failed");
+            }
+        }
+
+        if (_scratchDoorsToClose.Count > 0)
+        {
+            for (var i = 0; i < _scratchDoorsToClose.Count; i++)
+            {
+                var door = _scratchDoorsToClose[i];
                 _openedDoors.Remove(door);
                 try
                 {
@@ -480,16 +511,12 @@ public class InteractionSync :
                     _log.Warning(ex, "[InteractionSync] closeFast failed (door may be broken)");
                 }
             }
-            catch (Exception ex)
-            {
-                _log.Warning(ex, "[InteractionSync] Door auto-close check failed");
-            }
         }
 
-        if (toRemove != null)
+        if (_scratchDoorsToRemove.Count > 0)
         {
-            foreach (var d in toRemove)
-                _openedDoors.Remove(d);
+            for (var i = 0; i < _scratchDoorsToRemove.Count; i++)
+                _openedDoors.Remove(_scratchDoorsToRemove[i]);
         }
     }
 
@@ -638,7 +665,7 @@ public class InteractionSync :
         _applyingRemoteElevatorEvents = true;
         try
         {
-            var applied = new HashSet<Elevator>();
+            _scratchAppliedElevators.Clear();
             foreach (var ev in events)
             {
                 var elevator = FindElevatorByPos(level, ev.X, ev.Y);
@@ -648,7 +675,7 @@ public class InteractionSync :
                     continue;
                 }
 
-                if (!applied.Add(elevator))
+                if (!_scratchAppliedElevators.Add(elevator))
                     continue;
 
                 try
@@ -774,12 +801,13 @@ public class InteractionSync :
         _applyingRemoteBreakableGroundEvents = true;
         try
         {
-            var applied = new List<(double, double)>();
+            _scratchAppliedBreakableGround.Clear();
             foreach (var ev in events)
             {
                 var alreadyNearby = false;
-                foreach (var (ax, ay) in applied)
+                for (var i = 0; i < _scratchAppliedBreakableGround.Count; i++)
                 {
+                    var (ax, ay) = _scratchAppliedBreakableGround[i];
                     if (System.Math.Abs(ax - ev.X) <= BreakableGroundPosTolerance && System.Math.Abs(ay - ev.Y) <= BreakableGroundPosTolerance)
                     {
                         alreadyNearby = true;
@@ -791,7 +819,7 @@ public class InteractionSync :
 
                 var cx = (int)System.Math.Round(ev.X);
                 var cy = (int)System.Math.Round(ev.Y);
-                applied.Add((ev.X, ev.Y));
+                _scratchAppliedBreakableGround.Add((ev.X, ev.Y));
 
                 try
                 {

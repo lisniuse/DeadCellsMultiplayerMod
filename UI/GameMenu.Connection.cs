@@ -284,7 +284,7 @@ namespace DeadCellsMultiplayerMod
                     if (ts != null) ShowHostStatusMenu(ts);
                 }
 
-                EnqueueMainThread(() => ConnectionUI.RefreshLayoutAfterDisconnect());
+                EnqueueMainThreadCoalesced("ui:refresh-layout-after-disconnect", () => ConnectionUI.RefreshLayoutAfterDisconnect());
                 return;
             }
 
@@ -304,7 +304,7 @@ namespace DeadCellsMultiplayerMod
             if (wasInRun)
                 StartHostDisconnectCountdown();
 
-            EnqueueMainThread(() => ConnectionUI.RefreshLayoutAfterDisconnect());
+            EnqueueMainThreadCoalesced("ui:refresh-layout-after-disconnect", () => ConnectionUI.RefreshLayoutAfterDisconnect());
         }
 
         private static void SendUsernameToRemote()

@@ -5,6 +5,7 @@ using dc.tool;
 using HaxeProxy.Runtime;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using DeadCellsMultiplayerMod.KingHead;
+using DeadCellsMultiplayerMod.Tools;
 
 namespace DeadCellsMultiplayerMod
 {
@@ -12,19 +13,43 @@ namespace DeadCellsMultiplayerMod
     {
         private void UpdateGhostHeads()
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             var main = dc.Main.Class.ME;
             if (main == null || main.user == null)
             {
                 return;
             }
             var ftime = dc.pr.Game.Class.ME.ftime;
+            var now = Stopwatch.GetTimestamp();
+            var activeClients = 0;
+            var recreatedHeads = 0;
+            var updatedHeadFx = 0;
+            var throttledHeads = 0;
             for (int i = 0; i < clientHeads.Length; i++)
             {
                 var client = clients[i];
                 if (client == null)
                 {
                     pendingClientHeadRecreate[i] = false;
+                    ResetGhostHeadRuntimeState(i);
                     continue;
+                }
+                activeClients++;
+
+                var attemptedRecreate = false;
+                if (pendingClientHeadRecreate[i] && now >= clientNextHeadRecreateTick[i])
+                {
+                    attemptedRecreate = true;
+                    var recreateStart = RuntimeHitchWatch.Start();
+                    RecreateClientHead(i);
+                    if (clientHeads[i] != null)
+                        recreatedHeads++;
+                    LogGhostRuntimeStepIfSlow(
+                        "ModEntry.UpdateGhostHeads.RecreateClientHead",
+                        recreateStart,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"slot={i} remoteId={clientIds[i]} pending={CountPendingClientHeadRecreate()}"));
                 }
 
                 var head = clientHeads[i];
@@ -32,13 +57,114 @@ namespace DeadCellsMultiplayerMod
                 {
                     var hasKnownHead = !string.IsNullOrWhiteSpace(client.RemoteHeadSkinId) ||
                                        !string.IsNullOrWhiteSpace(clientHeadSkins[i]);
-                    if (pendingClientHeadRecreate[i] || hasKnownHead)
+                    if (!attemptedRecreate &&
+                        (pendingClientHeadRecreate[i] || hasKnownHead) &&
+                        now >= clientNextHeadRecreateTick[i])
+                    {
+                        var recreateStart = RuntimeHitchWatch.Start();
                         RecreateClientHead(i);
+                        if (clientHeads[i] != null)
+                            recreatedHeads++;
+                        LogGhostRuntimeStepIfSlow(
+                            "ModEntry.UpdateGhostHeads.RecreateClientHead",
+                            recreateStart,
+                            string.Create(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                $"slot={i} remoteId={clientIds[i]} pending={CountPendingClientHeadRecreate()}"));
+                    }
                     continue;
                 }
 
+                if (!ShouldUpdateGhostHead(i, client, now))
+                {
+                    throttledHeads++;
+                    continue;
+                }
+
+                var fxStart = RuntimeHitchWatch.Start();
                 head.updateHeadFx(ftime);
+                clientHeadDirty[i] = false;
+                clientNextHeadFxTick[i] = IsGhostHeadHighPriority(client)
+                    ? 0
+                    : now + (long)(Stopwatch.Frequency * GhostHeadDormantUpdateSeconds);
+                updatedHeadFx++;
+                LogGhostRuntimeStepIfSlow(
+                    "ModEntry.UpdateGhostHeads.HeadFx",
+                    fxStart,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"slot={i} remoteId={clientIds[i]}"));
             }
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Logger,
+                    "ModEntry.UpdateGhostHeads",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"activeClients={activeClients} updatedHeadFx={updatedHeadFx} recreatedHeads={recreatedHeads} throttledHeads={throttledHeads} pendingRecreate={CountPendingClientHeadRecreate()}"));
+            }
+        }
+
+        private static void ResetGhostHeadRuntimeState(int slot)
+        {
+            if (slot < 0 || slot >= clientHeadDirty.Length)
+                return;
+
+            clientHeadDirty[slot] = false;
+            clientNextHeadFxTick[slot] = 0;
+            clientNextHeadRecreateTick[slot] = 0;
+        }
+
+        private static void MarkGhostHeadDirty(int slot, bool immediate)
+        {
+            if (slot < 0 || slot >= clientHeadDirty.Length)
+                return;
+
+            clientHeadDirty[slot] = true;
+            if (immediate)
+                clientNextHeadFxTick[slot] = 0;
+        }
+
+        private void ScheduleGhostHeadRecreate(int slot, bool immediate)
+        {
+            if (slot < 0 || slot >= pendingClientHeadRecreate.Length)
+                return;
+
+            pendingClientHeadRecreate[slot] = true;
+            clientNextHeadRecreateTick[slot] = immediate
+                ? 0
+                : Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * GhostHeadRecreateRetrySeconds);
+            MarkGhostHeadDirty(slot, immediate: true);
+        }
+
+        private static bool IsGhostHeadHighPriority(GhostKing client)
+        {
+            if (client == null)
+                return false;
+
+            try
+            {
+                return client.visible && client.isOnScreen && !client.isOutOfGame;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool ShouldUpdateGhostHead(int slot, GhostKing client, long now)
+        {
+            if (slot < 0 || slot >= clientHeadDirty.Length)
+                return false;
+
+            if (IsGhostHeadHighPriority(client))
+                return true;
+
+            return clientHeadDirty[slot] || now >= clientNextHeadFxTick[slot];
         }
 
 
@@ -281,7 +407,7 @@ namespace DeadCellsMultiplayerMod
                 client.RemoteHeadSkinId = cleaned;
 
             if (!string.Equals(prev, cleaned, StringComparison.Ordinal) || client?.head == null)
-                instance.RecreateClientHead(index);
+                instance.ScheduleGhostHeadRecreate(index, immediate: true);
         }
 
         private static string NormalizeSkin(string? skin, string defaultSkin)
@@ -291,6 +417,7 @@ namespace DeadCellsMultiplayerMod
 
         private void RecreateClientHead(int slot)
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             if (slot < 0 || slot >= clients.Length)
                 return;
 
@@ -299,11 +426,12 @@ namespace DeadCellsMultiplayerMod
             var localLevel = localHero?._level;
             if (client == null || localHero == null || localLevel == null || client.spr == null)
             {
-                pendingClientHeadRecreate[slot] = true;
+                ScheduleGhostHeadRecreate(slot, immediate: false);
                 return;
             }
 
             var existing = clientHeads[slot];
+            var hadExisting = existing != null;
             if (existing != null)
             {
                 existing.dispose();
@@ -322,15 +450,25 @@ namespace DeadCellsMultiplayerMod
                 clientHeads[slot] = newHead;
                 client.head = newHead;
                 pendingClientHeadRecreate[slot] = false;
+                clientNextHeadRecreateTick[slot] = 0;
+                MarkGhostHeadDirty(slot, immediate: true);
             }
             finally
             {
                 remoteHeadSkin = previousGlobalHead;
             }
+
+            LogGhostRuntimeStepIfSlow(
+                "ModEntry.RecreateClientHead",
+                hitchStart,
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"slot={slot} remoteId={clientIds[slot]} hadExisting={(hadExisting ? 1 : 0)} desiredHead={desiredHead}"));
         }
 
         private void ReceiveGhostCoords()
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             var net = _net;
             var ghost = _ghost;
             if (net == null || me == null || ghost == null) return;
@@ -343,8 +481,15 @@ namespace DeadCellsMultiplayerMod
             if (string.IsNullOrWhiteSpace(localLevelId))
                 localLevelId = me._level?.map?.id?.ToString() ?? string.Empty;
 
+            var createdSlots = 0;
+            var updatedLabels = 0;
+            var playedAnims = 0;
+            var playedHeadAnims = 0;
+            var disposedSlots = 0;
+
             foreach (var remote in remotes)
             {
+                var remoteStart = RuntimeHitchWatch.Start();
                 if (!TryGetClientIndex(localId, remote.Id, out var index))
                     continue;
 
@@ -354,18 +499,32 @@ namespace DeadCellsMultiplayerMod
                 if (!ShouldKeepRemoteKingVisibleInRoom(remote, localLevelId))
                 {
                     QueueClientDisposeWithTransition(index);
+                    disposedSlots++;
+                    LogGhostRuntimeStepIfSlow(
+                        "ModEntry.ReceiveGhostCoords.Remote",
+                        remoteStart,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"remoteId={remote.Id} slot={index} disposed=1 anim={(remote.HasAnim ? 1 : 0)} headAnim={(remote.HasHeadAnim ? 1 : 0)}"));
                     continue;
                 }
 
                 CancelPendingClientDispose(index);
 
+                var hadClientBefore = clients[index] != null;
                 var client = EnsureClientKingSlot(index);
                 if (client == null)
                     continue;
+                if (!hadClientBefore)
+                {
+                    createdSlots++;
+                    MarkGhostHeadDirty(index, immediate: true);
+                }
 
                 var drawX = remote.X;
                 var drawY = remote.Y - 0.2d;
                 var useDownedOffset = false;
+                var headDirty = !hadClientBefore;
                 if (_remoteDowned.TryGetValue(remote.Id, out var downed))
                 {
                     var currentLevelId = GetCurrentLevelId();
@@ -386,31 +545,103 @@ namespace DeadCellsMultiplayerMod
                 }
 
                 if (useDownedOffset)
-                {
                     drawY -= DownedGhostBodyYOffsetPx;
-                    client._targetable = false;
-                }
-                else
+
+                if (clientLastDownedOffsets[index] != useDownedOffset)
                 {
-                    client._targetable = true;
+                    client._targetable = !useDownedOffset;
+                    clientLastDownedOffsets[index] = useDownedOffset;
+                    headDirty = true;
                 }
 
-                client.setPosPixel(drawX, drawY);
-                client.dir = remote.Dir;
-                rLastX[index] = drawX;
-                rLastY[index] = drawY;
+                if (rLastX[index] != drawX || rLastY[index] != drawY)
+                {
+                    client.setPosPixel(drawX, drawY);
+                    rLastX[index] = drawX;
+                    rLastY[index] = drawY;
+                    headDirty = true;
+                }
+
+                if (clientLastDirs[index] != remote.Dir)
+                {
+                    client.dir = remote.Dir;
+                    clientLastDirs[index] = remote.Dir;
+                    headDirty = true;
+                }
 
                 var newLabel = BuildRemoteLabel(remote.Id, remote.Username);
                 if (!string.Equals(clientLabels[index], newLabel, StringComparison.Ordinal))
                 {
+                    var labelStart = RuntimeHitchWatch.Start();
                     ghost.SetLabel(client, newLabel);
                     clientLabels[index] = newLabel;
+                    updatedLabels++;
+                    LogGhostRuntimeStepIfSlow(
+                        "ModEntry.ReceiveGhostCoords.SetLabel",
+                        labelStart,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"remoteId={remote.Id} slot={index} label={newLabel}"));
                 }
 
-                if (remote.HasAnim && !string.IsNullOrWhiteSpace(remote.Anim))
+                if (remote.HasAnim &&
+                    !string.IsNullOrWhiteSpace(remote.Anim) &&
+                    (!string.Equals(clientLastBodyAnims[index], remote.Anim, StringComparison.Ordinal) ||
+                     clientLastBodyAnimQueues[index] != remote.AnimQueue ||
+                     clientLastBodyAnimGs[index] != remote.AnimG))
+                {
+                    var animStart = RuntimeHitchWatch.Start();
                     PlayGhostAnim(client, remote.Anim!, remote.AnimQueue, remote.AnimG);
-                if(remote.HasHeadAnim && !string.IsNullOrWhiteSpace(remote.HeadAnim))
+                    clientLastBodyAnims[index] = remote.Anim;
+                    clientLastBodyAnimQueues[index] = remote.AnimQueue;
+                    clientLastBodyAnimGs[index] = remote.AnimG;
+                    playedAnims++;
+                    headDirty = true;
+                    LogGhostRuntimeStepIfSlow(
+                        "ModEntry.ReceiveGhostCoords.PlayGhostAnim",
+                        animStart,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"remoteId={remote.Id} slot={index} anim={remote.Anim}"));
+                }
+                if (remote.HasHeadAnim &&
+                    !string.IsNullOrWhiteSpace(remote.HeadAnim) &&
+                    !string.Equals(clientLastHeadAnims[index], remote.HeadAnim, StringComparison.Ordinal))
+                {
+                    var headAnimStart = RuntimeHitchWatch.Start();
                     PlayGhostHeadAnim(client, remote.HeadAnim);
+                    clientLastHeadAnims[index] = remote.HeadAnim;
+                    playedHeadAnims++;
+                    headDirty = true;
+                    LogGhostRuntimeStepIfSlow(
+                        "ModEntry.ReceiveGhostCoords.PlayGhostHeadAnim",
+                        headAnimStart,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"remoteId={remote.Id} slot={index} anim={remote.HeadAnim}"));
+                }
+
+                LogGhostRuntimeStepIfSlow(
+                    "ModEntry.ReceiveGhostCoords.Remote",
+                    remoteStart,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"remoteId={remote.Id} slot={index} created={(hadClientBefore ? 0 : 1)} downed={(useDownedOffset ? 1 : 0)} anim={(remote.HasAnim ? 1 : 0)} headAnim={(remote.HasHeadAnim ? 1 : 0)}"));
+
+                if (headDirty)
+                    MarkGhostHeadDirty(index, immediate: true);
+            }
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Logger,
+                    "ModEntry.ReceiveGhostCoords",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"remotes={remotes.Count} createdSlots={createdSlots} updatedLabels={updatedLabels} playedAnims={playedAnims} playedHeadAnims={playedHeadAnims} disposedSlots={disposedSlots}"));
             }
         }
 
@@ -512,6 +743,7 @@ namespace DeadCellsMultiplayerMod
 
         private GhostKing? EnsureClientKingSlot(int slot)
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             if (slot < 0 || slot >= clients.Length)
                 return null;
 
@@ -534,11 +766,19 @@ namespace DeadCellsMultiplayerMod
                 !string.IsNullOrWhiteSpace(knownHead) ? knownHead : remoteHeadSkin,
                 "BaseFlame");
             RecreateClientHead(slot);
+            MarkGhostHeadDirty(slot, immediate: true);
 
             if (!string.IsNullOrWhiteSpace(clientLabels[slot]))
                 _ghost.SetLabel(created, clientLabels[slot]);
 
             ApplyCachedRemoteDiveSkillInfoIfAny(clientIds[slot], created);
+
+            LogGhostRuntimeStepIfSlow(
+                "ModEntry.EnsureClientKingSlot",
+                hitchStart,
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"slot={slot} remoteId={clientIds[slot]} created=1 skin={(string.IsNullOrWhiteSpace(knownSkin) ? 0 : 1)} head={(string.IsNullOrWhiteSpace(knownHead) ? 0 : 1)}"));
 
             return created;
         }
@@ -559,6 +799,7 @@ namespace DeadCellsMultiplayerMod
                 clientHeads[slot] = null;
             }
             pendingClientHeadRecreate[slot] = false;
+            ResetGhostHeadRuntimeState(slot);
 
             var client = clients[slot];
             if (client != null)
@@ -568,6 +809,14 @@ namespace DeadCellsMultiplayerMod
                 client.disposeGfx();
             }
             clients[slot] = null!;
+            clientLastBodyAnims[slot] = null;
+            clientLastBodyAnimQueues[slot] = null;
+            clientLastBodyAnimGs[slot] = null;
+            clientLastHeadAnims[slot] = null;
+            clientLastDirs[slot] = 0;
+            clientLastDownedOffsets[slot] = false;
+            rLastX[slot] = 0;
+            rLastY[slot] = 0;
 
             if (!clearIdentity)
                 return;
@@ -581,21 +830,42 @@ namespace DeadCellsMultiplayerMod
 
             clientIds[slot] = 0;
             clientLabels[slot] = null;
-            rLastX[slot] = 0;
-            rLastY[slot] = 0;
         }
 
         private void ReceiveGhostWeapons()
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             var net = _net;
             if (net == null || me == null) return;
 
             if (!net.TryConsumeRemoteWeaponSnapshots(out var updates))
                 return;
 
+            var applied = 0;
+
             foreach (var update in updates)
             {
+                var updateStart = RuntimeHitchWatch.Start();
                 ApplyRemoteWeaponUpdate(update.Id, update.Kind, update.Slot, update.PermanentId, update.Ammo);
+                applied++;
+                LogGhostRuntimeStepIfSlow(
+                    "ModEntry.ReceiveGhostWeapons.ApplyRemoteWeaponUpdate",
+                    updateStart,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"remoteId={update.Id} slot={update.Slot} permanentId={update.PermanentId} ammo={(update.Ammo.HasValue ? update.Ammo.Value : -1)}"));
+            }
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Logger,
+                    "ModEntry.ReceiveGhostWeapons",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"updates={updates.Count} applied={applied}"));
             }
         }
 
@@ -611,6 +881,7 @@ namespace DeadCellsMultiplayerMod
 
         private void ReceiveGhostAttacks()
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             var net = _net;
             if (net == null || me == null) return;
 
@@ -618,10 +889,22 @@ namespace DeadCellsMultiplayerMod
                 return;
 
             var localId = net.id;
+            var diveHandled = 0;
+            var queuedAttacks = 0;
             foreach (var attack in attacks)
             {
+                var attackStart = RuntimeHitchWatch.Start();
                 if (TryHandleRemoteDiveAttack(attack, localId))
+                {
+                    diveHandled++;
+                    LogGhostRuntimeStepIfSlow(
+                        "ModEntry.ReceiveGhostAttacks.Remote",
+                        attackStart,
+                        string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"remoteId={attack.Id} slot={attack.Slot} dive=1 action={attack.Action}"));
                     continue;
+                }
 
                 if (attack.Slot < 0 &&
                     (string.IsNullOrWhiteSpace(attack.Kind) ||
@@ -640,17 +923,80 @@ namespace DeadCellsMultiplayerMod
                     client.kingWeaponsManager.queueInterrupt(attack.Slot);
                 else
                     client.kingWeaponsManager.queueAttack(attack.Slot);
+
+                queuedAttacks++;
+                LogGhostRuntimeStepIfSlow(
+                    "ModEntry.ReceiveGhostAttacks.Remote",
+                    attackStart,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"remoteId={attack.Id} slot={attack.Slot} dive=0 action={attack.Action} kind={attack.Kind ?? string.Empty}"));
+            }
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Logger,
+                    "ModEntry.ReceiveGhostAttacks",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"attacks={attacks.Count} diveHandled={diveHandled} queuedAttacks={queuedAttacks}"));
             }
         }
 
         private void UpdateGhostWeapons()
         {
+            var hitchStart = RuntimeHitchWatch.Start();
+            var activeManagers = 0;
             for (int i = 0; i < clients.Length; i++)
             {
                 var client = clients[i];
                 if (client?.kingWeaponsManager == null) continue;
+                activeManagers++;
+                var managerStart = RuntimeHitchWatch.Start();
                 client.kingWeaponsManager.update();
+                LogGhostRuntimeStepIfSlow(
+                    "ModEntry.UpdateGhostWeapons.Manager",
+                    managerStart,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"slot={i} remoteId={clientIds[i]} shield={(client.kingWeaponsManager.IsShieldActive ? 1 : 0)}"));
             }
+
+            var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
+            if (hitchMs >= RuntimeHitchWatch.GhostRuntimeSlowThresholdMs)
+            {
+                RuntimeHitchWatch.LogSlow(
+                    Logger,
+                    "ModEntry.UpdateGhostWeapons",
+                    hitchMs,
+                    string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        $"activeManagers={activeManagers} clients={clients.Length}"));
+            }
+        }
+
+        private static int CountPendingClientHeadRecreate()
+        {
+            var count = 0;
+            for (int i = 0; i < pendingClientHeadRecreate.Length; i++)
+            {
+                if (pendingClientHeadRecreate[i])
+                    count++;
+            }
+
+            return count;
+        }
+
+        private void LogGhostRuntimeStepIfSlow(string key, long stepStart, string? details)
+        {
+            var stepMs = RuntimeHitchWatch.GetElapsedMilliseconds(stepStart);
+            if (stepMs < RuntimeHitchWatch.GhostRuntimeStepSlowThresholdMs)
+                return;
+
+            RuntimeHitchWatch.LogSlow(Logger, key, stepMs, details);
         }
 
         private void PlayGhostAnim(GhostKing client, string anim, int? queueAnim, bool? g)
@@ -816,6 +1162,7 @@ namespace DeadCellsMultiplayerMod
 
         private void ApplyRemoteWeaponUpdate(int remoteId, string? kindId, int slot, int permanentId, int? ammo = null)
         {
+            var hitchStart = RuntimeHitchWatch.Start();
             if (string.IsNullOrWhiteSpace(kindId)) return;
             var net = _net;
             var localId = net?.id ?? 0;
@@ -892,6 +1239,13 @@ namespace DeadCellsMultiplayerMod
             {
                 _inventorySyncGuard = false;
             }
+
+            LogGhostRuntimeStepIfSlow(
+                "ModEntry.ApplyRemoteWeaponUpdate",
+                hitchStart,
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"remoteId={remoteId} slot={slot} permanentId={permanentId} ammo={(ammo.HasValue ? ammo.Value : -1)} kind={cleaned}"));
         }
 
         private static void ApplyRemoteWeaponAmmo(InventItem item, int? ammo)
