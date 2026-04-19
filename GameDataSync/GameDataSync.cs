@@ -107,6 +107,9 @@ namespace DeadCellsMultiplayerMod
         private static readonly HashSet<int> _remotePlannedLoresSnapshot = new();
         private static int _remoteStoryDataVersion;
         private static bool _hasRemoteStoryDataVersion;
+        private static readonly object _sameRunRestartSync = new();
+        private static bool _sameRunRestartPending;
+        private static int _sameRunRestartSeed;
 
         public GameDataSync(Serilog.ILogger log)
         {
@@ -130,21 +133,44 @@ namespace DeadCellsMultiplayerMod
         bool mode,
         LaunchMode gdata)
         {
-            isCustom = false;
-            mode = false;
+            var sameRunRestart = TryPeekSameRunRestartSeed(out var restartSeed);
+            var effectiveLaunch = gdata;
+            var effectiveStreamEnabled = isCustom;
+            var effectiveCustomMode = mode;
+            if (gdata is LaunchMode.NewGame newGame)
+            {
+                if (GameMenu.TryGetAuthoritativePendingNewGameLaunch(out var selectedCustom, out var selectedStreamEnabled))
+                {
+                    effectiveCustomMode = selectedCustom;
+                    effectiveStreamEnabled = selectedStreamEnabled;
+                    effectiveLaunch = new LaunchMode.NewGame(selectedCustom, selectedStreamEnabled);
+                }
+                else
+                {
+                    effectiveCustomMode = newGame.Param0;
+                    effectiveStreamEnabled = newGame.Param1;
+                }
+            }
             Seed = lvl;
             ModEntry.me = null!;
             ModEntry.ResetClientSlots();
             ModEntry.kingInitialized = false;
             ModEntry._ghost = null!;
+            ModEntry.ResetHeroCosmeticSendCache();
+            _lastHeroSkinSyncNet = null;
+            _lastHeroSkinSyncPayload = null;
+            _lastHeroHeadSkinSyncNet = null;
+            _lastHeroHeadSkinSyncPayload = null;
             var net = GameMenu.NetRef;
-            var shouldSynchronizeSeed = ShouldSynchronizeRunSeed(gdata);
+            var shouldSynchronizeSeed = ShouldSynchronizeRunSeed(effectiveLaunch);
             if (net == null || !net.IsAlive)
                 RestoreOriginalUserState(self, true);
 
             if (net != null && net.IsHost)
             {
-                if (shouldSynchronizeSeed)
+                if (sameRunRestart)
+                    Seed = restartSeed;
+                else if (shouldSynchronizeSeed)
                     Seed = GameMenu.ForceGenerateServerSeed("NewGame_hook");
                 else
                     Seed = lvl;
@@ -155,7 +181,11 @@ namespace DeadCellsMultiplayerMod
             }
             else if (net != null)
             {
-                if (shouldSynchronizeSeed && GameMenu.TryGetRemoteSeed(out var remoteSeed))
+                if (sameRunRestart)
+                {
+                    Seed = restartSeed;
+                }
+                else if (shouldSynchronizeSeed && GameMenu.TryGetRemoteSeed(out var remoteSeed))
                 {
                     Seed = remoteSeed;
                 }
@@ -171,24 +201,120 @@ namespace DeadCellsMultiplayerMod
                 {
                     _log?.Warning("[NetMod] Remote boss rune not received yet");
                 }
-
                 CaptureOriginalUserData(self, allowReplaceWhenBetter: true);
             }
             lvl = Seed;
             _isTwitch = isTwitch;
-            _isCustom = isCustom;
-            _mode = mode;
-            _launch = gdata;
+            _isCustom = effectiveCustomMode;
+            _mode = effectiveCustomMode;
+            _launch = effectiveLaunch;
             self.pickDeathItem();
+            try
+            {
+                orig(self, lvl, isTwitch, effectiveStreamEnabled, effectiveCustomMode, effectiveLaunch);
+            }
+            finally
+            {
+                GameMenu.ClearAuthoritativePendingNewGameLaunch();
+                if (sameRunRestart)
+                    ClearSameRunRestart();
+            }
+
             SendHeroSkin(self, net);
             SendHeroHeadSkin(self, net);
-            orig(self, lvl, isTwitch, isCustom, mode, gdata);
 
         }
 
         private static bool ShouldSynchronizeRunSeed(LaunchMode? launch)
         {
+            lock (_sameRunRestartSync)
+            {
+                if (_sameRunRestartPending)
+                    return false;
+            }
+
             return launch is LaunchMode.NewGame;
+        }
+
+        internal static void BeginSameRunRestart(int seed)
+        {
+            lock (_sameRunRestartSync)
+            {
+                _sameRunRestartPending = true;
+                _sameRunRestartSeed = seed;
+            }
+        }
+
+        private static bool TryPeekSameRunRestartSeed(out int seed)
+        {
+            lock (_sameRunRestartSync)
+            {
+                if (_sameRunRestartPending)
+                {
+                    seed = _sameRunRestartSeed;
+                    return true;
+                }
+            }
+
+            seed = 0;
+            return false;
+        }
+
+        private static void ClearSameRunRestart()
+        {
+            lock (_sameRunRestartSync)
+            {
+                _sameRunRestartPending = false;
+                _sameRunRestartSeed = 0;
+            }
+        }
+
+        internal static bool ResolveCurrentRunIsCustom()
+        {
+            try
+            {
+                var currentCustomGame = dc.pr.Game.Class.ME?.data?.cgData;
+                if (currentCustomGame != null)
+                    return true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var mainGameData = dc.Main.Class.ME?.user?.mainGameData;
+                if (mainGameData != null)
+                    return mainGameData.isCustom;
+            }
+            catch
+            {
+            }
+
+            return _isCustom;
+        }
+
+        internal static bool ResolveCurrentRunStreamEnabled()
+        {
+            try
+            {
+                var game = dc.pr.Game.Class.ME;
+                if (game?.data != null)
+                    return game.data._twitchMode;
+            }
+            catch
+            {
+            }
+
+            if (_launch is LaunchMode.NewGame storedNewGame)
+                return storedNewGame.Param1;
+
+            return false;
+        }
+
+        internal static LaunchMode BuildSameRunRestartLaunchMode()
+        {
+            return new LaunchMode.NewGame(ResolveCurrentRunIsCustom(), ResolveCurrentRunStreamEnabled());
         }
 
         public static void MarkProgressPayloadDirty() { }

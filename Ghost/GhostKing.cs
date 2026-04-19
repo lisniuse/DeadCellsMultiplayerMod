@@ -947,7 +947,7 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         public void initScarf()
         {
-            var skinInfo = ResolveBodySkinInfo(RemoteSkinId ?? ModEntry.Instance?.remoteSkin, out var resolvedSkinId);
+            var skinInfo = ResolveBodySkinInfo(RemoteSkinId, out var resolvedSkinId);
             if (skinInfo == null)
             {
                 DisposeScarf();
@@ -1017,7 +1017,7 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
         public override void initGfx()
         {
             base.initGfx();
-            var skinInfo = ResolveBodySkinInfo(RemoteSkinId ?? ModEntry.Instance?.remoteSkin, out var resolvedSkinId);
+            var skinInfo = ResolveBodySkinInfo(RemoteSkinId, out var resolvedSkinId);
             if (skinInfo == null)
                 return;
 

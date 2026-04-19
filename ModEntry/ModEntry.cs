@@ -39,6 +39,7 @@ using DeadCellsMultiplayerMod.Mobs.Levelinit;
 using dc.en.inter.door;
 using DeadCellsMultiplayerMod.Interaction;
 using DeadCellsMultiplayerMod.UI;
+using System.Collections.Generic;
 
 
 namespace DeadCellsMultiplayerMod
@@ -79,6 +80,7 @@ namespace DeadCellsMultiplayerMod
         public static int[] clientIds = new int[NetNode.MaxClientSlots];
         public static string?[] clientSkins = new string?[NetNode.MaxClientSlots];
         public static string?[] clientHeadSkins = new string?[NetNode.MaxClientSlots];
+        private static readonly Dictionary<int, int> clientSlotByRemoteId = new();
         private static bool[] pendingClientHeadRecreate = new bool[NetNode.MaxClientSlots];
         private static string?[] clientLastBodyAnims = new string?[NetNode.MaxClientSlots];
         private static int?[] clientLastBodyAnimQueues = new int?[NetNode.MaxClientSlots];
@@ -148,9 +150,7 @@ namespace DeadCellsMultiplayerMod
         private const double ReviveUseDistancePx = 48.0;
         private const double ReviveAttemptCooldownSeconds = 0.2;
         private const double ReviveHoldSeconds = 0.7;
-        private const double ReviveHomunculusBodyMaxDistancePx = 64.0;
         private const double DownedStateResendSeconds = 0.4;
-        private const double DownedHeadStateResendSeconds = 1.0 / 30.0;
         private const double DownedGhostBodyYOffsetPx = 40.0;
         private const double LocalReviveBodyYOffsetPx = 0.5;
         private const double PostRevivePositionLockSeconds = 0.0;
@@ -165,11 +165,6 @@ namespace DeadCellsMultiplayerMod
             public int UserId;
             public double X;
             public double Y;
-            public bool HasHeadPosition;
-            public double HeadX;
-            public double HeadY;
-            public bool HasHeadAnim;
-            public string HeadAnim = string.Empty;
             public string LevelId = string.Empty;
             public long UpdatedAtTicks;
         }
@@ -288,6 +283,7 @@ namespace DeadCellsMultiplayerMod
 
         internal static void ResetClientSlots()
         {
+            clientSlotByRemoteId.Clear();
             for (int i = 0; i < clients.Length; i++)
             {
                 var head = clientHeads[i];
@@ -924,7 +920,7 @@ namespace DeadCellsMultiplayerMod
             _appliedBossHeroTeleportLevels.Clear();
             _lastBossCineSentLevelId = null;
             _lastBossCineSentTick = 0;
-            ResetFakeDeathState(unlockLocalHero: true, sendNetworkUpState: false, clearRemoteDownedTracking: false, clearDownedAnnouncements: false);
+            ResetFakeDeathState(unlockLocalHero: true, sendNetworkUpState: false);
             me = self;
             me._targetable = true;
             orig(self, oldLevel);
@@ -993,6 +989,7 @@ namespace DeadCellsMultiplayerMod
             ApplyReceivedBossHeroTeleport();
             ApplyReceivedBossCine();
             SuppressRemoteBossDeathCineIfNeeded();
+            ProcessCameraSpectateInput();
 
             var hitchMs = RuntimeHitchWatch.GetElapsedMilliseconds(hitchStart);
             if (hitchMs >= RuntimeHitchWatch.ModFrameSlowThresholdMs)

@@ -1,3 +1,4 @@
+using dc;
 using dc.en;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using HaxeProxy.Runtime;
@@ -10,7 +11,6 @@ namespace DeadCellsMultiplayerMod
     {
         private readonly Hero _hero;
         private HeroDeadCorpse? _corpse;
-        private Homunculus? _homunculus;
         private bool _lethalFallStarted;
         private bool _cineSuppressed;
         private bool _hadHeroVisibleState;
@@ -34,12 +34,14 @@ namespace DeadCellsMultiplayerMod
             HideHero();
             CreateCorpse();
             SuppressCineEffects();
-            EnsureViewportTracksHero(immediate: true);
+            ReleaseBlockingCinematicState();
+            EnsureViewportTracksCurrentSubject(immediate: true);
         }
 
         public override void update()
         {
             base.update();
+            ReleaseBlockingCinematicState();
 
             if (_hero == null || _hero.destroyed)
             {
@@ -49,21 +51,14 @@ namespace DeadCellsMultiplayerMod
 
             SuppressCineEffects();
 
-            var hasLiveHomunculus = HasLiveHomunculus();
-
             try { _hero.cancelVelocities(); } catch { }
-            if (!hasLiveHomunculus)
-            {
-                try { _hero.lockControlsS(0.25); } catch { }
-            }
+            try { _hero.lockControlsS(0.25); } catch { }
             try { _hero.cancelSkillControlLock(); } catch { }
 
             HideHero();
             EnsureCorpse();
-            EnsureHomunculus();
-            MaintainLocalHomunculusControl();
             EnsureCorpseFalling();
-            EnsureViewportTracksHero(immediate: false);
+            EnsureViewportTracksCurrentSubject(immediate: false);
         }
 
         public override void onDispose()
@@ -71,9 +66,8 @@ namespace DeadCellsMultiplayerMod
             base.onDispose();
             RestoreCineState();
             DisposeCorpse();
-            DisposeHomunculus();
             RestoreHeroVisibility();
-            EnsureViewportTracksHero(immediate: true);
+            EnsureViewportTracksCurrentSubject(immediate: true);
         }
 
         private void EnsureCorpse()
@@ -83,16 +77,9 @@ namespace DeadCellsMultiplayerMod
                 CreateCorpse();
         }
 
-        private void EnsureHomunculus()
-        {
-            // Fake-death flow no longer uses Homunculus.
-            DisposeHomunculus();
-        }
-
         private void CreateCorpse()
         {
             DisposeCorpse();
-            DisposeHomunculus();
 
             try
             {
@@ -330,37 +317,16 @@ namespace DeadCellsMultiplayerMod
             return false;
         }
 
-        private void CreateHomunculus(HeroDeadCorpse corpse)
+        private void ReleaseBlockingCinematicState()
         {
-            _homunculus = null;
-        }
-
-        private bool HasLiveHomunculus()
-        {
-            return false;
-        }
-
-        private void MaintainLocalHomunculusControl()
-        {
-            // No-op: local fake-death should not create/control Homunculus.
-        }
-
-        private static dc.tool.mainSkills.Homunculus? GetHomunculusSkill(Hero? hero)
-        {
-            if (hero == null)
-                return null;
-
             try
             {
-                var manager = hero.mainSkillsManager;
-                if (manager == null)
-                    return null;
-
-                return manager.getMainSkill(dc.tool.mainSkills.Homunculus.Class) as dc.tool.mainSkills.Homunculus;
+                var game = dc.pr.Game.Class.ME;
+                if (game != null && ReferenceEquals(game.curCine, this))
+                    game.curCine = null;
             }
             catch
             {
-                return null;
             }
         }
 
@@ -430,37 +396,29 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
-        public bool TryGetHomunculusPixelPosition(out double x, out double y)
+        public bool TryGetPreferredControlEntity(out Entity entity)
         {
-            // Keep network/revive logic compatible by mirroring corpse position
-            // when fake-death head is disabled.
-            if (TryGetCorpsePixelPosition(out x, out y))
+            var corpse = _corpse;
+            if (corpse != null && !corpse.destroyed)
+            {
+                entity = corpse;
                 return true;
+            }
 
-            x = 0;
-            y = 0;
+            if (_hero != null && !_hero.destroyed)
+            {
+                entity = _hero;
+                return true;
+            }
+
+            entity = null!;
             return false;
         }
 
-        public bool TryGetHomunculusAnim(out string? anim)
+        public bool HasCorpseForRevive()
         {
-            anim = null;
-            return false;
-        }
-
-        public bool IsHomunculusNearCorpse(double maxDistancePx)
-        {
-            if (maxDistancePx <= 0)
-                return false;
-
-            if (!TryGetCorpsePixelPosition(out var corpseX, out var corpseY))
-                return false;
-            if (!TryGetHomunculusPixelPosition(out var headX, out var headY))
-                return false;
-
-            var dx = headX - corpseX;
-            var dy = headY - corpseY;
-            return dx * dx + dy * dy <= maxDistancePx * maxDistancePx;
+            var corpse = _corpse;
+            return corpse != null && !corpse.destroyed;
         }
 
         public bool IsCorpseInLethalFall()
@@ -717,19 +675,27 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
-        private void EnsureViewportTracksHero(bool immediate)
+        private void EnsureViewportTracksCurrentSubject(bool immediate)
         {
-            if (_hero == null || _hero.destroyed)
+            Entity? preferred = null;
+            if (_corpse != null && !_corpse.destroyed)
+                preferred = _corpse;
+            else if (_hero != null && !_hero.destroyed)
+                preferred = _hero;
+
+            preferred = ModEntry.ResolvePreferredCameraTarget(preferred);
+            if (preferred == null)
                 return;
 
             try
             {
-                var viewport = _hero._level?.viewport;
+                var hero = _hero;
+                var viewport = preferred._level?.viewport ?? hero?._level?.viewport;
                 if (viewport == null)
                     return;
 
-                if (!ReferenceEquals(viewport.tracked, _hero))
-                    viewport.track(_hero, immediate);
+                if (immediate || !ReferenceEquals(viewport.tracked, preferred))
+                    viewport.track(preferred, immediate);
             }
             catch
             {
@@ -811,42 +777,6 @@ namespace DeadCellsMultiplayerMod
             catch { }
 
             try { corpse.dispose(); } catch { }
-        }
-
-        private void DisposeHomunculus()
-        {
-            var hom = _homunculus;
-            _homunculus = null;
-            if (hom == null)
-                return;
-
-            RemoveFromHomunculusSkillEntityList(hom);
-            try
-            {
-                if (!hom.destroyed)
-                    hom.destroy();
-            }
-            catch
-            {
-            }
-
-            try { hom.dispose(); } catch { }
-        }
-
-        private static void RemoveFromHomunculusSkillEntityList(Homunculus hom)
-        {
-            if (hom == null)
-                return;
-
-            try
-            {
-                var bucketObj = hom._level?.entitiesByClass?.get(17969);
-                if (bucketObj is dc.hl.types.ArrayObj bucket)
-                    bucket.remove(hom);
-            }
-            catch
-            {
-            }
         }
     }
 }

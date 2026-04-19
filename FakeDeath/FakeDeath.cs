@@ -420,11 +420,6 @@ namespace DeadCellsMultiplayerMod
 
                     existing.X = state.X;
                     existing.Y = state.Y;
-                    existing.HasHeadPosition = state.HasHeadPosition;
-                    existing.HeadX = state.HeadX;
-                    existing.HeadY = state.HeadY;
-                    existing.HasHeadAnim = state.HasHeadAnim;
-                    existing.HeadAnim = state.HasHeadAnim ? (state.HeadAnim ?? string.Empty) : string.Empty;
                     existing.LevelId = state.LevelId ?? string.Empty;
                     existing.UpdatedAtTicks = Stopwatch.GetTimestamp();
 
@@ -500,7 +495,7 @@ namespace DeadCellsMultiplayerMod
                     if (req.TargetId != localId)
                         continue;
 
-                    if (_localDeadCine == null || !_localDeadCine.IsHomunculusNearCorpse(ReviveHomunculusBodyMaxDistancePx))
+                    if (_localDeadCine == null || !_localDeadCine.HasCorpseForRevive())
                         continue;
 
                     ReviveLocalPlayer(net);
@@ -604,10 +599,7 @@ namespace DeadCellsMultiplayerMod
                         cine.UpdateTarget(
                             state.X,
                             state.Y,
-                            client.dir,
-                            state.HasHeadPosition ? state.HeadX : null,
-                            state.HasHeadPosition ? state.HeadY : null,
-                            state.HasHeadAnim ? state.HeadAnim : null);
+                            client.dir);
                     }
                     catch { DisposeRemoteDownedCine(state.UserId); }
                 }
@@ -773,7 +765,7 @@ namespace DeadCellsMultiplayerMod
 
             try { hero._targetable = false; } catch { }
             try { hero.cancelVelocities(); } catch { }
-            try { hero.lockControlsS(10.0); } catch { }
+            try { hero.lockControlsS(0.25); } catch { }
             try { hero.cancelSkillControlLock(); } catch { }
             SnapHeroToDownedPosition(hero, _localDownedX, _localDownedY, clampToGround: false);
             StartLocalDeadCine(hero);
@@ -816,11 +808,11 @@ namespace DeadCellsMultiplayerMod
                 ResetAllDownedGameOverState();
 
             try { me.cancelVelocities(); } catch { }
+            var cine = _localDeadCine;
             try { me.lockControlsS(0.25); } catch { }
             try { me.cancelSkillControlLock(); } catch { }
             try { me._targetable = false; } catch { }
 
-            var cine = _localDeadCine;
             if (cine != null && cine.TryGetCorpsePixelPosition(out var corpseX, out var corpseY))
             {
                 TryUpdateDownedPositionFromCorpse(corpseX, corpseY);
@@ -1115,16 +1107,6 @@ namespace DeadCellsMultiplayerMod
                 if (distSq > ReviveUseDistancePx * ReviveUseDistancePx)
                     continue;
 
-                if (state.HasHeadPosition)
-                {
-                    var hdx = state.HeadX - state.X;
-                    var hdy = state.HeadY - state.Y;
-                    var headBodyDistSq = hdx * hdx + hdy * hdy;
-                    var maxHeadBodySq = ReviveHomunculusBodyMaxDistancePx * ReviveHomunculusBodyMaxDistancePx * 16.0;
-                    if (headBodyDistSq > maxHeadBodySq)
-                        continue;
-                }
-
                 if (distSq < bestDistSq)
                 {
                     bestDistSq = distSq;
@@ -1224,24 +1206,8 @@ namespace DeadCellsMultiplayerMod
             if (net == null || net.id <= 0)
                 return;
 
-            double? headX = null;
-            double? headY = null;
-            string? headAnim = null;
-            if (isDowned && _localDeadCine != null && _localDeadCine.TryGetHomunculusPixelPosition(out var hx, out var hy))
-            {
-                headX = hx;
-                headY = hy;
-                _localDeadCine.TryGetHomunculusAnim(out headAnim);
-            }
-
             var now = Stopwatch.GetTimestamp();
             var resend = (long)(Stopwatch.Frequency * DownedStateResendSeconds);
-            if (isDowned && headX.HasValue && headY.HasValue)
-            {
-                var fastResend = (long)(Stopwatch.Frequency * DownedHeadStateResendSeconds);
-                if (fastResend > 0 && (resend <= 0 || fastResend < resend))
-                    resend = fastResend;
-            }
             if (!force && _nextDownedStateSendTicks != 0 && now < _nextDownedStateSendTicks)
                 return;
 
@@ -1251,7 +1217,7 @@ namespace DeadCellsMultiplayerMod
             var x = isDowned ? _localDownedX : (me?.spr?.x ?? _localDownedX);
             var y = isDowned ? _localDownedY : (me?.spr?.y ?? _localDownedY);
 
-            net.SendPlayerDownState(isDowned, x, y, level, headX, headY, headAnim);
+            net.SendPlayerDownState(isDowned, x, y, level);
             _nextDownedStateSendTicks = now + resend;
         }
 
@@ -1283,7 +1249,7 @@ namespace DeadCellsMultiplayerMod
 
             try
             {
-                _localDeadCine = new DeadBase(hero, ModEntry.GetPrimaryClient());
+                _localDeadCine = new DeadBase(hero, null);
             }
             catch
             {

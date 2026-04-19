@@ -691,6 +691,8 @@ public sealed partial class NetNode
         var hasHeadPosition = false;
         var headX = 0d;
         var headY = 0d;
+        var hasHeadDir = false;
+        var headDir = 0;
         var hasHeadAnim = false;
         string? headAnim = null;
         if (parts.Length >= 7 &&
@@ -703,16 +705,35 @@ public sealed partial class NetNode
 
             if (parts.Length >= 8)
             {
-                var parsedAnim = (parts[7] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
-                if (!string.IsNullOrWhiteSpace(parsedAnim))
+                if (int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedHeadDir) &&
+                    parsedHeadDir != 0)
                 {
-                    hasHeadAnim = true;
-                    headAnim = parsedAnim;
+                    hasHeadDir = true;
+                    headDir = parsedHeadDir < 0 ? -1 : 1;
+
+                    if (parts.Length >= 9)
+                    {
+                        var parsedAnim = (parts[8] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+                        if (!string.IsNullOrWhiteSpace(parsedAnim))
+                        {
+                            hasHeadAnim = true;
+                            headAnim = parsedAnim;
+                        }
+                    }
+                }
+                else
+                {
+                    var parsedAnim = (parts[7] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(parsedAnim))
+                    {
+                        hasHeadAnim = true;
+                        headAnim = parsedAnim;
+                    }
                 }
             }
         }
 
-        state = new PlayerDownState(parsedUserId, isDowned, x, y, levelId, hasHeadPosition, headX, headY, hasHeadAnim, headAnim);
+        state = new PlayerDownState(parsedUserId, isDowned, x, y, levelId, hasHeadPosition, headX, headY, hasHeadDir, headDir, hasHeadAnim, headAnim);
         return true;
     }
 

@@ -33,6 +33,15 @@ public sealed partial class NetNode
         _log.Information("[NetNode] Sent seed {Seed}", seed);
     }
 
+    public void SendRunRestart(int seed)
+    {
+        if (!HasAnyConnection())
+            return;
+
+        var line = string.Create(CultureInfo.InvariantCulture, $"RESTART|{seed}\n");
+        _ = SendLineSafe(line);
+    }
+
     public void SendSerializerSync(int seq, int uid)
     {
         if (_role != NetRole.Host)
@@ -80,6 +89,17 @@ public sealed partial class NetNode
         var idPart = ID > 0 ? $"{ID}|" : string.Empty;
         SendRaw("USER|" + idPart + safe);
         _log.Information("[NetNode] Sent username {Username}", safe);
+    }
+
+    public void SendReady(bool ready)
+    {
+        if (ID <= 0)
+            return;
+
+        if (!HasAnyConnection())
+            return;
+
+        _ = SendLineSafe(BuildReadyLine(ID, ready));
     }
 
     public void SendBossRune(int bossRune)
@@ -408,7 +428,7 @@ public sealed partial class NetNode
         _log.Information("[NetNode] Sent hero death");
     }
 
-    public void SendPlayerDownState(bool isDowned, double x, double y, string? levelId, double? headX = null, double? headY = null, string? headAnim = null)
+    public void SendPlayerDownState(bool isDowned, double x, double y, string? levelId, double? headX = null, double? headY = null, int? headDir = null, string? headAnim = null)
     {
         if (!HasAnyConnection())
             return;
@@ -416,8 +436,9 @@ public sealed partial class NetNode
             return;
 
         var hasHead = isDowned && headX.HasValue && headY.HasValue;
+        var hasHeadDir = hasHead && headDir.HasValue && headDir.Value != 0;
         var hasAnim = hasHead && !string.IsNullOrWhiteSpace(headAnim);
-        var state = new PlayerDownState(ID, isDowned, x, y, levelId ?? string.Empty, hasHead, headX ?? 0, headY ?? 0, hasAnim, headAnim);
+        var state = new PlayerDownState(ID, isDowned, x, y, levelId ?? string.Empty, hasHead, headX ?? 0, headY ?? 0, hasHeadDir, headDir ?? 0, hasAnim, headAnim);
         var line = BuildPlayerDownLine(state);
         _ = SendLineSafe(line);
     }

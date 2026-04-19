@@ -394,6 +394,7 @@ public sealed partial class NetNode
                 continue;
             var line = BuildTaggedLine("USER", state.Id, username);
             await SendLineToClientSafe(connection, line).ConfigureAwait(false);
+            await SendLineToClientSafe(connection, BuildReadyLine(state.Id, state.Ready)).ConfigureAwait(false);
         }
     }
 }

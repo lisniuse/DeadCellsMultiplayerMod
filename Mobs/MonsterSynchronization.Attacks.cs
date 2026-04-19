@@ -404,24 +404,23 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     baselineSource = authoritativeBaselineSource;
                 }
 
-                // Do not let a side/stale level replace the live gameplay combat level with an empty tracked set.
-                if (authoritativeBaselineTrackedCount > 0 &&
-                    !candidateMatchesAuthoritative &&
-                    candidateTrackedCount <= 0)
+                if (!candidateMatchesAuthoritative)
                 {
-                    reason = "non_active_level_rebuild";
+                    reason = authoritativeBaselineTrackedCount > 0
+                        ? "non_active_level_rebuild"
+                        : "non_active_level_bootstrap";
                     return false;
                 }
             }
 
+            if (candidateTrackedCount <= 0)
+            {
+                reason = sameIdentity ? "same_identity_empty" : "candidate_empty";
+                return false;
+            }
+
             if (baselineTrackedCount > 0)
             {
-                if (candidateTrackedCount <= 0)
-                {
-                    reason = "same_identity_empty";
-                    return false;
-                }
-
                 if (candidateTrackedCount < baselineTrackedCount)
                 {
                     reason = "same_identity_partial";
@@ -536,6 +535,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             s_levelIdentityToken = 0;
             s_lastIgnoredDuplicateLevelId = string.Empty;
             s_lastIgnoredDuplicateIdentityToken = 0;
+            s_lastIgnoredForeignLevelId = string.Empty;
+            s_lastIgnoredForeignIdentityToken = 0;
         }
 
         private static bool IsLevelIdentityReadyLocked(Level? level)

@@ -43,11 +43,16 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
 
                 if (isHost)
                 {
-                    playerNames.Add(localName + " (Host) (you)");
+                    playerNames.Add(GameMenu.BuildConnectionPlayerDisplayLine(
+                        localName,
+                        isHost: true,
+                        isLocal: true,
+                        ready: GameMenu.IsLocalReadyForUi()));
                 }
                 else
                 {
                     string? hostName = null;
+                    var hostReady = false;
                     if (hasSnapshots)
                     {
                         for (int i = 0; i < snapshots.Count; i++)
@@ -57,6 +62,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
                                 continue;
 
                             hostName = GetPlayerName(localId, remote.Id, remote.Username ?? string.Empty);
+                            net.TryGetRemoteReady(remote.Id, out hostReady);
                             break;
                         }
                     }
@@ -66,8 +72,16 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
                         var fallbackHost = GameMenu.RemoteUsername;
                         hostName = string.IsNullOrWhiteSpace(fallbackHost) ? "Host" : fallbackHost.Trim();
                     }
-                    playerNames.Add(hostName + " (Host)");
-                    playerNames.Add(localName + " (you)");
+                    playerNames.Add(GameMenu.BuildConnectionPlayerDisplayLine(
+                        hostName,
+                        isHost: true,
+                        isLocal: false,
+                        ready: hostReady));
+                    playerNames.Add(GameMenu.BuildConnectionPlayerDisplayLine(
+                        localName,
+                        isHost: false,
+                        isLocal: true,
+                        ready: GameMenu.IsLocalReadyForUi()));
                 }
 
                 if (hasSnapshots)
@@ -83,7 +97,12 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
                             continue;
 
                         string displayName = GetPlayerName(localId, remote.Id, remote.Username ?? string.Empty);
-                        playerNames.Add(displayName);
+                        net.TryGetRemoteReady(remote.Id, out var ready);
+                        playerNames.Add(GameMenu.BuildConnectionPlayerDisplayLine(
+                            displayName,
+                            isHost: false,
+                            isLocal: false,
+                            ready: ready));
                     }
                 }
 

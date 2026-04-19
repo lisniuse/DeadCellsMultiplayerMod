@@ -87,6 +87,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static int s_lastCommittedTrackedCount;
         private static string s_lastIgnoredDuplicateLevelId = string.Empty;
         private static int s_lastIgnoredDuplicateIdentityToken;
+        private static string s_lastIgnoredForeignLevelId = string.Empty;
+        private static int s_lastIgnoredForeignIdentityToken;
         private static string s_lastResetReason = string.Empty;
         private static int forceExactNemesisTargetDepth;
         private static int clientNetworkQueuedAttackDepth;
@@ -542,6 +544,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             s_lastCommittedTrackedCount = trackedCount;
             s_lastIgnoredDuplicateLevelId = string.Empty;
             s_lastIgnoredDuplicateIdentityToken = 0;
+            s_lastIgnoredForeignLevelId = string.Empty;
+            s_lastIgnoredForeignIdentityToken = 0;
         }
 
         private static bool ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(Level? level, int candidateIdentityToken)
@@ -611,6 +615,72 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             return true;
+        }
+
+        private static bool ShouldIgnoreForeignNonAuthoritativeEntitiesPostCreateLocked(Level? level, int candidateIdentityToken)
+        {
+            if (level == null ||
+                candidateIdentityToken <= 0)
+            {
+                return false;
+            }
+
+            if (!TryGetAuthoritativeGameplayLevel(out var authoritativeLevel, out _) ||
+                authoritativeLevel == null)
+            {
+                return false;
+            }
+
+            return !DoesLevelMatchIdentity(level, candidateIdentityToken, authoritativeLevel);
+        }
+
+        private static bool TryIgnoreForeignNonAuthoritativeEntitiesPostCreate(Level? level)
+        {
+            var candidateIdentityToken = ComputeLevelIdentityToken(level);
+            var levelId = GetLevelTraceIdSafe(level);
+            var entityCount = GetEntityCountSafe(level);
+            var role = MobSyncNetRoleForTrace(GameMenu.NetRef);
+            var trackedCurrent = 0;
+            var currentIdentityToken = 0;
+            var shouldLog = false;
+
+            lock (Sync)
+            {
+                if (!ShouldIgnoreForeignNonAuthoritativeEntitiesPostCreateLocked(level, candidateIdentityToken))
+                    return false;
+
+                trackedCurrent = trackedMobs.Count;
+                currentIdentityToken = s_levelIdentityToken;
+                shouldLog = s_lastIgnoredForeignIdentityToken != candidateIdentityToken ||
+                            !string.Equals(s_lastIgnoredForeignLevelId, levelId, StringComparison.Ordinal);
+                if (shouldLog)
+                {
+                    s_lastIgnoredForeignIdentityToken = candidateIdentityToken;
+                    s_lastIgnoredForeignLevelId = levelId;
+                }
+            }
+
+            if (shouldLog)
+            {
+                MobSyncTrace.LogRebuildRejected(
+                    "non_active_level_callback",
+                    role,
+                    levelId,
+                    trackedCurrent,
+                    entityCount,
+                    0,
+                    currentIdentityToken,
+                    candidateIdentityToken);
+            }
+
+            return true;
+        }
+
+        private static bool ShouldResetTrackingForDisposedLevelLocked(Level? level)
+        {
+            return level != null &&
+                   currentLevel != null &&
+                   ReferenceEquals(currentLevel, level);
         }
 
         private static bool TryGetCurrentLevelIdentityToken(out int identityToken)
@@ -713,6 +783,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var levelId = GetLevelTraceIdSafe(self);
             var levelKey = GetLevelRuntimeKey(self);
             var entityCount = GetEntityCountSafe(self);
+            var candidateIdentityToken = ComputeLevelIdentityToken(self);
             var net = GameMenu.NetRef;
             var role = MobSyncNetRoleForTrace(net);
             var trackedBefore = 0;
@@ -730,9 +801,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 lastResetReason = s_lastResetReason;
                 if (IsHost(net))
                 {
-                    shouldSuppressEnteredLog = ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(
-                        self,
-                        ComputeLevelIdentityToken(self));
+                    shouldSuppressEnteredLog =
+                        ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(self, candidateIdentityToken) ||
+                        ShouldIgnoreForeignNonAuthoritativeEntitiesPostCreateLocked(self, candidateIdentityToken);
                 }
             }
 
@@ -751,8 +822,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             orig(self);
-            if (IsHost(net) && TryIgnoreCommittedIdentityEntitiesPostCreate(self))
+            if (IsHost(net) &&
+                (TryIgnoreCommittedIdentityEntitiesPostCreate(self) ||
+                 TryIgnoreForeignNonAuthoritativeEntitiesPostCreate(self)))
+            {
                 return;
+            }
 
             var rebuildAccepted = RebuildMobArray(self);
             // Drop pending mob packets only when a rebuild was actually accepted and the live sync-id map changed.
@@ -834,17 +909,26 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             var trackedBeforeReset = 0;
             var levelId = string.Empty;
+            var shouldReset = false;
             lock (Sync)
             {
                 trackedBeforeReset = trackedMobs.Count;
                 levelId = GetLevelTraceIdSafe(self);
-                ResetMobTrackingLocked("level_dispose_before_orig");
+                shouldReset = ShouldResetTrackingForDisposedLevelLocked(self);
+                if (shouldReset)
+                    ResetMobTrackingLocked("level_dispose_before_orig");
             }
-            SyncMobIdRegistry.ClearForLevel(self);
-            try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
-            MobSyncTrace.LogLevelReset("dispose", levelId, trackedBeforeReset);
+            if (shouldReset)
+            {
+                SyncMobIdRegistry.ClearForLevel(self);
+                try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
+                MobSyncTrace.LogLevelReset("dispose", levelId, trackedBeforeReset);
+            }
 
             orig(self);
+
+            if (!shouldReset)
+                return;
 
             lock (Sync)
             {

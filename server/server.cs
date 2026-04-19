@@ -95,6 +95,7 @@ public sealed partial class NetNode : IDisposable
         public int BonusLife;
         public int Recover;
         public string? Username;
+        public bool Ready;
         public string? Skin;
         public string? Head;
 
@@ -467,10 +468,12 @@ public sealed partial class NetNode : IDisposable
         public readonly bool HasHeadPosition;
         public readonly double HeadX;
         public readonly double HeadY;
+        public readonly bool HasHeadDir;
+        public readonly int HeadDir;
         public readonly bool HasHeadAnim;
         public readonly string? HeadAnim;
 
-        public PlayerDownState(int userId, bool isDowned, double x, double y, string levelId, bool hasHeadPosition = false, double headX = 0, double headY = 0, bool hasHeadAnim = false, string? headAnim = null)
+        public PlayerDownState(int userId, bool isDowned, double x, double y, string levelId, bool hasHeadPosition = false, double headX = 0, double headY = 0, bool hasHeadDir = false, int headDir = 0, bool hasHeadAnim = false, string? headAnim = null)
         {
             UserId = userId;
             IsDowned = isDowned;
@@ -480,6 +483,8 @@ public sealed partial class NetNode : IDisposable
             HasHeadPosition = hasHeadPosition;
             HeadX = headX;
             HeadY = headY;
+            HasHeadDir = hasHeadDir;
+            HeadDir = hasHeadDir ? (headDir < 0 ? -1 : 1) : 0;
             HasHeadAnim = hasHeadAnim;
             HeadAnim = hasHeadAnim ? (headAnim ?? string.Empty) : null;
         }

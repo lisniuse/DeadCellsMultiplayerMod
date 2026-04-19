@@ -339,7 +339,7 @@ namespace DeadCellsMultiplayerMod
             if (_netRole == NetRole.None) return;
             if (_net == null || me == null) return;
             int dir = me.dir;
-            if (me.spr.x == last_x && me.spr.y == last_y && lastDir == dir) return;
+            if (me is null || me.spr == null || me.spr.x == last_x && me.spr.y == last_y && lastDir == dir) return;
 
             _net.TickSend(me.spr.x, me.spr.y, dir);
             last_x = me.spr.x;
@@ -353,15 +353,58 @@ namespace DeadCellsMultiplayerMod
         internal static bool TryGetClientIndex(int localId, int remoteId, out int index)
         {
             index = -1;
-            if (localId <= 0 || remoteId <= 0 || remoteId == localId)
+            if (remoteId <= 0)
                 return false;
 
-            var mapped = remoteId < localId ? remoteId - 1 : remoteId - 2;
-            if (mapped < 0 || mapped >= clients.Length)
+            if (localId > 0 && remoteId == localId)
                 return false;
 
-            index = mapped;
-            return true;
+            if (clientSlotByRemoteId.TryGetValue(remoteId, out var mapped) &&
+                mapped >= 0 &&
+                mapped < clients.Length &&
+                clientIds[mapped] == remoteId)
+            {
+                index = mapped;
+                return true;
+            }
+
+            for (var i = 0; i < clientIds.Length; i++)
+            {
+                if (clientIds[i] != remoteId)
+                    continue;
+
+                clientSlotByRemoteId[remoteId] = i;
+                index = i;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryEnsureClientIndex(int localId, int remoteId, out int index)
+        {
+            if (TryGetClientIndex(localId, remoteId, out index))
+                return true;
+
+            index = -1;
+            if (remoteId <= 0)
+                return false;
+
+            if (localId > 0 && remoteId == localId)
+                return false;
+
+            for (var i = 0; i < clientIds.Length; i++)
+            {
+                if (clientIds[i] != 0)
+                    continue;
+
+                clientIds[i] = remoteId;
+                clientSlotByRemoteId[remoteId] = i;
+                index = i;
+                return true;
+            }
+
+            return false;
         }
 
         internal static void SetClientSkin(int remoteId, string? skin)
@@ -372,7 +415,7 @@ namespace DeadCellsMultiplayerMod
 
             var net = _net;
             var localId = net?.id ?? 0;
-            if (!TryGetClientIndex(localId, remoteId, out var index))
+            if (!TryEnsureClientIndex(localId, remoteId, out var index))
                 return;
 
             var cleaned = NormalizeSkin(skin, "PrisonerDefault");
@@ -395,7 +438,7 @@ namespace DeadCellsMultiplayerMod
 
             var net = _net;
             var localId = net?.id ?? 0;
-            if (!TryGetClientIndex(localId, remoteId, out var index))
+            if (!TryEnsureClientIndex(localId, remoteId, out var index))
                 return;
 
             var cleaned = NormalizeSkin(skin, "BaseFlame");
@@ -439,8 +482,6 @@ namespace DeadCellsMultiplayerMod
             }
 
             var desiredHead = NormalizeSkin(client.RemoteHeadSkinId, "BaseFlame");
-            var previousGlobalHead = remoteHeadSkin;
-            remoteHeadSkin = desiredHead;
             try
             {
                 bool fromUI = false;
@@ -455,7 +496,6 @@ namespace DeadCellsMultiplayerMod
             }
             finally
             {
-                remoteHeadSkin = previousGlobalHead;
             }
 
             LogGhostRuntimeStepIfSlow(
@@ -492,7 +532,7 @@ namespace DeadCellsMultiplayerMod
                 foreach (var remote in remotes)
                 {
                     var remoteStart = RuntimeHitchWatch.Start();
-                    if (!TryGetClientIndex(localId, remote.Id, out var index))
+                    if (!TryEnsureClientIndex(localId, remote.Id, out var index))
                         continue;
 
                     remotePlayerId = remote.Id;
@@ -541,7 +581,7 @@ namespace DeadCellsMultiplayerMod
                                 downedCine != null &&
                                 !downedCine.destroyed)
                             {
-                                downedCine.UpdateTarget(drawX, drawY, remote.Dir);
+                                downedCine.UpdateBodyTarget(drawX, drawY, remote.Dir);
                             }
                         }
                     }
@@ -769,9 +809,7 @@ namespace DeadCellsMultiplayerMod
                 created.ApplyRemoteSkin(knownSkin);
 
             var knownHead = clientHeadSkins[slot];
-            created.RemoteHeadSkinId = NormalizeSkin(
-                !string.IsNullOrWhiteSpace(knownHead) ? knownHead : remoteHeadSkin,
-                "BaseFlame");
+            created.RemoteHeadSkinId = NormalizeSkin(knownHead, "BaseFlame");
             RecreateClientHead(slot);
             MarkGhostHeadDirty(slot, immediate: true);
 
@@ -830,6 +868,7 @@ namespace DeadCellsMultiplayerMod
 
             if (previousRemoteId > 0)
             {
+                clientSlotByRemoteId.Remove(previousRemoteId);
                 _remoteLastDoorMarkers.Remove(previousRemoteId);
                 _remotePendingDoorMarkers.Remove(previousRemoteId);
                 ClearCachedRemoteDiveSkillInfo(previousRemoteId);
@@ -1334,6 +1373,17 @@ namespace DeadCellsMultiplayerMod
         {
             _lastSentHeroSkin = null;
             _lastSentHeroHeadSkin = null;
+        }
+
+        internal static void ResetHeroCosmeticSendCache()
+        {
+            try
+            {
+                Instance?.ResetLocalSkinSendCache();
+            }
+            catch
+            {
+            }
         }
 
         private void ResetDoorMarkerState()

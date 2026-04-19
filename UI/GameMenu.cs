@@ -185,6 +185,15 @@ namespace DeadCellsMultiplayerMod
                 _steamLobbyId = 0;
                 _steamLobbyCode = string.Empty;
                 _steamHostSteamId = 0UL;
+                _pendingLaunchAction = PendingLaunchAction.NewGame;
+                _pendingLaunchCustom = false;
+                _pendingLaunchStreamEnabled = false;
+                _hasAuthoritativePendingNewGameLaunch = false;
+                _authoritativePendingNewGameCustom = false;
+                _authoritativePendingNewGameStreamEnabled = false;
+                _localReady = false;
+                _playersDisplay.Clear();
+                InvalidateGeneratePayloadCacheLocked();
                 _mainThreadQueueDepth = _mainThreadQueue.Count;
                 lock (MainThreadCoalesceSync)
                 {
@@ -359,6 +368,14 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        internal static bool IsClientInActualRun()
+        {
+            lock (Sync)
+            {
+                return _role == NetRole.Client && _inActualRun;
+            }
+        }
+
         public static void SetRole(NetRole role)
         {
             var previous = _role;
@@ -443,6 +460,34 @@ namespace DeadCellsMultiplayerMod
                 QueueClientRestartFromHostSeed(seed, "host_restart");
         }
 
+        public static void ReceiveHostRunRestart(int seed)
+        {
+            bool restartClientWorldNow = false;
+            lock (Sync)
+            {
+                _remoteSeed = seed;
+                _seedArrived = true;
+                if (_role == NetRole.Client)
+                {
+                    _autoStartTriggered = false;
+                    if (_inActualRun)
+                    {
+                        _inActualRun = false;
+                        _pendingAutoStart = false;
+                        restartClientWorldNow = true;
+                    }
+                    else
+                    {
+                        _pendingAutoStart = true;
+                    }
+                }
+            }
+
+            _log?.Information("[NetMod] Client received same-run restart {Seed}", seed);
+            if (restartClientWorldNow)
+                QueueClientRestartFromHostSeed(seed, "host_same_run_restart");
+        }
+
         internal static void QueueHostRestartFromDeath(string reason)
         {
             var now = DateTime.UtcNow;
@@ -467,12 +512,17 @@ namespace DeadCellsMultiplayerMod
                 }
 
                 _log?.Information("[NetMod] Host restarting run ({Reason})", reason);
+                GameDataSync.BeginSameRunRestart(GameDataSync.Seed);
+                try { NetRef?.SendRunRestart(GameDataSync.Seed); } catch { }
+                var restartLaunch = GameDataSync.BuildSameRunRestartLaunchMode();
+                var restartIsCustom = GameDataSync.ResolveCurrentRunIsCustom();
+                var restartStreamEnabled = GameDataSync.ResolveCurrentRunStreamEnabled();
                 try
                 {
                     var main = dc.Main.Class.ME;
                     if (main != null)
                     {
-                        main.launchGame(GameDataSync._launch, null, 0.8);
+                        main.launchGame(restartLaunch, null, 0.8);
                         return;
                     }
                 }
@@ -483,7 +533,7 @@ namespace DeadCellsMultiplayerMod
 
                 game.destroy();
                 game.disposeImmediately();
-                game.user.newGame(GameDataSync.Seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
+                game.user.newGame(GameDataSync.Seed, GameDataSync._isTwitch, restartStreamEnabled, restartIsCustom, restartLaunch);
             });
         }
 
@@ -507,12 +557,16 @@ namespace DeadCellsMultiplayerMod
                 }
 
                 _log?.Information("[NetMod] Client restarting run from host seed {Seed} ({Reason})", seed, reason);
+                GameDataSync.BeginSameRunRestart(seed);
+                var restartLaunch = GameDataSync.BuildSameRunRestartLaunchMode();
+                var restartIsCustom = GameDataSync.ResolveCurrentRunIsCustom();
+                var restartStreamEnabled = GameDataSync.ResolveCurrentRunStreamEnabled();
                 try
                 {
                     var main = dc.Main.Class.ME;
                     if (main != null)
                     {
-                        main.launchGame(GameDataSync._launch, null, 0.8);
+                        main.launchGame(restartLaunch, null, 0.8);
                         return;
                     }
                 }
@@ -523,7 +577,7 @@ namespace DeadCellsMultiplayerMod
 
                 game.destroy();
                 game.disposeImmediately();
-                game.user.newGame(seed, GameDataSync._isTwitch, GameDataSync._isCustom, GameDataSync._mode, GameDataSync._launch);
+                game.user.newGame(seed, GameDataSync._isTwitch, restartStreamEnabled, restartIsCustom, restartLaunch);
             });
         }
 
@@ -576,6 +630,8 @@ namespace DeadCellsMultiplayerMod
                 EnqueueMainThread(() =>
                     MultiplayerUI.PushSystemMessage(FormatLocalized("{0} connected to the server.", userForMsg)));
             }
+
+            RequestLobbyMenuRefresh();
         }
 
         private static void SendCachedGeneratePayload()
@@ -589,15 +645,7 @@ namespace DeadCellsMultiplayerMod
                 levelDesc = _cachedLevelDescSync;
             }
 
-            if (levelDesc == null)
-                return;
-
-            var payload = new
-            {
-                levelDesc = levelDesc ?? new LevelDescSync(),
-                rawDesc = string.Empty
-            };
-            var json = JsonConvert.SerializeObject(payload);
+            var json = BuildGeneratePayloadJson(levelDesc);
             net.SendGeneratePayload(json);
         }
 
@@ -630,7 +678,7 @@ namespace DeadCellsMultiplayerMod
                 if (_role == NetRole.Client &&
                     !_inActualRun &&
                     _pendingAutoStart &&
-                    _seedArrived &&
+                    IsPendingLaunchReadyForAutoStartLocked() &&
                     !_autoStartTriggered)
                 {
                     _autoStartTriggered = true;
@@ -671,7 +719,7 @@ namespace DeadCellsMultiplayerMod
                             return;
                         }
 
-                        ts.startNewGame(custom: true);
+                        TryAutoStartPendingLaunch(ts);
                     }
                     finally
                     {
@@ -1206,19 +1254,15 @@ namespace DeadCellsMultiplayerMod
 
                 if (role == NetRole.Host)
                 {
+                    var streamEnabled = TryGetStreamEnabled(screen);
                     if (_menuTransport == ConnectionTransport.Steam)
                         ModEntry.Instance.StartSteamHostFromMenu(_mpPort);
                     else
                         ModEntry.Instance.StartHostFromMenu(_mpIp, _mpPort);
                     _waitingForHost = false;
-                    try
-                    {
-                        screen.startNewGame(custom: false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _log?.Warning("[NetMod] Failed to start host run: {Message}", ex.Message);
-                    }
+                    SetAuthoritativePendingNewGameLaunch(custom: false, streamEnabled);
+                    RememberPendingLaunch(PendingLaunchAction.NewGame, custom: false, streamEnabled, sendToRemote: true);
+                    TryLaunchNewGame(screen, custom: false, streamEnabled);
                 }
                 else if (role == NetRole.Client)
                 {
@@ -1295,15 +1339,11 @@ namespace DeadCellsMultiplayerMod
 
         private static void StartHostRun(TitleScreen screen)
         {
+            var streamEnabled = TryGetStreamEnabled(screen);
             StartHostServerOnly();
-            try
-            {
-                screen.startNewGame(custom: false);
-            }
-            catch (Exception ex)
-            {
-                _log?.Warning("[NetMod] Failed to start host run: {Message}", ex.Message);
-            }
+            SetAuthoritativePendingNewGameLaunch(custom: false, streamEnabled);
+            RememberPendingLaunch(PendingLaunchAction.NewGame, custom: false, streamEnabled, sendToRemote: true);
+            TryLaunchNewGame(screen, custom: false, streamEnabled);
         }
 
         // private static void GameDisposeHook(Hook_Game.orig_onDispose orig, Game self)

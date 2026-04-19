@@ -95,7 +95,7 @@ namespace DeadCellsMultiplayerMod.KingHead
             TryBindHeroField(me);
 
             var headSprite = king?.spr;
-            var remoteHeadSkin = ModEntry.Instance?.remoteHeadSkin;
+            var remoteHeadSkin = king?.RemoteHeadSkinId;
             if (remoteHeadSkin == null)
                 remoteHeadSkin = "BaseFlame";
 

@@ -101,6 +101,13 @@ public sealed partial class NetNode
             $"EXITREADY|{state.UserId}|{state.DoorCx}|{state.DoorCy}|{(state.Pressed ? 1 : 0)}|{(state.InsideCircle ? 1 : 0)}|{(state.IsOutOfGame ? 1 : 0)}|{(state.IsOnScreen ? 1 : 0)}\n");
     }
 
+    private static string BuildReadyLine(int id, bool ready)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"READY|{id}|{(ready ? 1 : 0)}\n");
+    }
+
     private static string BuildPlayerDownLine(PlayerDownState state)
     {
         var safeLevelId = (state.LevelId ?? string.Empty)
@@ -114,6 +121,20 @@ public sealed partial class NetNode
 
         if (state.HasHeadPosition)
         {
+            if (state.HasHeadDir)
+            {
+                if (state.HasHeadAnim && !string.IsNullOrWhiteSpace(safeHeadAnim))
+                {
+                    return string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"PDOWN|{state.UserId}|{(state.IsDowned ? 1 : 0)}|{state.X}|{state.Y}|{safeLevelId}|{state.HeadX}|{state.HeadY}|{state.HeadDir}|{safeHeadAnim}\n");
+                }
+
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"PDOWN|{state.UserId}|{(state.IsDowned ? 1 : 0)}|{state.X}|{state.Y}|{safeLevelId}|{state.HeadX}|{state.HeadY}|{state.HeadDir}\n");
+            }
+
             if (state.HasHeadAnim && !string.IsNullOrWhiteSpace(safeHeadAnim))
             {
                 return string.Create(

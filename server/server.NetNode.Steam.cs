@@ -403,6 +403,7 @@ public sealed partial class NetNode
         await SendLineToSteamClientSafe(connection, $"ID|{connection.AssignedId}\n").ConfigureAwait(false);
     }
 
+
     private void ProcessIncomingSteamPayload(string payload, int senderId, SteamClientConnection? senderConnection)
     {
         if (string.IsNullOrEmpty(payload))

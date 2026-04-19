@@ -468,6 +468,21 @@ public sealed partial class NetNode
         }
     }
 
+    public bool TryGetRemoteReady(int userId, out bool ready)
+    {
+        lock (_sync)
+        {
+            if (userId > 0 && _remotes.TryGetValue(userId, out var state) && state.HasRemote)
+            {
+                ready = state.Ready;
+                return true;
+            }
+
+            ready = false;
+            return false;
+        }
+    }
+
     public void CopyRemoteUserIdsTo(HashSet<int> target, bool includePrimary = true)
     {
         if (target == null)

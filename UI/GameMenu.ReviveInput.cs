@@ -39,7 +39,7 @@ internal static partial class GameMenu
             if (controller == null || controller.isLocked)
                 return false;
 
-            var b = controller.get_bindings();
+            var bindings = controller.get_bindings();
 
             bool PadHeld(ArrayBytes_Int? bind)
             {
@@ -52,7 +52,7 @@ internal static partial class GameMenu
                         var code = Marshal.ReadInt32(bind.bytes, i << 2);
                         if (code < 0)
                             continue;
-                        if (controller.padIsPressed(code))
+                        if (controller.padIsDown(code))
                             return true;
                     }
                 }
@@ -85,17 +85,17 @@ internal static partial class GameMenu
                 return false;
             }
 
-            if (PadHeld(b.padA))
+            if (PadHeld(bindings.padA))
                 return true;
-            if (PadHeld(b.padB))
+            if (PadHeld(bindings.padB))
                 return true;
-            if (PadHeld(b.padC))
+            if (PadHeld(bindings.padC))
                 return true;
-            if (KeyHeld(b.primary))
+            if (KeyHeld(bindings.primary))
                 return true;
-            if (KeyHeld(b.secondary))
+            if (KeyHeld(bindings.secondary))
                 return true;
-            if (KeyHeld(b.third))
+            if (KeyHeld(bindings.third))
                 return true;
         }
         catch

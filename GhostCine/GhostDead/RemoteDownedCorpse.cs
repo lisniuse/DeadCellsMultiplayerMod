@@ -12,7 +12,6 @@ namespace DeadCellsMultiplayerMod
         private readonly GhostKing _ghost;
         private readonly dc.GameCinematic? _previousCine;
         private HeroDeadCorpse? _corpse;
-        private Homunculus? _homunculus;
         private bool _hadGhostVisibleState;
         private bool _ghostWasVisible;
         private bool _hadTemplateHeroVisibleState;
@@ -25,16 +24,11 @@ namespace DeadCellsMultiplayerMod
         private double _targetX;
         private double _targetY;
         private int _targetDir;
-        private double _headTargetX;
-        private double _headTargetY;
-        private bool _hasHeadAnimTarget;
-        private string? _headAnimTarget;
         private string? _interactionLabelText;
         private LightTip? _interactionLightTip;
         private Pointer? _corpsePointer;
         private const int CorpseMarkerColor = 0xED6a1F;
         private const int PointerFxSuppressionKey = 188743680;
-        private const double HomunculusIdleYSnapTolerancePx = 2.0;
 
         public RemoteDownedCorpse(Hero templateHero, GhostKing ghost, double x, double y, int dir, dc.GameCinematic? previousCine)
         {
@@ -50,10 +44,10 @@ namespace DeadCellsMultiplayerMod
             CreateCorpse();
             EnsureTemplateHeroVisible();
             UpdateTarget(x, y, dir);
-            EnsureViewportTracksTemplateHero(immediate: true);
+            EnsureViewportTracksCurrentSubject(immediate: true);
         }
 
-        public void UpdateTarget(double x, double y, int dir, double? headX = null, double? headY = null, string? headAnim = null)
+        public void UpdateTarget(double x, double y, int dir)
         {
             var normalizedDir = ResolveTargetDir(dir);
             var changed = !_hasTarget ||
@@ -65,30 +59,26 @@ namespace DeadCellsMultiplayerMod
             _targetY = y;
             _targetDir = normalizedDir;
             _hasTarget = true;
-            if (headX.HasValue && headY.HasValue)
-            {
-                _headTargetX = headX.Value;
-                _headTargetY = headY.Value;
-            }
-            else
-            {
-                _headTargetX = x;
-                _headTargetY = y;
-            }
-            if (!string.IsNullOrWhiteSpace(headAnim))
-            {
-                _headAnimTarget = headAnim.Trim();
-                _hasHeadAnimTarget = true;
-            }
-            else
-            {
-                _headAnimTarget = null;
-                _hasHeadAnimTarget = false;
-            }
 
             if (changed)
                 ApplyTargetToCorpse(forceStartFall: true);
-            ApplyTargetToHomunculus();
+        }
+
+        public void UpdateBodyTarget(double x, double y, int dir)
+        {
+            var normalizedDir = ResolveTargetDir(dir);
+            var changed = !_hasTarget ||
+                          Math.Abs(_targetX - x) > 0.001 ||
+                          Math.Abs(_targetY - y) > 0.001 ||
+                          _targetDir != normalizedDir;
+
+            _targetX = x;
+            _targetY = y;
+            _targetDir = normalizedDir;
+            _hasTarget = true;
+
+            if (changed)
+                ApplyTargetToCorpse(forceStartFall: true);
         }
 
         public void SetInteractionLabel(string? text)
@@ -136,9 +126,8 @@ namespace DeadCellsMultiplayerMod
 
             HideGhost();
             EnsureCorpse();
-            EnsureHomunculus();
             EnsureTemplateHeroVisible();
-            EnsureViewportTracksTemplateHero(immediate: false);
+            EnsureViewportTracksCurrentSubject(immediate: false);
         }
 
         public override void onDispose()
@@ -146,10 +135,9 @@ namespace DeadCellsMultiplayerMod
             base.onDispose();
             RestoreCineState();
             DisposeCorpse();
-            DisposeHomunculus();
             RestoreGhostVisibility();
             RestoreTemplateHeroVisibility();
-            EnsureViewportTracksTemplateHero(immediate: true);
+            EnsureViewportTracksCurrentSubject(immediate: true);
         }
 
         private void EnsureCorpse()
@@ -164,14 +152,12 @@ namespace DeadCellsMultiplayerMod
             KeepCorpseActive(corpse);
             ApplyTargetToCorpse(forceStartFall: false);
             EnsureLethalFallStarted();
-            ApplyTargetToHomunculus();
             EnsureCorpsePointer();
         }
 
         private void CreateCorpse()
         {
             DisposeCorpse();
-            DisposeHomunculus();
 
             try
             {
@@ -182,7 +168,6 @@ namespace DeadCellsMultiplayerMod
                 _corpse = corpse;
                 _lethalFallStarted = false;
                 ApplyTargetToCorpse(forceStartFall: true);
-                ApplyTargetToHomunculus();
                 ApplyInteractionLabel();
                 EnsureCorpsePointer();
                 EnsureTemplateHeroVisible();
@@ -306,78 +291,6 @@ namespace DeadCellsMultiplayerMod
 
             _lethalFallStarted = true;
             try { corpse.startLethalFall(); } catch { }
-        }
-
-        private void EnsureHomunculus()
-        {
-            // Remote downed visual is corpse-only.
-            DisposeHomunculus();
-        }
-
-        private void CreateHomunculus(HeroDeadCorpse corpse)
-        {
-            _homunculus = null;
-        }
-
-        private void ApplyTargetToHomunculus()
-        {
-            // No-op: head entity is disabled.
-        }
-
-        private static bool IsIdleLikeHomunculusAnim(string? anim)
-        {
-            if (string.IsNullOrWhiteSpace(anim))
-                return false;
-
-            return anim.IndexOf("idle", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static void DisableRemoteHomunculusController(Homunculus hom)
-        {
-            if (hom == null)
-                return;
-
-            try
-            {
-                var heroCtrl = hom._level?.game?.hero?.controller;
-                var ctrl = hom.controller;
-                if (ctrl != null && !ReferenceEquals(ctrl, heroCtrl))
-                    ctrl.manualLock = true;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                var game = hom._level?.game;
-                var hero = game?.hero;
-                if (hero != null && game != null)
-                {
-                    try { hero.controller.manualLock = false; } catch { }
-                    try { game.curCine = null; } catch { }
-                    try { hom._level?.viewport?.track(hero, null); } catch { }
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private static void RemoveFromHomunculusSkillEntityList(Homunculus hom)
-        {
-            if (hom == null)
-                return;
-
-            try
-            {
-                var bucketObj = hom._level?.entitiesByClass?.get(17969);
-                if (bucketObj is dc.hl.types.ArrayObj bucket)
-                    bucket.remove(hom);
-            }
-            catch
-            {
-            }
         }
 
         private static void KeepCorpseActive(HeroDeadCorpse corpse)
@@ -559,20 +472,24 @@ namespace DeadCellsMultiplayerMod
             try { corpse.removeLightTip(); } catch { }
         }
 
-        private void EnsureViewportTracksTemplateHero(bool immediate)
+        private void EnsureViewportTracksCurrentSubject(bool immediate)
         {
             var hero = _templateHero;
             if (hero == null || hero.destroyed)
                 return;
 
+            var preferred = ModEntry.ResolvePreferredCameraTarget(hero);
+            if (preferred == null)
+                return;
+
             try
             {
-                var viewport = hero._level?.viewport;
+                var viewport = preferred._level?.viewport ?? hero._level?.viewport;
                 if (viewport == null)
                     return;
 
-                if (!ReferenceEquals(viewport.tracked, hero))
-                    viewport.track(hero, immediate);
+                if (immediate || !ReferenceEquals(viewport.tracked, preferred))
+                    viewport.track(preferred, immediate);
             }
             catch
             {
@@ -694,27 +611,6 @@ namespace DeadCellsMultiplayerMod
             }
 
             try { corpse.dispose(); } catch { }
-        }
-
-        private void DisposeHomunculus()
-        {
-            var hom = _homunculus;
-            _homunculus = null;
-            _hasHeadAnimTarget = false;
-            _headAnimTarget = null;
-            if (hom == null)
-                return;
-
-            try
-            {
-                if (!hom.destroyed)
-                    hom.destroy();
-            }
-            catch
-            {
-            }
-
-            try { hom.dispose(); } catch { }
         }
     }
 }
