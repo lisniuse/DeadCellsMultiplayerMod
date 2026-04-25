@@ -1340,6 +1340,7 @@ namespace DeadCellsMultiplayerMod
 
                 if (role == NetRole.Host)
                 {
+                    PrepareLobbyForNewNetworkSession();
                     var streamEnabled = TryGetStreamEnabled(screen);
                     if (_menuTransport == ConnectionTransport.Steam)
                         ModEntry.Instance.StartSteamHostFromMenu(_mpPort);
@@ -1352,7 +1353,7 @@ namespace DeadCellsMultiplayerMod
                 }
                 else if (role == NetRole.Client)
                 {
-                    ResetLobbyReadyState();
+                    PrepareLobbyForNewNetworkSession();
                     if (_menuTransport == ConnectionTransport.Steam)
                     {
                         if (_steamHostSteamId == 0UL)
@@ -1369,12 +1370,6 @@ namespace DeadCellsMultiplayerMod
 
                     lock (Sync)
                     {
-                        _levelDescArrived = false;
-                        _pendingAutoStart = false;
-                        _pendingClientRestartSeed = null;
-                        _pendingClientRestartReason = string.Empty;
-                        _autoStartTriggered = false;
-                        _seedArrived = false;
                         _clientConnectAttempt = 0;
                         _clientConnecting = true;
                         _waitingForHost = true;
@@ -1404,11 +1399,12 @@ namespace DeadCellsMultiplayerMod
 
                 if (NetRef != null && NetRef.IsAlive && NetRef.IsHost)
                 {
+                    PrepareLobbyForNewNetworkSession();
                     _waitingForHost = false;
                     return;
                 }
 
-                ResetLobbyReadyState();
+                PrepareLobbyForNewNetworkSession();
                 if (_menuTransport == ConnectionTransport.Steam)
                 {
                     ModEntry.Instance.StartSteamHostFromMenu(_mpPort);

@@ -200,11 +200,7 @@ namespace DeadCellsMultiplayerMod
             catch { }
             lock (Sync)
             {
-                _inActualRun = false;
-                _pendingClientRestartSeed = null;
-                _pendingClientRestartReason = string.Empty;
-                _continueLaunchInProgress = false;
-                _continueLaunchStartedAt = DateTime.MinValue;
+                ResetLobbyLaunchStateLocked();
             }
             ResetLobbyReadyState();
             ResetSteamState();
@@ -311,7 +307,13 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
-            var wasInRun = _inActualRun;
+            bool wasInRun;
+            lock (Sync)
+            {
+                wasInRun = _inActualRun;
+                ResetLobbyLaunchStateLocked();
+            }
+
             SetRole(NetRole.None);
             NetRef = null;
             _waitingForHost = false;
@@ -373,13 +375,11 @@ namespace DeadCellsMultiplayerMod
 
         private static void ClearNetworkCaches()
         {
-            CacheLevelDescSync(null);
-            _genArrived = false;
-            _seedArrived = false;
-            _pendingClientRestartSeed = null;
-            _pendingClientRestartReason = string.Empty;
-            _continueLaunchInProgress = false;
-            _continueLaunchStartedAt = DateTime.MinValue;
+            lock (Sync)
+            {
+                _cachedLevelDescSync = null;
+                ResetLobbyLaunchStateLocked();
+            }
         }
 
         private static void ResetSteamState()

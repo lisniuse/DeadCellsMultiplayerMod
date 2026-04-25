@@ -198,6 +198,8 @@ public sealed partial class NetNode
                     primaryId = _primaryRemoteId;
                 }
 
+                ModEntry.SetClientLabel(effectiveId.Value, username);
+
                 if (effectiveId.Value == primaryId)
                     GameMenu.ReceiveRemoteUsername(username);
 

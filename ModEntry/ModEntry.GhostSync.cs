@@ -409,6 +409,33 @@ namespace DeadCellsMultiplayerMod
             return false;
         }
 
+        internal static void SetClientLabel(int remoteId, string? username)
+        {
+            var net = _net;
+            var localId = net?.id ?? 0;
+            if (!TryEnsureClientIndex(localId, remoteId, out var index))
+                return;
+
+            ApplyClientLabel(index, BuildRemoteLabel(username));
+        }
+
+        private static void ApplyClientLabel(int index, string? label)
+        {
+            if (index < 0 || index >= clientLabels.Length)
+                return;
+
+            var normalized = string.IsNullOrWhiteSpace(label) ? "Guest" : label.Trim();
+            clientLabels[index] = normalized;
+
+            var ghost = _ghost;
+            var client = clients[index];
+            if (ghost == null || client == null)
+                return;
+
+            if (client.spr != null)
+                ghost.SetLabel(client, normalized);
+        }
+
         internal static void SetClientSkin(int remoteId, string? skin)
         {
             var instance = Instance;
@@ -618,12 +645,11 @@ namespace DeadCellsMultiplayerMod
                         headDirty = true;
                     }
 
-                    var newLabel = BuildRemoteLabel(remote.Id, remote.Username);
+                    var newLabel = BuildRemoteLabel(remote.Username);
                     if (!string.Equals(clientLabels[index], newLabel, StringComparison.Ordinal))
                     {
                         var labelStart = RuntimeHitchWatch.Start();
-                        ghost.SetLabel(client, newLabel);
-                        clientLabels[index] = newLabel;
+                        ApplyClientLabel(index, newLabel);
                         updatedLabels++;
                         LogGhostRuntimeStepIfSlow(
                             "ModEntry.ReceiveGhostCoords.SetLabel",
@@ -820,7 +846,7 @@ namespace DeadCellsMultiplayerMod
             MarkGhostHeadDirty(slot, immediate: true);
 
             if (!string.IsNullOrWhiteSpace(clientLabels[slot]))
-                _ghost.SetLabel(created, clientLabels[slot]);
+                ApplyClientLabel(slot, clientLabels[slot]);
 
             ApplyCachedRemoteDiveSkillInfoIfAny(clientIds[slot], created);
 

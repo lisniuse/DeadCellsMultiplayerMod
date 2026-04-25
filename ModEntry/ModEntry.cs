@@ -343,7 +343,7 @@ namespace DeadCellsMultiplayerMod
             ThrowTeardownFailures("client slots reset", failures);
         }
 
-        private static string BuildRemoteLabel(int remoteId, string? username)
+        private static string BuildRemoteLabel(string? username)
         {
             var clean = string.IsNullOrWhiteSpace(username) ? "Guest" : username.Trim();
             return clean;

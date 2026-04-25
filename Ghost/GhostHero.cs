@@ -249,7 +249,7 @@ namespace DeadCellsMultiplayerMod
 
         public void SetLabel(Entity entity, string? text)
         {
-            if (entity == null) return;
+            if (entity == null || entity.spr == null) return;
             var normalizedText = string.IsNullOrWhiteSpace(text) ? "Guest" : text;
             if (_labels.TryGetValue(entity, out var existing))
             {

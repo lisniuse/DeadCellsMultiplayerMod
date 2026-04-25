@@ -21,6 +21,30 @@ namespace DeadCellsMultiplayerMod
             _playersDisplay.Clear();
         }
 
+        private static void ResetLobbyLaunchStateLocked()
+        {
+            _inActualRun = false;
+            _levelDescArrived = false;
+            _pendingAutoStart = false;
+            _autoStartTriggered = false;
+            _pendingClientRestartSeed = null;
+            _pendingClientRestartReason = string.Empty;
+            _continueLaunchInProgress = false;
+            _continueLaunchStartedAt = DateTime.MinValue;
+            _autoStartRetryAt = DateTime.MinValue;
+            _genArrived = false;
+            _seedArrived = false;
+        }
+
+        private static void PrepareLobbyForNewNetworkSession()
+        {
+            lock (Sync)
+            {
+                ResetLobbyLaunchStateLocked();
+                ResetLobbyReadyStateLocked();
+            }
+        }
+
         private static void ToggleLocalReadyFromMenu(TitleScreen screen)
         {
             SetLocalReady(!_localReady, sendToRemote: true, refreshMenu: true);
