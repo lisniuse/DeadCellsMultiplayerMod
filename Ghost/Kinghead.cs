@@ -26,6 +26,7 @@ namespace DeadCellsMultiplayerMod.KingHead
         private bool? useLocalSpace;
         private FPoint? kingLastHeadPos;
         private bool usesCustomRemoteHead;
+        private bool disposed;
         private string _cachedHeadSkeletonGroup = string.Empty;
         private double _lastForcedPosX = double.NaN;
         private double _lastForcedPosY = double.NaN;
@@ -232,6 +233,40 @@ namespace DeadCellsMultiplayerMod.KingHead
             this.headAddSb.hasRotationScale = true;
             this.headAddSb.blendMode = new dc.h2d.BlendMode.Add();
         }
+
+        public new void dispose()
+        {
+            if (disposed)
+                return;
+
+            disposed = true;
+            var particleContainer = headParticleContainer;
+            var container = headContainer;
+            headParticleContainer = null;
+            headContainer = null;
+            headMaterial = null;
+            headSkeleton = null;
+            kingLastHeadPos = null;
+            try
+            {
+                base.dispose();
+            }
+            finally
+            {
+                RemoveContainer(particleContainer);
+                RemoveContainer(container);
+                king = null;
+                me = null;
+                lvl = null;
+            }
+        }
+
+        private static void RemoveContainer(dc.h2d.Object? container)
+        {
+            if (container?.parent != null)
+                container.remove();
+        }
+
         public override void updateHeadFx(double c1)
         {
             if (king == null)

@@ -161,15 +161,18 @@ namespace DeadCellsMultiplayerMod
             if (_nextDebugExplorerRevealRetryTick != 0 && now < _nextDebugExplorerRevealRetryTick)
                 return;
 
-            var feedback = false;
-            hero.triggerExplorerInstinct(Ref<bool>.From(ref feedback));
-
-            var minimap = hero._level?.game?.hud?.minimap ?? dc.ui.HUD.Class.ME?.minimap;
-            if (minimap == null)
+            var level = hero._level;
+            var map = level?.map;
+            var rooms = map?.rooms;
+            var minimap = level?.game?.hud?.minimap ?? dc.ui.HUD.Class.ME?.minimap;
+            if (level == null || map == null || rooms == null || minimap == null)
             {
                 _nextDebugExplorerRevealRetryTick = now + (long)(Stopwatch.Frequency * 0.05);
                 return;
             }
+
+            var feedback = false;
+            hero.triggerExplorerInstinct(Ref<bool>.From(ref feedback));
 
             minimap.revealAll();
             _debugExplorerRevealAllCount++;

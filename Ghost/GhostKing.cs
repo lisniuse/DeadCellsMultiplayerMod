@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -67,6 +68,11 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             EnsureRuntimeDependencies();
             base.init();
             base.initSpeechDeck();
+        }
+
+        public override bool shouldSave()
+        {
+            return false;
         }
 
         private static Hero? ResolveLocalHero()
@@ -235,6 +241,9 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
                     created = new DiveAttack(localHero, currentGame, copiedSkillInfos);
                     created.init();
                 });
+                if (!IsRemoteDiveCooldownRuntimeReady(localHero, created))
+                    return null;
+
                 remoteDiveAttack = created;
                 return created;
             }
@@ -246,8 +255,11 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         private void ExecuteRemoteDive(Hero localHero, DiveAttack dive, double high, bool startOnly)
         {
-            if (!IsRemoteDiveReplayContextValid(localHero))
+            if (!IsRemoteDiveReplayContextValid(localHero) ||
+                !IsRemoteDiveCooldownRuntimeReady(localHero, dive))
+            {
                 return;
+            }
 
             var cooldownSnapshot = CaptureCooldown(localHero.cd, DiveAttackCooldownKey);
             var controlLockSnapshot = CaptureCooldown(localHero.cd, HeroControlLockCooldownKey);
@@ -333,6 +345,27 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             try
             {
                 return spr != null && spr.groupName != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsRemoteDiveCooldownRuntimeReady(Hero localHero, DiveAttack? dive)
+        {
+            if (localHero == null || dive == null)
+                return false;
+
+            return IsCooldownFastCheckReady(localHero.cd) &&
+                   IsCooldownFastCheckReady(dive.cd);
+        }
+
+        private static bool IsCooldownFastCheckReady(Cooldown? cooldown)
+        {
+            try
+            {
+                return cooldown?.fastCheck != null;
             }
             catch
             {
@@ -844,12 +877,15 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         private void DisposeRemoteDiveAttack()
         {
-            if (remoteDiveAttack == null)
+            var diveAttack = remoteDiveAttack;
+            remoteDiveAttack = null;
+            if (diveAttack == null)
                 return;
 
-            try { remoteDiveAttack.cancel(); } catch { }
-            try { remoteDiveAttack.destroy(); } catch { }
-            remoteDiveAttack = null;
+            List<Exception>? failures = null;
+            RunGhostKingTeardownStep(ref failures, "remote dive cancel", diveAttack.cancel);
+            RunGhostKingTeardownStep(ref failures, "remote dive destroy", diveAttack.destroy);
+            ThrowGhostKingTeardownFailures("remote dive attack", failures);
         }
 
         private static virtual_cooldown_duration_flags_forbiddenItem_props_requiredItem_skill_? CloneDiveSkillInfos(
@@ -976,11 +1012,12 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         public void DisposeScarf()
         {
-            if (scarf == null)
+            var oldScarf = scarf;
+            scarf = null;
+            if (oldScarf == null)
                 return;
 
-            try { scarf.dispose(); } catch { }
-            scarf = null;
+            oldScarf.dispose();
         }
 
         public override void disposeGfx()
@@ -991,26 +1028,44 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
         public override void dispose()
         {
-            DisposeKingWeaponsManager();
-            DisposeScarf();
-            DisposeRemoteDiveAttack();
-            base.dispose();
+            List<Exception>? failures = null;
+            RunGhostKingTeardownStep(ref failures, "weapon manager", DisposeKingWeaponsManager);
+            RunGhostKingTeardownStep(ref failures, "scarf", DisposeScarf);
+            RunGhostKingTeardownStep(ref failures, "remote dive attack", DisposeRemoteDiveAttack);
+            RunGhostKingTeardownStep(ref failures, "base entity", () => base.dispose());
+            ThrowGhostKingTeardownFailures("GhostKing", failures);
+        }
+
+        private static void RunGhostKingTeardownStep(ref List<Exception>? failures, string step, Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                failures ??= new List<Exception>();
+                failures.Add(new InvalidOperationException($"GhostKing teardown failed during {step}.", ex));
+            }
+        }
+
+        private static void ThrowGhostKingTeardownFailures(string scope, List<Exception>? failures)
+        {
+            if (failures == null || failures.Count == 0)
+                return;
+            if (failures.Count == 1)
+                throw failures[0];
+            throw new AggregateException($"GhostKing teardown failed for {scope}.", failures);
         }
 
         private void DisposeKingWeaponsManager()
         {
-            if(kingWeaponsManager == null)
+            var manager = kingWeaponsManager;
+            kingWeaponsManager = null;
+            if(manager == null)
                 return;
 
-            try
-            {
-                kingWeaponsManager.DisposeManagedWeapon();
-            }
-            catch
-            {
-            }
-
-            kingWeaponsManager = null;
+            manager.DisposeManagedWeapon();
         }
 
 
@@ -1071,49 +1126,49 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             if (currentSprite == null)
                 return false;
 
-            try
-            {
-                int startFrame = 0;
-                bool stopAllAnims = true;
-                currentSprite.set(heroLib, group, Ref<int>.From(ref startFrame), Ref<bool>.From(ref stopAllAnims));
-                if (normalMap != null)
-                    currentSprite.addOrUpdateNormalMapTexture(normalMap);
+            int startFrame = 0;
+            bool stopAllAnims = true;
+            currentSprite.set(heroLib, group, Ref<int>.From(ref startFrame), Ref<bool>.From(ref stopAllAnims));
 
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            var normalMapShader = (NormalMap)currentSprite.getShader(NormalMap.Class);
+            if (normalMapShader != null)
+                currentSprite.removeShader(normalMapShader);
+
+            if (normalMap != null)
+                currentSprite.addOrUpdateNormalMapTexture(normalMap);
+
+            return true;
         }
 
-        public void ApplyRemoteSkin(string? skin)
+        private void RebuildRemoteSkinGraphics()
+        {
+            if (this.spr != null)
+                this.disposeGfx();
+
+            this.initGfx();
+        }
+
+        public bool ApplyRemoteSkin(string? skin)
         {
             var cleaned = NormalizeBodySkinId(skin);
-            if (string.Equals(RemoteSkinId, cleaned, StringComparison.Ordinal))
-                return;
+            var spriteMissing = this.spr == null;
+            var animMissing = this.spr?._animManager == null;
+            var skinChanged = !string.Equals(RemoteSkinId, cleaned, StringComparison.Ordinal);
+            if (!spriteMissing && !animMissing && !skinChanged)
+                return false;
 
             RemoteSkinId = cleaned;
-            if (this.spr != null)
+            try
             {
-                try
-                {
-                    this.disposeGfx();
-                    this.initGfx();
-                }
-                catch
-                {
-                    RemoteSkinId = DefaultBodySkinId;
-                    try
-                    {
-                        this.disposeGfx();
-                        this.initGfx();
-                    }
-                    catch
-                    {
-                    }
-                }
+                RebuildRemoteSkinGraphics();
             }
+            catch when (!string.Equals(RemoteSkinId, DefaultBodySkinId, StringComparison.Ordinal))
+            {
+                RemoteSkinId = DefaultBodySkinId;
+                RebuildRemoteSkinGraphics();
+            }
+
+            return true;
         }
 
         private static StringMap? ResolveAnimationTracks(

@@ -176,6 +176,7 @@ namespace DeadCellsMultiplayerMod
 
             StartHostServerOnly();
             ClearAuthoritativePendingNewGameLaunch();
+            TrySendContinueLaunchPrerequisites(screen);
             RememberPendingLaunch(
                 PendingLaunchAction.LoadSave,
                 ResolveCurrentSaveIsCustom(screen),
@@ -329,8 +330,13 @@ namespace DeadCellsMultiplayerMod
 
         private static void TryLaunchContinue(TitleScreen? screen)
         {
+            if (!TryBeginContinueLaunch())
+                return;
+
             try
             {
+                ModEntry.Instance?.PrepareForContinueLaunch();
+
                 var main = dc.Main.Class.ME;
                 if (main != null)
                 {
@@ -341,6 +347,7 @@ namespace DeadCellsMultiplayerMod
             catch (Exception ex)
             {
                 _log?.Warning("[NetMod] Continue launch failed: {Message}", ex.Message);
+                ClearContinueLaunchGuard();
             }
 
             try
@@ -350,6 +357,78 @@ namespace DeadCellsMultiplayerMod
             catch (Exception ex)
             {
                 _log?.Warning("[NetMod] Continue fallback failed: {Message}", ex.Message);
+                ClearContinueLaunchGuard();
+            }
+        }
+
+        private static bool TryBeginContinueLaunch()
+        {
+            var now = DateTime.UtcNow;
+            lock (Sync)
+            {
+                if (_continueLaunchInProgress &&
+                    (now - _continueLaunchStartedAt).TotalMilliseconds < ContinueLaunchGuardMs)
+                {
+                    return false;
+                }
+
+                _continueLaunchInProgress = true;
+                _continueLaunchStartedAt = now;
+                return true;
+            }
+        }
+
+        private static void ClearContinueLaunchGuard()
+        {
+            lock (Sync)
+            {
+                _continueLaunchInProgress = false;
+                _continueLaunchStartedAt = DateTime.MinValue;
+            }
+        }
+
+        private static void TrySendContinueLaunchPrerequisites(TitleScreen? screen)
+        {
+            var net = NetRef;
+            if (net == null || !net.IsAlive || !net.IsHost)
+                return;
+
+            var user = TryResolveContinueUser(screen);
+            if (user == null)
+                return;
+
+            GameDataSync.SendBossRune(user, net);
+            GameDataSync.SendCurrentHeroCosmetics(user, net, force: true);
+        }
+
+        private static User? TryResolveContinueUser(TitleScreen? screen)
+        {
+            try
+            {
+                if (screen?.user != null)
+                    return screen.user;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (dc.Main.Class.ME?.user != null)
+                    return dc.Main.Class.ME.user;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return Save.Class.tryLoad.Invoke();
+            }
+            catch (Exception ex)
+            {
+                _log?.Warning("[NetMod] Failed to load selected save for Continue prerequisites: {Message}", ex.Message);
+                return null;
             }
         }
 
@@ -446,9 +525,24 @@ namespace DeadCellsMultiplayerMod
         private static bool IsPendingLaunchReadyForAutoStartLocked()
         {
             if (_pendingLaunchAction == PendingLaunchAction.LoadSave)
-                return _genArrived;
+                return _genArrived && GameDataSync.HasRemoteBossRune();
 
-            return _genArrived && _seedArrived;
+            if (!_genArrived || !_seedArrived)
+                return false;
+
+            return IsRemoteRunSyncReadyForLaunchLocked();
+        }
+
+        private static bool IsRemoteRunSyncReadyForLaunchLocked()
+        {
+            if (!GameDataSync.HasRemoteBossRune())
+                return false;
+
+            var levelId = GetCachedLevelDescSync()?.LevelId;
+            if (!string.IsNullOrWhiteSpace(levelId) && GameDataSync.HasPendingRemoteLevelGraph(levelId))
+                return true;
+
+            return GameDataSync.HasPendingRemoteLevelGraph("PrisonStart");
         }
 
         private static void TryAutoStartPendingLaunch(TitleScreen screen)

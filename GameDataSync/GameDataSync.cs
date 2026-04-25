@@ -157,6 +157,7 @@ namespace DeadCellsMultiplayerMod
             ModEntry.kingInitialized = false;
             ModEntry._ghost = null!;
             ModEntry.ResetHeroCosmeticSendCache();
+            ClearPendingBossRuneReloadState();
             _lastHeroSkinSyncNet = null;
             _lastHeroSkinSyncPayload = null;
             _lastHeroHeadSkinSyncNet = null;
@@ -840,6 +841,30 @@ namespace DeadCellsMultiplayerMod
             return false;
         }
 
+        internal static bool HasRemoteBossRune()
+        {
+            lock (_bossRuneLock)
+            {
+                return _remoteBossRune.HasValue;
+            }
+        }
+
+        internal static void ClearNetworkLaunchState()
+        {
+            lock (_bossRuneLock)
+            {
+                _remoteBossRune = null;
+                _hostBossRune = null;
+            }
+
+            _hasRemoteBossRune = false;
+            _hasRemoteSerializerSync = false;
+            _hasRemoteSerializerValues = false;
+            _remoteSerializerSeq = 0;
+            _remoteSerializerUid = 0;
+            ClearPendingBossRuneReloadState();
+        }
+
         public static void ReceiveHeroSkin(string skin)
         {
             
@@ -859,6 +884,23 @@ namespace DeadCellsMultiplayerMod
                 cleaned = "BaseFlame";
 
             ModEntry.SetRemoteHeadSkin(cleaned);
+        }
+
+        internal static void SendCurrentHeroCosmetics(User? user, NetNode? net, bool force = false)
+        {
+            if (user == null || net == null || !net.IsAlive)
+                return;
+
+            if (force)
+            {
+                _lastHeroSkinSyncNet = null;
+                _lastHeroSkinSyncPayload = null;
+                _lastHeroHeadSkinSyncNet = null;
+                _lastHeroHeadSkinSyncPayload = null;
+            }
+
+            SendHeroSkin(user, net);
+            SendHeroHeadSkin(user, net);
         }
 
         private static void SendHeroSkin(User user, NetNode? net)

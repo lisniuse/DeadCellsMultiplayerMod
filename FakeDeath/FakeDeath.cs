@@ -246,8 +246,7 @@ namespace DeadCellsMultiplayerMod
             {
             }
 
-            try { cine?.destroy(); } catch { }
-            try { cine?.disposeImmediately(); } catch { }
+            DisposeGameCinematicRuntime(cine);
             return true;
         }
 
@@ -658,8 +657,7 @@ namespace DeadCellsMultiplayerMod
                 return;
 
             _remoteDownedCines.Remove(userId);
-            try { cine.destroy(); } catch { }
-            try { cine.disposeImmediately(); } catch { }
+            DisposeGameCinematicRuntime(cine);
         }
 
         private void DisposeAllRemoteDownedCines()
@@ -671,8 +669,14 @@ namespace DeadCellsMultiplayerMod
             foreach (var id in _remoteDownedCines.Keys)
                 _scratchStaleCorpseIds.Add(id);
 
+            List<Exception>? failures = null;
             for (int i = 0; i < _scratchStaleCorpseIds.Count; i++)
-                DisposeRemoteDownedCine(_scratchStaleCorpseIds[i]);
+            {
+                var userId = _scratchStaleCorpseIds[i];
+                RunTeardownStep(ref failures, $"remote downed cine {userId}", () => DisposeRemoteDownedCine(userId));
+            }
+
+            ThrowTeardownFailures("remote downed cines", failures);
         }
 
         private bool HasAliveRemoteTeammate(NetNode net)
@@ -1264,8 +1268,17 @@ namespace DeadCellsMultiplayerMod
             if (cine == null)
                 return;
 
-            try { cine.destroy(); } catch { }
-            try { cine.disposeImmediately(); } catch { }
+            DisposeGameCinematicRuntime(cine);
+        }
+
+        private static void DisposeGameCinematicRuntime(dc.GameCinematic? cine)
+        {
+            if (cine == null)
+                return;
+
+            if (!cine.destroyed)
+                cine.destroy();
+            cine.disposeImmediately();
         }
 
         private void ResetFakeDeathState(

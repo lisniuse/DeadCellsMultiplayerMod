@@ -137,6 +137,8 @@ public sealed partial class NetNode
                     string? cachedLevelDescPayload;
                     string? cachedLevelSeedPayload;
                     string? cachedLevelGraphPayload;
+                    string? cachedHeroSkin;
+                    string? cachedHeroHeadSkin;
                     lock (_hostCacheSync)
                     {
                         cachedBossRune = _cachedHostBossRune;
@@ -146,6 +148,8 @@ public sealed partial class NetNode
                         cachedLevelDescPayload = _cachedHostLevelDescPayload;
                         cachedLevelSeedPayload = _cachedHostLevelSeedPayload;
                         cachedLevelGraphPayload = _cachedHostLevelGraphPayload;
+                        cachedHeroSkin = _cachedHostHeroSkin;
+                        cachedHeroHeadSkin = _cachedHostHeroHeadSkin;
                     }
 
                     if (cachedSerializerSeq.HasValue && cachedSerializerUid.HasValue)
@@ -165,6 +169,12 @@ public sealed partial class NetNode
 
                     if (cachedLevelGraphPayload != null)
                         await SendLineToClientSafe(connection, $"LGRAPH|{cachedLevelGraphPayload}\n").ConfigureAwait(false);
+
+                    if (!string.IsNullOrWhiteSpace(cachedHeroSkin))
+                        await SendLineToClientSafe(connection, BuildTaggedLine("SKIN", 1, cachedHeroSkin)).ConfigureAwait(false);
+
+                    if (!string.IsNullOrWhiteSpace(cachedHeroHeadSkin))
+                        await SendLineToClientSafe(connection, BuildTaggedLine("HEAD", 1, cachedHeroHeadSkin)).ConfigureAwait(false);
                 }
 
                 GameMenu.EnqueueMainThreadCoalesced("net:remote-connected", () =>
@@ -395,6 +405,18 @@ public sealed partial class NetNode
             var line = BuildTaggedLine("USER", state.Id, username);
             await SendLineToClientSafe(connection, line).ConfigureAwait(false);
             await SendLineToClientSafe(connection, BuildReadyLine(state.Id, state.Ready)).ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(state.Skin))
+            {
+                var skinLine = BuildTaggedLine("SKIN", state.Id, state.Skin);
+                await SendLineToClientSafe(connection, skinLine).ConfigureAwait(false);
+            }
+
+            if (!string.IsNullOrWhiteSpace(state.Head))
+            {
+                var headLine = BuildTaggedLine("HEAD", state.Id, state.Head);
+                await SendLineToClientSafe(connection, headLine).ConfigureAwait(false);
+            }
         }
     }
 }

@@ -7,6 +7,20 @@ namespace DeadCellsMultiplayerMod
 {
     internal static partial class GameMenu
     {
+        private static void ResetLobbyReadyState()
+        {
+            lock (Sync)
+            {
+                ResetLobbyReadyStateLocked();
+            }
+        }
+
+        private static void ResetLobbyReadyStateLocked()
+        {
+            _localReady = false;
+            _playersDisplay.Clear();
+        }
+
         private static void ToggleLocalReadyFromMenu(TitleScreen screen)
         {
             SetLocalReady(!_localReady, sendToRemote: true, refreshMenu: true);

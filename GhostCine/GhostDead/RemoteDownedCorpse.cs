@@ -601,16 +601,9 @@ namespace DeadCellsMultiplayerMod
             if (corpse == null)
                 return;
 
-            try
-            {
-                if (!corpse.destroyed)
-                    corpse.destroy();
-            }
-            catch
-            {
-            }
-
-            try { corpse.dispose(); } catch { }
+            if (!corpse.destroyed)
+                corpse.destroy();
+            corpse.dispose();
         }
     }
 }

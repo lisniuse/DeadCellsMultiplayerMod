@@ -93,6 +93,9 @@ namespace DeadCellsMultiplayerMod
         private static long[] clientNextHeadRecreateTick = new long[NetNode.MaxClientSlots];
         public static Hero me = null!;
         public static GhostHero _ghost = null!;
+        private Hero? _ghostOwnerHero;
+        private dc.pr.Game? _ghostOwnerGame;
+        private NetNode? _ghostBootstrapNet;
 
         private GameDataSync? gds;
         private Hero? _debugPerkAppliedHero;
@@ -283,15 +286,43 @@ namespace DeadCellsMultiplayerMod
 
         internal static void ResetClientSlots()
         {
+            List<Exception>? failures = null;
+            var instance = Instance;
+            if (instance != null)
+            {
+                RunTeardownStep(ref failures, "coop ghost runtime reset", instance.DisposeCoopGhostRuntime);
+                instance._ghostBootstrapNet = null;
+            }
+            else
+            {
+                var ghost = _ghost;
+                _ghost = null!;
+                RunTeardownStep(ref failures, "static GhostHero reset", () => ghost?.Dispose());
+            }
+
             clientSlotByRemoteId.Clear();
             for (int i = 0; i < clients.Length; i++)
             {
                 var head = clientHeads[i];
                 if (head != null)
                 {
-                    head.dispose();
-                    clientHeads[i] = null;
+                    var headClient = clients[i];
+                    RunTeardownStep(ref failures, $"static client head slot {i}", () =>
+                    {
+                        if (headClient != null && ReferenceEquals(headClient.head, head))
+                            headClient.head = null!;
+                        head.dispose();
+                    });
                 }
+
+                var client = clients[i];
+                if (client != null && instance == null)
+                {
+                    var slot = i;
+                    RunTeardownStep(ref failures, $"static client GhostKing slot {slot}", () => GhostHero.DisposeKingRuntime(client));
+                }
+
+                clientHeads[i] = null;
                 clients[i] = null!;
                 clientLabels[i] = null;
                 clientIds[i] = 0;
@@ -308,6 +339,8 @@ namespace DeadCellsMultiplayerMod
                 rLastY[i] = 0;
                 ResetGhostHeadRuntimeState(i);
             }
+
+            ThrowTeardownFailures("client slots reset", failures);
         }
 
         private static string BuildRemoteLabel(int remoteId, string? username)
@@ -678,11 +711,16 @@ namespace DeadCellsMultiplayerMod
         {
             orig(self, v);
             if (_netRole == NetRole.Client)
+            {
                 GameDataSync.CaptureOriginalUserData(self, allowReplaceWhenBetter: true);
+                GameDataSync.RestoreRemoteUserData(self);
+            }
         }
 
         private void Hook_Game_onDispose(Hook_Game.orig_onDispose orig, dc.pr.Game self)
         {
+            DisposeCoopGhostRuntimeForWorldTeardown(self);
+
             if (_netRole == NetRole.Client)
             {
                 var user = self?.user;
@@ -930,22 +968,24 @@ namespace DeadCellsMultiplayerMod
             SendCurrentRoomTarget(force: true);
             _net?.ClearMobSyncQueues();
             EnsureHeroVisibilityAfterRoomChange(me);
-            if (_netRole == NetRole.None) return;
-            var net = _net;
-            var localId = net?.id ?? 0;
-            _ghost = new GhostHero(localId, game!, me, Logger, this);
-            _ghost.SetLabel(me, GameMenu.Username);
-            for (int i = 0; i < clients.Length; i++)
-            {
-                DisposeClientSlot(i, clearIdentity: false);
-                rLastX[i] = 0;
-                rLastY[i] = 0;
-                ResetGhostHeadRuntimeState(i);
-            }
 
-            DrainRemoteCombatQueuesAfterLevelChange();
-            GameMenu.EnqueueMainThreadCoalesced("ghost:receive-coords", ReceiveGhostCoords);
-            MarkDiveNetGuardAfterSpawnOrRoomChange();
+            if (_netRole != NetRole.None)
+            {
+                List<Exception>? failures = null;
+                for (int i = 0; i < clients.Length; i++)
+                {
+                    var slot = i;
+                    RunTeardownStep(ref failures, $"level-change client slot {slot}", () => DisposeClientSlot(slot, clearIdentity: false));
+                    rLastX[i] = 0;
+                    rLastY[i] = 0;
+                    ResetGhostHeadRuntimeState(i);
+                }
+                ThrowTeardownFailures("level-change client slots", failures);
+
+                DrainRemoteCombatQueuesAfterLevelChange();
+                GameMenu.EnqueueMainThreadCoalesced("ghost:receive-coords", ReceiveGhostCoords);
+                MarkDiveNetGuardAfterSpawnOrRoomChange();
+            }
 
             _debugExplorerRevealAppliedSignature = string.Empty;
             _nextDebugExplorerRevealRetryTick = 0;
@@ -955,10 +995,15 @@ namespace DeadCellsMultiplayerMod
 
         public void hook_hero_wakeup(Hook_Hero.orig_wakeup orig, Hero self, Level lvl, int cx, int cy)
         {
-            me = self;
-            me._targetable = true;
             _debugExplorerRevealAppliedSignature = string.Empty;
             orig(self, lvl, cx, cy);
+
+            var localGame = lvl?.game ?? game ?? dc.pr.Game.Class.ME;
+            if (localGame == null || !IsHeroRuntimeReadyForCoop(localGame, self))
+                return;
+
+            me = self;
+            me._targetable = true;
             EnsureHeroVisibilityAfterRoomChange(me);
             SendCurrentRoomTarget(force: true);
             SendEquippedWeapons(self.inventory);
@@ -972,10 +1017,151 @@ namespace DeadCellsMultiplayerMod
             orig(self);
         }
 
+        internal void PrepareForContinueLaunch()
+        {
+            DisposeCoopGhostRuntime();
+            // Continue keeps the live net session; discard old-world remote combat work
+            // before the next load so stale dive/attack packets cannot replay into it.
+            DrainRemoteCombatQueuesAfterLevelChange();
+            me = null!;
+            game = null;
+            kingInitialized = false;
+            ResetHeroCosmeticSendCache();
+            GameDataSync.ClearPendingBossRuneReloadState();
+        }
+
+        private void EnsureCoopRuntimeBootstrap()
+        {
+            if (_netRole == NetRole.None)
+                return;
+
+            var net = _net;
+            if (net == null || !TryGetReadyLocalHero(out var localGame, out var localHero))
+                return;
+
+            me = localHero;
+            me._targetable = true;
+
+            if (_ghost != null &&
+                (!ReferenceEquals(_ghostOwnerHero, me) ||
+                 !ReferenceEquals(_ghostOwnerGame, localGame)))
+            {
+                DisposeCoopGhostRuntime();
+            }
+
+            if (_ghost == null)
+            {
+                _ghost = new GhostHero(net.id, localGame, me, Logger, this);
+                _ghost.SetLabel(me, GameMenu.Username);
+                _ghostOwnerHero = me;
+                _ghostOwnerGame = localGame;
+                _ghostBootstrapNet = null;
+            }
+
+            if (ReferenceEquals(_ghostBootstrapNet, net))
+                return;
+
+            _ghostBootstrapNet = net;
+            EnsureHeroVisibilityAfterRoomChange(me);
+            SendCurrentRoomTarget(force: true);
+            if (me.inventory != null)
+                SendEquippedWeapons(me.inventory);
+            if (net.IsHost)
+                GameDataSync.SendBossRune(localGame.user, net);
+            GameDataSync.SendCurrentHeroCosmetics(localGame.user, net);
+            MarkDiveNetGuardAfterSpawnOrRoomChange();
+        }
+
+        private bool TryGetReadyLocalHero(out dc.pr.Game localGame, out Hero localHero)
+        {
+            localGame = null!;
+            localHero = null!;
+
+            var candidateGame = game ?? dc.pr.Game.Class.ME;
+            var candidateHero = candidateGame?.hero ?? ModCore.Modules.Game.Instance?.HeroInstance ?? me;
+            if (candidateGame == null || candidateHero == null)
+                return false;
+
+            if (!IsHeroRuntimeReadyForCoop(candidateGame, candidateHero))
+                return false;
+
+            localGame = candidateGame;
+            localHero = candidateHero;
+            return true;
+        }
+
+        private static bool IsHeroRuntimeReadyForCoop(dc.pr.Game localGame, Hero hero)
+        {
+            try
+            {
+                if (localGame == null || hero == null || hero.destroyed)
+                    return false;
+
+                if (localGame.user == null || localGame.data == null || localGame.controller == null)
+                    return false;
+
+                var gameHero = localGame.hero;
+                if (gameHero != null && !ReferenceEquals(gameHero, hero))
+                    return false;
+
+                var level = hero._level;
+                if (level == null || level.map == null)
+                    return false;
+
+                if (level.game != null && !ReferenceEquals(level.game, localGame))
+                    return false;
+
+                var currentLevel = localGame.curLevel;
+                if (currentLevel != null && currentLevel.map != null)
+                {
+                    var heroLevelId = level.map.id?.ToString();
+                    var currentLevelId = currentLevel.map.id?.ToString();
+                    if (!string.IsNullOrWhiteSpace(heroLevelId) &&
+                        !string.IsNullOrWhiteSpace(currentLevelId) &&
+                        !string.Equals(heroLevelId, currentLevelId, StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+                }
+
+                if (!HasHeroEntityRuntimeInitialized(hero))
+                    return false;
+
+                var cooldown = hero.cd;
+                if (cooldown == null || cooldown.fastCheck == null)
+                    return false;
+
+                return localGame.curCine == null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        internal static bool HasHeroEntityRuntimeInitialized(Hero? hero)
+        {
+            try
+            {
+                return hero != null && hero.awake && hero.initDone;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public void OnHeroInit()
         {
+            var localGame = game ?? dc.pr.Game.Class.ME;
+            var hero = localGame?.hero ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            if (localGame != null && hero != null && IsHeroRuntimeReadyForCoop(localGame, hero))
+            {
+                me = hero;
+                me._targetable = true;
+                ApplyDebugHeroRuntimeOptions();
+            }
             GameMenu.MarkInRun();
-            ApplyDebugHeroRuntimeOptions();
         }
 
         public void OnFrameUpdate(double dt)
@@ -1005,7 +1191,10 @@ namespace DeadCellsMultiplayerMod
         }
         void IOnHeroUpdate.OnHeroUpdate(double dt)
         {
-            if (me == null) return;
+            if (!TryGetReadyLocalHero(out _, out var localHero))
+                return;
+
+            me = localHero;
             var hitchStart = RuntimeHitchWatch.Start();
             var stepStart = RuntimeHitchWatch.Start();
             ApplyDebugHeroRuntimeOptions();
@@ -1017,6 +1206,10 @@ namespace DeadCellsMultiplayerMod
 
             if (_netRole == NetRole.None || _net == null)
                 return;
+
+            stepStart = RuntimeHitchWatch.Start();
+            EnsureCoopRuntimeBootstrap();
+            LogHeroUpdateStepIfSlow("ModEntry.OnHeroUpdate.EnsureCoopRuntimeBootstrap", stepStart, null);
 
             stepStart = RuntimeHitchWatch.Start();
             TrySendCurrentDiveSkillInfoSnapshot();

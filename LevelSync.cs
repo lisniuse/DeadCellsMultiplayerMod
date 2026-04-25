@@ -134,6 +134,17 @@ namespace DeadCellsMultiplayerMod
             TryScheduleBossRuneReloadForLevel(currentLevelId);
         }
 
+        internal static bool HasPendingRemoteLevelGraph(string? levelId)
+        {
+            if (string.IsNullOrWhiteSpace(levelId))
+                return false;
+
+            lock (_levelGraphLock)
+            {
+                return _remoteLevelGraphs.ContainsKey(levelId);
+            }
+        }
+
         internal static void MarkPendingBossRuneReload(int bossRune)
         {
             var levelId = TryGetCurrentLevelId();
@@ -208,9 +219,16 @@ namespace DeadCellsMultiplayerMod
             if (net == null || !net.IsAlive || net.IsHost)
                 return;
 
+            if (GameMenu.HasPendingClientRestart())
+                return;
+
             var hero = ModEntry.me;
             var level = hero?._level;
             if (hero == null || level == null || level.map == null)
+                return;
+
+            var game = dc.pr.Game.Class.ME;
+            if (!IsRuntimeReadyForReload(game, hero, level))
                 return;
 
             var currentLevelId = level.map.id?.ToString();
@@ -271,10 +289,17 @@ namespace DeadCellsMultiplayerMod
             if (net == null || !net.IsAlive || net.IsHost)
                 return;
 
+            if (GameMenu.HasPendingClientRestart())
+                return;
+
             var hero = ModEntry.me;
             var level = hero?._level;
             var user = dc.Main.Class.ME?.user ?? level?.game?.user;
             if (hero == null || level == null || level.map == null || user == null)
+                return;
+
+            var game = dc.pr.Game.Class.ME;
+            if (!IsRuntimeReadyForReload(game, hero, level))
                 return;
 
             var currentLevelId = level.map.id?.ToString();
@@ -335,6 +360,74 @@ namespace DeadCellsMultiplayerMod
                 _lastBossRuneReloadTick = now;
                 return true;
             }
+        }
+
+        private static bool IsRuntimeReadyForReload(Game? game, Hero hero, Level level)
+        {
+            if (game == null || hero == null || level == null || level.map == null)
+                return false;
+
+            try
+            {
+                if (dc.pr.Game.Class.ME == null)
+                    return false;
+
+                if (dc.Main.Class.ME?.root == null || dc.Main.Class.ME.options == null)
+                    return false;
+
+                if (game.controller == null ||
+                    game.curLevel == null ||
+                    game.curLevel.map == null ||
+                    game.data == null ||
+                    game.user == null ||
+                    game.hud == null ||
+                    game.log == null)
+                {
+                    return false;
+                }
+
+                var gameLevelId = game.curLevel.map.id?.ToString();
+                var heroLevelId = level.map.id?.ToString();
+                if (string.IsNullOrWhiteSpace(gameLevelId) ||
+                    !string.Equals(gameLevelId, heroLevelId, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var gameHero = game.hero;
+                if (gameHero == null || gameHero._level == null || gameHero._level.map == null)
+                    return false;
+            }
+            catch
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!ModEntry.HasHeroEntityRuntimeInitialized(hero))
+                    return false;
+
+                var cd = hero.cd;
+                if (cd == null || cd.fastCheck == null)
+                    return false;
+            }
+            catch
+            {
+                return false;
+            }
+
+            try
+            {
+                if (game.curCine != null)
+                    return false;
+            }
+            catch
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static (int OffsetCx, int OffsetCy) ComputeBossRuneReloadOffsets(Hero hero, Level level)

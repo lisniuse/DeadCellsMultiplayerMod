@@ -96,8 +96,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
         {
             try
             {
-                var fastCheck = ModEntry.me?.cd?.fastCheck;
-                if (fastCheck == null)
+                if (!TryGetLocalHeroFastCheck(out var fastCheck))
                     return false;
 
                 int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
@@ -120,8 +119,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
                 var hero = ModCore.Modules.Game.Instance.HeroInstance!;
                 Zombie zombie = new Zombie(hero._level, hero.cx, hero.cy, 0, 100);
                 zombie.init();
-                var fastCheck = ModEntry.me?.cd?.fastCheck;
-                if (fastCheck != null)
+                if (TryGetLocalHeroFastCheck(out var fastCheck))
                 {
                     int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
                     fastCheck.set(key, new CdInst(key, 3.0));
@@ -130,8 +128,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
             if (Key.Class.isPressed(99))//num3
             {
                 var me = ModEntry.me;
-                var fastCheck = me?.cd?.fastCheck;
-                if (fastCheck != null)
+                if (TryGetLocalHeroFastCheck(out var fastCheck))
                 {
                     int key = Cooldown.Encode(Cooldown.Keys.JUMP_HIT);
                     fastCheck.remove(key);
@@ -162,6 +159,31 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
             }
 
         }
+
+        private static bool TryGetLocalHeroFastCheck(out dc.haxe.ds.IntMap fastCheck)
+        {
+            fastCheck = null!;
+            var hero = ModEntry.me;
+            if (!ModEntry.HasHeroEntityRuntimeInitialized(hero))
+                return false;
+
+            try
+            {
+                var cooldown = hero.cd;
+                var map = cooldown?.fastCheck;
+                if (map == null)
+                    return false;
+
+                fastCheck = map;
+                return true;
+            }
+            catch
+            {
+                fastCheck = null!;
+                return false;
+            }
+        }
+
         private void Hook_Hero_kinglifupdate(Hook_Hero.orig_updateLifeBar orig, Hero self)
         {
             orig(self);
@@ -569,8 +591,10 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI
         {
             UpdateSystemMessages(dt);
             var hero = ModEntry.me;
-            if (hero != null)
-                KingLifeUpdate(hero);
+            if (!ModEntry.HasHeroEntityRuntimeInitialized(hero))
+                return;
+
+            KingLifeUpdate(hero);
             Debugkeys();
         }
     }

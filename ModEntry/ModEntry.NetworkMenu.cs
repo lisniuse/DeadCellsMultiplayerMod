@@ -101,24 +101,49 @@ namespace DeadCellsMultiplayerMod
         public void StopNetworkFromMenu()
         {
             var roleBeforeStop = _netRole;
-            if (roleBeforeStop == NetRole.Client)
+            try
             {
-                Logger.Information("[NetMod] Disconnecting client from host...");
-                _net?.SendControlAndFlush("BYE", 500);
+                if (roleBeforeStop == NetRole.Client)
+                {
+                    Logger.Information("[NetMod] Disconnecting client from host...");
+                    _net?.SendControlAndFlush("BYE", 500);
+                }
+                else if (roleBeforeStop == NetRole.Host)
+                {
+                    Logger.Information("[NetMod] Disposing host server...");
+                    _net?.SendControlAndFlush("KICK", 500);
+                }
             }
-            else if (roleBeforeStop == NetRole.Host)
+            catch (Exception ex)
             {
-                Logger.Information("[NetMod] Disposing host server...");
-                _net?.SendControlAndFlush("KICK", 500);
+                Logger.Warning("[NetMod] Network stop notification failed: {Message}", ex.Message);
             }
 
-            _net?.Dispose();
-            ResetNetworkState();
-            _net = null;
-            _netRole = NetRole.None;
-            GameMenu.NetRef = null;
-            GameMenu.SetRole(_netRole);
-            ConnectionUI.NotifyConnectionsChanged();
+            try
+            {
+                _net?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("[NetMod] Network dispose failed: {Message}", ex.Message);
+            }
+
+            try
+            {
+                ResetNetworkState();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("[NetMod] Network runtime cleanup failed: {Message}", ex.Message);
+            }
+            finally
+            {
+                _net = null;
+                _netRole = NetRole.None;
+                GameMenu.NetRef = null;
+                GameMenu.SetRole(_netRole);
+                ConnectionUI.NotifyConnectionsChanged();
+            }
         }
     }
 }

@@ -230,19 +230,23 @@ namespace DeadCellsMultiplayerMod.Ghost
         /// <summary>Disposes the managed weapon and clears shield state; call when GhostKing is torn down to avoid use-after-dispose.</summary>
         internal void DisposeManagedWeapon()
         {
-            if(weapon != null && !weapon.destroyed)
-            {
-                try { weapon.dispose(); } catch { }
-            }
-
+            var managedWeapon = weapon;
             weapon = null!;
-            weaponItem = null!;
-            pendingAttacks = 0;
-            pendingInterrupts = 0;
-            pendingSlot = -1;
-            _shieldActive = false;
-            _shieldLastPulseTicks = 0;
-            _lastShieldReleaseTimestamp = 0;
+            try
+            {
+                if(managedWeapon != null && !managedWeapon.destroyed)
+                    managedWeapon.dispose();
+            }
+            finally
+            {
+                weaponItem = null!;
+                pendingAttacks = 0;
+                pendingInterrupts = 0;
+                pendingSlot = -1;
+                _shieldActive = false;
+                _shieldLastPulseTicks = 0;
+                _lastShieldReleaseTimestamp = 0;
+            }
         }
 
         private bool NeedsWeaponRebuild(InventItem item)

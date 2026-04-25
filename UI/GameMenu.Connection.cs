@@ -74,10 +74,10 @@ namespace DeadCellsMultiplayerMod
                 var continueLabel = GetContinueButtonLabel(screen);
                 var startLabel = GetStartNormalModeButtonLabel();
                 var canLaunch = AllPlayersReady();
-                AddMenuButton(screen, GetReadyButtonLabel(), () => ToggleLocalReadyFromMenu(screen), Localize("Toggle your ready state"));
                 AddMenuButton(screen, continueLabel, () => ContinueHostRun(screen), Localize("Continue the selected multiplayer save"), canLaunch);
                 AddMenuButton(screen, startLabel, () => StartHostRunNormalMode(screen), GetText.Instance.GetString("Launch game"), canLaunch);
                 AddMenuButton(screen, "Custom Mode", () => OpenHostCustomMode(screen), Localize("Configure and launch multiplayer custom mode"), canLaunch);
+                AddMenuButton(screen, GetReadyButtonLabel(), () => ToggleLocalReadyFromMenu(screen), Localize("Toggle your ready state"));
                 AddMenuButton(screen, multiplayerSaveLabel, () => OpenMultiplayerSlotMenu(screen), Localize("Choose multiplayer save slot"));
                 AddMenuButton(screen, GetText.Instance.GetString("Back"), () =>
                 {
@@ -89,7 +89,7 @@ namespace DeadCellsMultiplayerMod
                 }, GetText.Instance.GetString("Back to host setup"));
 
                 RemoveMenuItems(screen, "About Core Modding", GetText.Instance.GetString("Play multiplayer"));
-                RemoveDuplicatesKeepFirst(screen, GetReadyButtonLabel(), continueLabel, startLabel, "Custom Mode", multiplayerSaveLabel, GetText.Instance.GetString("Back"));
+                RemoveDuplicatesKeepFirst(screen, continueLabel, startLabel, "Custom Mode", GetReadyButtonLabel(), multiplayerSaveLabel, GetText.Instance.GetString("Back"));
                 _inHostStatusMenu = true;
                 _inClientWaitingMenu = false;
             }
@@ -120,16 +120,16 @@ namespace DeadCellsMultiplayerMod
 
                 AddInfoLine(screen, $"Selected mode: {GetPendingLaunchSummaryLabel(screen)}", infoColor: 0xE0E0E0);
                 AddMenuButton(screen, GetReadyButtonLabel(), () => ToggleLocalReadyFromMenu(screen), Localize("Toggle your ready state"));
+                var multiplayerSaveLabel = GetMultiplayerSaveButtonLabel();
+                AddMenuButton(screen, multiplayerSaveLabel, () => OpenMultiplayerSlotMenu(screen), Localize("Choose multiplayer save slot"));
                 AddMenuButton(
                     screen,
                     GetText.Instance.GetString("Disconnect"),
                     () => {DisconnectFromMenu(screen); screen.ShouldAutoHideConnectionUI(false);},
                     GetText.Instance.GetString("Disconnect and return to main menu"));
-                var multiplayerSaveLabel = GetMultiplayerSaveButtonLabel();
-                AddMenuButton(screen, multiplayerSaveLabel, () => OpenMultiplayerSlotMenu(screen), Localize("Choose multiplayer save slot"));
 
                 RemoveMenuItems(screen, "About Core Modding", GetText.Instance.GetString("Play multiplayer"));
-                RemoveDuplicatesKeepFirst(screen, GetReadyButtonLabel(), GetText.Instance.GetString("Disconnect"), multiplayerSaveLabel);
+                RemoveDuplicatesKeepFirst(screen, GetReadyButtonLabel(), multiplayerSaveLabel, GetText.Instance.GetString("Disconnect"));
                 _inClientWaitingMenu = true;
                 _inHostStatusMenu = false;
             }
@@ -201,7 +201,12 @@ namespace DeadCellsMultiplayerMod
             lock (Sync)
             {
                 _inActualRun = false;
+                _pendingClientRestartSeed = null;
+                _pendingClientRestartReason = string.Empty;
+                _continueLaunchInProgress = false;
+                _continueLaunchStartedAt = DateTime.MinValue;
             }
+            ResetLobbyReadyState();
             ResetSteamState();
         }
 
@@ -285,12 +290,14 @@ namespace DeadCellsMultiplayerMod
 
         public static void NotifyRemoteDisconnected(NetRole role)
         {
+            try { ModEntry.Instance?.HandleNetworkDisconnectGhostCleanup(role); } catch { }
+
             if (role == NetRole.Host)
             {
                 var disconnectedName = string.IsNullOrWhiteSpace(_remoteUsername) ? Localize("Guest") : _remoteUsername.Trim();
                 MultiplayerUI.PushSystemMessage(FormatLocalized("{0} disconnected from the server.", disconnectedName));
                 _remoteUsername = "guest";
-                _localReady = false;
+                ResetLobbyReadyState();
                 _genArrived = false;
                 _seedArrived = false;
                 if (_menuSelection == NetRole.Host)
@@ -314,7 +321,7 @@ namespace DeadCellsMultiplayerMod
             _inHostStatusMenu = false;
             _inClientWaitingMenu = false;
             _remoteUsername = "guest";
-            _localReady = false;
+            ResetLobbyReadyState();
             _genArrived = false;
             MultiplayerUI.PushSystemMessage(Localize("Host disconnected from server."));
             if (wasInRun)
@@ -369,6 +376,10 @@ namespace DeadCellsMultiplayerMod
             CacheLevelDescSync(null);
             _genArrived = false;
             _seedArrived = false;
+            _pendingClientRestartSeed = null;
+            _pendingClientRestartReason = string.Empty;
+            _continueLaunchInProgress = false;
+            _continueLaunchStartedAt = DateTime.MinValue;
         }
 
         private static void ResetSteamState()
@@ -753,6 +764,8 @@ namespace DeadCellsMultiplayerMod
             {
                 _clientConnectAttempt = 0;
                 _clientConnecting = false;
+                _pendingClientRestartSeed = null;
+                _pendingClientRestartReason = string.Empty;
             }
         }
 

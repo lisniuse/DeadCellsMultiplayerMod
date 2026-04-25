@@ -45,6 +45,7 @@ public class Levelinit : ModBase, IOnAdvancedModuleInitializing
     private void Levelinit_EntitiesPostCreate(Hook_Level.orig_entitiesPostCreate orig, Level self)
     {
         orig(self);
+        GhostHero.PurgeGhostKingsFromLevel(self);
     }
 
     private void Levelinit_OnDispose(Hook_Level.orig_onDispose orig, Level self)

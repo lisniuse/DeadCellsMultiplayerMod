@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using dc.pr;
 using ModCore.Utilities;
@@ -426,7 +428,11 @@ namespace DeadCellsMultiplayerMod
             if (client != null)
             {
                 if (!string.Equals(prev, cleaned, StringComparison.Ordinal) || client.spr == null)
-                    client.ApplyRemoteSkin(cleaned);
+                {
+                    var rebuiltBody = client.ApplyRemoteSkin(cleaned);
+                    if (rebuiltBody && (clientHeads[index] != null || client.head != null))
+                        instance.ScheduleGhostHeadRecreate(index, immediate: true);
+                }
             }
         }
 
@@ -477,6 +483,8 @@ namespace DeadCellsMultiplayerMod
             var hadExisting = existing != null;
             if (existing != null)
             {
+                if (ReferenceEquals(client.head, existing))
+                    client.head = null!;
                 existing.dispose();
                 clientHeads[slot] = null;
             }
@@ -485,9 +493,8 @@ namespace DeadCellsMultiplayerMod
             try
             {
                 bool fromUI = false;
-                var attachRoot = new dc.h2d.Object(client.spr);
                 var newHead = new Kinghead(localHero, client, localLevel, Logger);
-                newHead.init(localLevel, attachRoot, Ref<bool>.From(ref fromUI));
+                newHead.init(localLevel, client.spr, Ref<bool>.From(ref fromUI));
                 clientHeads[slot] = newHead;
                 client.head = newHead;
                 pendingClientHeadRecreate[slot] = false;
@@ -805,8 +812,7 @@ namespace DeadCellsMultiplayerMod
             clients[slot] = created;
 
             var knownSkin = clientSkins[slot];
-            if (!string.IsNullOrWhiteSpace(knownSkin))
-                created.ApplyRemoteSkin(knownSkin);
+            created.ApplyRemoteSkin(knownSkin);
 
             var knownHead = clientHeadSkins[slot];
             created.RemoteHeadSkinId = NormalizeSkin(knownHead, "BaseFlame");
@@ -838,21 +844,8 @@ namespace DeadCellsMultiplayerMod
             var previousRemoteId = clientIds[slot];
 
             var head = clientHeads[slot];
-            if (head != null)
-            {
-                head.dispose();
-                clientHeads[slot] = null;
-            }
-            pendingClientHeadRecreate[slot] = false;
-            ResetGhostHeadRuntimeState(slot);
-
             var client = clients[slot];
-            if (client != null)
-            {
-                client.destroy();
-                client.dispose();
-                client.disposeGfx();
-            }
+            clientHeads[slot] = null;
             clients[slot] = null!;
             clientLastBodyAnims[slot] = null;
             clientLastBodyAnimQueues[slot] = null;
@@ -862,9 +855,44 @@ namespace DeadCellsMultiplayerMod
             clientLastDownedOffsets[slot] = false;
             rLastX[slot] = 0;
             rLastY[slot] = 0;
+            List<Exception>? failures = null;
+
+            if (clearIdentity && previousRemoteId > 0)
+            {
+                _remoteDowned.Remove(previousRemoteId);
+                _downedAnnouncements.Remove(previousRemoteId);
+                RunTeardownStep(ref failures, $"remote downed cine {previousRemoteId}", () => DisposeRemoteDownedCine(previousRemoteId));
+            }
+
+            if (head != null)
+            {
+                RunTeardownStep(ref failures, $"client head slot {slot}", () =>
+                {
+                    if (client != null && ReferenceEquals(client.head, head))
+                        client.head = null!;
+                    head.dispose();
+                });
+            }
+            pendingClientHeadRecreate[slot] = false;
+            ResetGhostHeadRuntimeState(slot);
+
+            if (client != null)
+            {
+                var ghost = _ghost;
+                RunTeardownStep(ref failures, $"client GhostKing slot {slot}", () =>
+                {
+                    if (ghost != null)
+                        ghost.disposeKing(client);
+                    else
+                        GhostHero.DisposeKingRuntime(client);
+                });
+            }
 
             if (!clearIdentity)
+            {
+                ThrowTeardownFailures($"client slot {slot}", failures);
                 return;
+            }
 
             if (previousRemoteId > 0)
             {
@@ -876,6 +904,7 @@ namespace DeadCellsMultiplayerMod
 
             clientIds[slot] = 0;
             clientLabels[slot] = null;
+            ThrowTeardownFailures($"client slot {slot}", failures);
         }
 
         private void ReceiveGhostWeapons()
@@ -1397,11 +1426,95 @@ namespace DeadCellsMultiplayerMod
             _pendingClientDisposeTicks.Clear();
         }
 
+        private void DisposeCoopGhostRuntime()
+        {
+            List<Exception>? failures = null;
+            RunTeardownStep(
+                ref failures,
+                "fake death/downed ghost runtime",
+                () => ResetFakeDeathState(unlockLocalHero: false, sendNetworkUpState: false));
+
+            for (int i = 0; i < clients.Length; i++)
+            {
+                var slot = i;
+                RunTeardownStep(ref failures, $"client slot {slot}", () => DisposeClientSlot(slot, clearIdentity: true));
+            }
+
+            var ghost = _ghost;
+            _ghost = null!;
+            _ghostOwnerHero = null;
+            _ghostOwnerGame = null;
+            _ghostBootstrapNet = null;
+            RunTeardownStep(ref failures, "local GhostHero", () => ghost?.Dispose());
+            ThrowTeardownFailures("coop ghost runtime", failures);
+        }
+
+        private static void RunTeardownStep(ref List<Exception>? failures, string step, Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                failures ??= new List<Exception>();
+                failures.Add(new InvalidOperationException($"Ghost runtime teardown failed during {step}.", ex));
+            }
+        }
+
+        private static void ThrowTeardownFailures(string scope, List<Exception>? failures)
+        {
+            if (failures == null || failures.Count == 0)
+                return;
+            if (failures.Count == 1)
+                throw failures[0];
+            throw new AggregateException($"Ghost runtime teardown failed for {scope}.", failures);
+        }
+
+        internal void DisposeCoopGhostRuntimeForWorldTeardown(dc.pr.Game? disposingGame = null)
+        {
+            if (disposingGame != null &&
+                _ghostOwnerGame != null &&
+                !ReferenceEquals(_ghostOwnerGame, disposingGame))
+            {
+                return;
+            }
+
+            DisposeCoopGhostRuntime();
+        }
+
+        internal void HandleNetworkDisconnectGhostCleanup(NetRole role)
+        {
+            if (role == NetRole.Host)
+            {
+                var activeRemoteIds = new HashSet<int>();
+                List<Exception>? failures = null;
+                _net?.CopyRemoteUserIdsTo(activeRemoteIds, includePrimary: true);
+                for (int i = 0; i < clientIds.Length; i++)
+                {
+                    var slot = i;
+                    var remoteId = clientIds[i];
+                    if (remoteId <= 0 || activeRemoteIds.Contains(remoteId))
+                        continue;
+
+                    RunTeardownStep(ref failures, $"disconnected client slot {slot}", () => DisposeClientSlot(slot, clearIdentity: true));
+                }
+
+                ThrowTeardownFailures("host disconnect ghost cleanup", failures);
+                return;
+            }
+
+            DisposeCoopGhostRuntime();
+        }
+
         private void ResetNetworkState()
         {
             ResetFakeDeathState(unlockLocalHero: true, sendNetworkUpState: false);
+            DisposeCoopGhostRuntime();
             ResetLocalSkinSendCache();
+            GameDataSync.ClearNetworkLaunchState();
             ResetDoorMarkerState();
+            _ghostBootstrapNet = null;
             _lastSentDiveInfoPayload = string.Empty;
             _remoteDiveInfoPayloadById.Clear();
             _lastLocalDiveStartSendTicks = 0;

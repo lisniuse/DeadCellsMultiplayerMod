@@ -1,13 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using dc.en;
 using dc.pr;
 using ModCore.Utilities;
 using Serilog;
 using dc;
 using HaxeProxy.Runtime;
-using dc.shader;
-using dc.hl.types;
-using Hashlink.Virtuals;
-using dc.libs.heaps.slib;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 namespace DeadCellsMultiplayerMod
 {
@@ -40,6 +39,9 @@ namespace DeadCellsMultiplayerMod
         private static int _cachedDisplayMode = int.MinValue;
         private static int _cachedFullScreenMode = int.MinValue;
         private static double _cachedNicknameScale = NickScaleWindowed;
+        private static readonly object KingTeardownMarker = new();
+        private static readonly ConditionalWeakTable<GhostKing, object> DisposingKings = new();
+        private static readonly ConditionalWeakTable<GhostKing, object> DisposedKings = new();
 
         private const double RestartFrameIndex = 0;
 
@@ -92,72 +94,157 @@ namespace DeadCellsMultiplayerMod
             {
                 miniMap.track(king, 14888237, "minimapHero".AsHaxeString(), null, true, null, null, null);
             }
-            if (!string.IsNullOrWhiteSpace(label))
+            if (king.spr == null || king.spr._animManager == null)
+                king.ApplyRemoteSkin(king.RemoteSkinId);
+
+            if (!string.IsNullOrWhiteSpace(label) && king.spr != null)
                 SetLabel(king, label);
-            king.spr._animManager.play("idle".AsHaxeString(), null, null).loop(null);
+
+            var animManager = king.spr?._animManager;
+            if (animManager != null)
+                animManager.play("idle".AsHaxeString(), null, null).loop(null);
+
             return king;
         }
 
         public void disposeKing(GhostKing k)
         {
-            if (k.spr != null)
-            {
-                ColorMap shader = (ColorMap)k.spr.getShader(ColorMap.Class);
+            if (k == null)
+                return;
 
-                if (shader != null)
+            if (ReferenceEquals(king, k))
+                king = null!;
+            RemoveLabel(k);
+            DisposeKingRuntime(k);
+        }
+
+        public static void DisposeKingRuntime(GhostKing k)
+        {
+            if (k == null)
+                return;
+            if (DisposingKings.TryGetValue(k, out _))
+                return;
+
+            DisposingKings.Add(k, KingTeardownMarker);
+            List<Exception>? failures = null;
+            try
+            {
+                var level = TryGetKingLevel(k);
+                if (level == null && IsKingDisposed(k))
+                    return;
+
+                RunKingTeardownStep(ref failures, "destroy", () =>
                 {
-                    k.spr.removeShader(shader);
-                    k.spr.lib = null;
-                }
-            }
+                    if (!k.destroyed)
+                        k.destroy();
+                });
 
-            if (k.spriteClones != null)
-            {
-                int num = 0;
-                ArrayObj arrayObj = k.spriteClones;
-                for (; ; )
+                if (level != null)
                 {
-                    int length = arrayObj.length;
-                    if (num >= length)
-                    {
-                        break;
-                    }
-                    length = arrayObj.length;
-                    virtual_e_followHead_notActualClone_offX_offY_scaleBonus_? virtual_e_followHead_notActualClone_offX_offY_scaleBonus_;
-                    if (num >= length)
-                    {
-                        virtual_e_followHead_notActualClone_offX_offY_scaleBonus_ = null;
-                    }
-                    else
-                    {
-                        virtual_e_followHead_notActualClone_offX_offY_scaleBonus_ = (virtual_e_followHead_notActualClone_offX_offY_scaleBonus_)arrayObj.array[num]!;
-                    }
-                    num++;
-                    HSprite hsprite = virtual_e_followHead_notActualClone_offX_offY_scaleBonus_!.e;
-                    if (hsprite != null)
-                    {
-                        if (hsprite.parent != null)
-                        {
-                            hsprite.parent.removeChild(hsprite);
-                        }
-                    }
+                    RunKingTeardownStep(ref failures, "level entity GC", level.runEntitiesGC);
+                    RunKingTeardownStep(ref failures, "level collection purge", () => RemoveKingFromLevelCollections(level, k));
                 }
-            }
+                else if (!IsKingDisposed(k))
+                {
+                    RunKingTeardownStep(ref failures, "entity dispose", k.dispose);
+                }
 
-            if (k.speechSfxDeck != null)
+                if (failures == null && !DisposedKings.TryGetValue(k, out _))
+                    DisposedKings.Add(k, KingTeardownMarker);
+            }
+            finally
             {
-                k.speechSfxDeck.clear();
+                DisposingKings.Remove(k);
             }
 
-            if (k.runAnims != null)
+            ThrowKingTeardownFailures(failures);
+        }
+
+        private static bool IsKingDisposed(GhostKing k)
+        {
+            return DisposedKings.TryGetValue(k, out _) ||
+                   (k.destroyed && k.cd == null && k.spr == null);
+        }
+
+        private static Level? TryGetKingLevel(GhostKing k)
+        {
+            try
             {
-                k.runAnims = null;
+                return k._level;
             }
-            k.removeAllLights(true);
-            k.disposeGfx();
-            k.destroy();
-            k.dispose();
+            catch
+            {
+                return null;
+            }
+        }
 
+        private static void RemoveKingFromLevelCollections(Level level, GhostKing k)
+        {
+            level.entities?.remove(k);
+            level.qTreeEntities?.remove(k);
+            level.savedEntities?.remove(k);
+            level.entitiesGC?.remove(k);
+
+            var clids = k.getEntityCLIDS();
+            if (clids == null || level.entitiesByClass == null)
+                return;
+
+            for (var i = 0; i < clids.length; i++)
+            {
+                var entries = level.entitiesByClass.get(clids.getDyn(i)) as dc.hl.types.ArrayObj;
+                entries?.remove(k);
+            }
+        }
+
+        public static int PurgeGhostKingsFromLevel(Level? level)
+        {
+            if (level == null)
+                return 0;
+
+            var ghosts = new HashSet<GhostKing>();
+            CollectGhostKings(level.entities, ghosts);
+            CollectGhostKings(level.qTreeEntities, ghosts);
+            CollectGhostKings(level.savedEntities, ghosts);
+            CollectGhostKings(level.entitiesGC, ghosts);
+
+            foreach (var ghost in ghosts)
+                DisposeKingRuntime(ghost);
+
+            return ghosts.Count;
+        }
+
+        private static void CollectGhostKings(dc.hl.types.ArrayObj? entries, HashSet<GhostKing> ghosts)
+        {
+            if (entries == null)
+                return;
+
+            for (var i = 0; i < entries.length; i++)
+            {
+                if (entries.getDyn(i) is GhostKing ghost)
+                    ghosts.Add(ghost);
+            }
+        }
+
+        private static void RunKingTeardownStep(ref List<Exception>? failures, string step, Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                failures ??= new List<Exception>();
+                failures.Add(new InvalidOperationException($"GhostKing runtime teardown failed during {step}.", ex));
+            }
+        }
+
+        private static void ThrowKingTeardownFailures(List<Exception>? failures)
+        {
+            if (failures == null || failures.Count == 0)
+                return;
+            if (failures.Count == 1)
+                throw failures[0];
+            throw new AggregateException("GhostKing runtime teardown failed.", failures);
         }
 
         public void SetLabel(Entity entity, string? text)
@@ -177,8 +264,8 @@ namespace DeadCellsMultiplayerMod
                     return;
                 }
 
-                try { existing.Label.remove(); } catch { }
                 _labels.Remove(entity);
+                RemoveLabelNode(existing.Label);
             }
             _Assets _Assets = Assets.Class;
             dc.h2d.Text text_h2d = _Assets.makeText(normalizedText.AsHaxeString(), dc.ui.Text.Class.COLORS.get("ST".AsHaxeString()), null, entity.spr);
@@ -191,6 +278,69 @@ namespace DeadCellsMultiplayerMod
             text_h2d.scaleY = targetScale;
             text_h2d.textColor = 0;
             _labels[entity] = new LabelState(text_h2d, normalizedText);
+        }
+
+        private void RemoveLabel(Entity entity)
+        {
+            if (entity == null)
+                return;
+
+            if (_labels.TryGetValue(entity, out var state))
+            {
+                _labels.Remove(entity);
+                RemoveLabelNode(state.Label);
+            }
+
+            _staleLabels.Remove(entity);
+        }
+
+        private static void RemoveLabelNode(dc.h2d.Text? label)
+        {
+            if (label?.parent != null)
+                label.remove();
+        }
+
+        public void Dispose()
+        {
+            var head = kinghead;
+            kinghead = null!;
+            List<Exception>? failures = null;
+            RunTeardownStep(ref failures, "GhostHero.kinghead", () => head?.dispose());
+
+            var ownedKing = king;
+            king = null!;
+            RunTeardownStep(ref failures, "GhostHero.king", () => disposeKing(ownedKing));
+
+            foreach (var state in _labels.Values)
+            {
+                RunTeardownStep(ref failures, "GhostHero.label", () => RemoveLabelNode(state.Label));
+            }
+
+            _labels.Clear();
+            _staleLabels.Clear();
+            ThrowTeardownFailures(failures);
+        }
+
+        private static void RunTeardownStep(ref List<Exception>? failures, string step, Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                failures ??= new List<Exception>();
+                failures.Add(new InvalidOperationException($"GhostHero teardown failed during {step}.", ex));
+            }
+        }
+
+        private static void ThrowTeardownFailures(List<Exception>? failures)
+        {
+            if (failures == null || failures.Count == 0)
+                return;
+            if (failures.Count == 1)
+                throw failures[0];
+            throw new AggregateException("GhostHero teardown failed.", failures);
         }
 
         public void UpdateLabels()
