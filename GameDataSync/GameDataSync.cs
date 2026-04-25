@@ -270,6 +270,11 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        internal static void CancelSameRunRestart()
+        {
+            ClearSameRunRestart();
+        }
+
         internal static bool ResolveCurrentRunIsCustom()
         {
             try

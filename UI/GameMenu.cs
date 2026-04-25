@@ -560,13 +560,23 @@ namespace DeadCellsMultiplayerMod
             if (user == null)
                 return;
 
-            PrepareCurrentWorldForDirectRestart(game);
+            PrepareCurrentWorldForRestartTransition(game);
             try { game.destroy(); } catch { }
             try { game.disposeImmediately(); } catch { }
             user.newGame(seed, GameDataSync._isTwitch, streamEnabled, customMode, launchMode);
         }
 
-        private static void PrepareCurrentWorldForDirectRestart(dc.pr.Game game)
+        private static void RestartCurrentWorldWithLoading(dc.pr.Game game, dc.LaunchMode launchMode)
+        {
+            var main = dc.Main.Class.ME;
+            if (main == null)
+                throw new InvalidOperationException("Main is unavailable for restart launch.");
+
+            PrepareCurrentWorldForRestartTransition(game);
+            main.launchGame(launchMode, null, null);
+        }
+
+        private static void PrepareCurrentWorldForRestartTransition(dc.pr.Game game)
         {
             try { ModEntry.Instance?.DisposeCoopGhostRuntimeForWorldTeardown(game); } catch { }
 
@@ -619,15 +629,14 @@ namespace DeadCellsMultiplayerMod
                 GameDataSync.RestoreRemoteUserData(game.user);
                 GameDataSync.BeginSameRunRestart(seed);
                 var restartLaunch = GameDataSync.BuildSameRunRestartLaunchMode();
-                var restartIsCustom = GameDataSync.ResolveCurrentRunIsCustom();
-                var restartStreamEnabled = GameDataSync.ResolveCurrentRunStreamEnabled();
                 try
                 {
-                    RestartCurrentWorldDirect(game, seed, restartStreamEnabled, restartIsCustom, restartLaunch);
+                    RestartCurrentWorldWithLoading(game, restartLaunch);
                 }
                 catch (Exception ex)
                 {
-                    _log?.Warning("[NetMod] Client direct restart failed: {Message}", ex.Message);
+                    GameDataSync.CancelSameRunRestart();
+                    _log?.Warning("[NetMod] Client loading restart failed: {Message}", ex.Message);
                 }
             });
         }
