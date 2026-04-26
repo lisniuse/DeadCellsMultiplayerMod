@@ -34,14 +34,19 @@ namespace DeadCellsMultiplayerMod
             _autoStartRetryAt = DateTime.MinValue;
             _genArrived = false;
             _seedArrived = false;
+            _receivedLaunchPayload = false;
+            _receivedNewCoopWorldPrepared = false;
         }
 
-        private static void PrepareLobbyForNewNetworkSession()
+        private static void PrepareLobbyForNewNetworkSession(bool clearRemoteCoopState = false)
         {
             lock (Sync)
             {
                 ResetLobbyLaunchStateLocked();
                 ResetLobbyReadyStateLocked();
+                _pendingNewCoopWorldIdAssigned = false;
+                if (clearRemoteCoopState)
+                    ResetRemoteCoopStateLocked();
             }
         }
 

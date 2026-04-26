@@ -240,6 +240,36 @@ public sealed partial class NetNode
             return true;
         }
 
+        if (line.StartsWith("COOPID|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["COOPID|".Length..];
+            var effectiveId = ResolvePayloadId(payload, senderId, out var coopPayload);
+            if (forceSenderId)
+                effectiveId = senderId;
+
+            ParseCoopStatePayload(coopPayload, out var coopId, out var hasContinueSave);
+            if (effectiveId.HasValue)
+            {
+                lock (_sync)
+                {
+                    var state = GetOrCreateRemoteLocked(effectiveId.Value);
+                    state.CoopId = coopId;
+                    state.HasContinueSave = hasContinueSave;
+                    state.HasRemote = true;
+                    _hasRemote = true;
+                    if (_primaryRemoteId == 0)
+                        _primaryRemoteId = effectiveId.Value;
+                }
+
+                GameMenu.ReceiveRemoteCoopState(effectiveId.Value, coopId, hasContinueSave);
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildCoopStateLine(effectiveId.Value, coopId, hasContinueSave);
+            }
+
+            return true;
+        }
+
         if (line.StartsWith("CHAT|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["CHAT|".Length..];

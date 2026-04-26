@@ -51,13 +51,20 @@ namespace DeadCellsMultiplayerMod
             orig(self, custom);
         }
 
-        private static void RememberPendingLaunch(PendingLaunchAction action, bool custom, bool streamEnabled, bool sendToRemote)
+        private static void RememberPendingLaunch(PendingLaunchAction action, bool custom, bool streamEnabled, bool sendToRemote, bool assignNewCoopWorld = true)
         {
+            if (sendToRemote && (action != PendingLaunchAction.NewGame || assignNewCoopWorld))
+                PrepareCoopIdentityForPendingLaunch(action);
+            else if (sendToRemote)
+                SendCoopStateToRemote();
+
             lock (Sync)
             {
                 _pendingLaunchAction = action;
                 _pendingLaunchCustom = custom;
                 _pendingLaunchStreamEnabled = streamEnabled;
+                if (action == PendingLaunchAction.NewGame && sendToRemote && !assignNewCoopWorld)
+                    _pendingNewCoopWorldIdAssigned = false;
                 InvalidateGeneratePayloadCacheLocked();
             }
 
@@ -171,8 +178,11 @@ namespace DeadCellsMultiplayerMod
 
         private static void ContinueHostRun(TitleScreen screen)
         {
-            if (!AllPlayersReady())
+            if (!CanHostStartContinue(out var reason))
+            {
+                _log?.Warning("[NetMod] Continue Coop blocked on host: {Reason}", reason);
                 return;
+            }
 
             StartHostServerOnly();
             ClearAuthoritativePendingNewGameLaunch();
@@ -203,7 +213,8 @@ namespace DeadCellsMultiplayerMod
                 PendingLaunchAction.NewGame,
                 custom: true,
                 TryGetStreamEnabled(screen),
-                sendToRemote: true);
+                sendToRemote: true,
+                assignNewCoopWorld: false);
 
             try
             {
@@ -466,16 +477,20 @@ namespace DeadCellsMultiplayerMod
             PendingLaunchAction action;
             bool custom;
             bool streamEnabled;
+            bool newCoopWorldPrepared;
+            var coopId = MUser.GetCurrentCoopId() ?? string.Empty;
+            var hostHasContinueSave = HasLocalContinueSaveState(out _);
             lock (Sync)
             {
                 action = _pendingLaunchAction;
                 custom = _pendingLaunchCustom;
                 streamEnabled = _pendingLaunchStreamEnabled;
+                newCoopWorldPrepared = _pendingNewCoopWorldIdAssigned;
             }
 
             var signature = string.Create(
                 System.Globalization.CultureInfo.InvariantCulture,
-                $"{levelDesc?.LevelId}|{levelDesc?.MapDepth}|{levelDesc?.Group}|{(int)action}|{(custom ? 1 : 0)}|{(streamEnabled ? 1 : 0)}");
+                $"{levelDesc?.LevelId}|{levelDesc?.MapDepth}|{levelDesc?.Group}|{(int)action}|{(custom ? 1 : 0)}|{(streamEnabled ? 1 : 0)}|{(newCoopWorldPrepared ? 1 : 0)}|{coopId}|{(hostHasContinueSave ? 1 : 0)}");
 
             lock (Sync)
             {
@@ -492,7 +507,10 @@ namespace DeadCellsMultiplayerMod
                 rawDesc = string.Empty,
                 launchAction = action.ToString(),
                 launchCustom = custom,
-                launchStreamEnabled = streamEnabled
+                launchStreamEnabled = streamEnabled,
+                newCoopWorldPrepared,
+                coopId,
+                hostHasContinueSave
             };
             var json = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
 
@@ -525,7 +543,15 @@ namespace DeadCellsMultiplayerMod
         private static bool IsPendingLaunchReadyForAutoStartLocked()
         {
             if (_pendingLaunchAction == PendingLaunchAction.LoadSave)
+            {
+                if (!CanClientAcceptContinueLaunchLocked(out var reason))
+                {
+                    LogClientContinueBlockReasonLocked(reason);
+                    return false;
+                }
+
                 return _genArrived && GameDataSync.HasRemoteBossRune();
+            }
 
             if (!_genArrived || !_seedArrived)
                 return false;

@@ -361,6 +361,8 @@ public sealed partial class NetNode
         string? cachedLevelDescPayload;
         string? cachedLevelSeedPayload;
         string? cachedLevelGraphPayload;
+        string? cachedCoopId;
+        bool cachedHasContinueSave;
         string? cachedHeroSkin;
         string? cachedHeroHeadSkin;
         lock (_hostCacheSync)
@@ -372,6 +374,8 @@ public sealed partial class NetNode
             cachedLevelDescPayload = _cachedHostLevelDescPayload;
             cachedLevelSeedPayload = _cachedHostLevelSeedPayload;
             cachedLevelGraphPayload = _cachedHostLevelGraphPayload;
+            cachedCoopId = _cachedHostCoopId;
+            cachedHasContinueSave = _cachedHostHasContinueSave;
             cachedHeroSkin = _cachedHostHeroSkin;
             cachedHeroHeadSkin = _cachedHostHeroHeadSkin;
         }
@@ -382,6 +386,8 @@ public sealed partial class NetNode
             await SendLineToSteamClientSafe(connection, $"BOSSRUNE|{cachedBossRune.Value}\n").ConfigureAwait(false);
         if (cachedSeed.HasValue)
             await SendLineToSteamClientSafe(connection, $"SEED|{cachedSeed.Value}\n").ConfigureAwait(false);
+        if (cachedCoopId != null)
+            await SendLineToSteamClientSafe(connection, BuildCoopStateLine(1, cachedCoopId, cachedHasContinueSave)).ConfigureAwait(false);
         if (cachedLevelDescPayload != null)
             await SendLineToSteamClientSafe(connection, $"LDESC|{cachedLevelDescPayload}\n").ConfigureAwait(false);
         if (cachedLevelSeedPayload != null)

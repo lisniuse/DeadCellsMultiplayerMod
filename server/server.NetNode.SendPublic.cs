@@ -102,6 +102,28 @@ public sealed partial class NetNode
         _ = SendLineSafe(BuildReadyLine(ID, ready));
     }
 
+    public void SendCoopState(string? coopId, bool hasContinueSave)
+    {
+        var safeCoopId = SanitizeProtocolToken(coopId, 128);
+        if (_role == NetRole.Host)
+        {
+            lock (_hostCacheSync)
+            {
+                _cachedHostCoopId = safeCoopId;
+                _cachedHostHasContinueSave = hasContinueSave;
+            }
+        }
+
+        if (!HasAnyConnection())
+            return;
+
+        var line = ID > 0
+            ? BuildCoopStateLine(ID, safeCoopId, hasContinueSave)
+            : $"COOPID|{safeCoopId}|{(hasContinueSave ? 1 : 0)}\n";
+        _ = SendLineSafe(line);
+        _log.Information("[NetNode] Sent coop id state hasId={HasId} hasContinue={HasContinue}", !string.IsNullOrWhiteSpace(safeCoopId), hasContinueSave);
+    }
+
     public void SendBossRune(int bossRune)
     {
         if (_role == NetRole.Host)

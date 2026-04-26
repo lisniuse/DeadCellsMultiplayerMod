@@ -137,6 +137,8 @@ public sealed partial class NetNode
                     string? cachedLevelDescPayload;
                     string? cachedLevelSeedPayload;
                     string? cachedLevelGraphPayload;
+                    string? cachedCoopId;
+                    bool cachedHasContinueSave;
                     string? cachedHeroSkin;
                     string? cachedHeroHeadSkin;
                     lock (_hostCacheSync)
@@ -148,6 +150,8 @@ public sealed partial class NetNode
                         cachedLevelDescPayload = _cachedHostLevelDescPayload;
                         cachedLevelSeedPayload = _cachedHostLevelSeedPayload;
                         cachedLevelGraphPayload = _cachedHostLevelGraphPayload;
+                        cachedCoopId = _cachedHostCoopId;
+                        cachedHasContinueSave = _cachedHostHasContinueSave;
                         cachedHeroSkin = _cachedHostHeroSkin;
                         cachedHeroHeadSkin = _cachedHostHeroHeadSkin;
                     }
@@ -160,6 +164,9 @@ public sealed partial class NetNode
 
                     if (cachedSeed.HasValue)
                         await SendLineToClientSafe(connection, $"SEED|{cachedSeed.Value}\n").ConfigureAwait(false);
+
+                    if (cachedCoopId != null)
+                        await SendLineToClientSafe(connection, BuildCoopStateLine(1, cachedCoopId, cachedHasContinueSave)).ConfigureAwait(false);
 
                     if (cachedLevelDescPayload != null)
                         await SendLineToClientSafe(connection, $"LDESC|{cachedLevelDescPayload}\n").ConfigureAwait(false);
@@ -405,6 +412,7 @@ public sealed partial class NetNode
             var line = BuildTaggedLine("USER", state.Id, username);
             await SendLineToClientSafe(connection, line).ConfigureAwait(false);
             await SendLineToClientSafe(connection, BuildReadyLine(state.Id, state.Ready)).ConfigureAwait(false);
+            await SendLineToClientSafe(connection, BuildCoopStateLine(state.Id, state.CoopId, state.HasContinueSave)).ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(state.Skin))
             {

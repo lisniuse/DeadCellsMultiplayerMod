@@ -210,6 +210,8 @@ namespace DeadCellsMultiplayerMod
                 _hasAuthoritativePendingNewGameLaunch = false;
                 _authoritativePendingNewGameCustom = false;
                 _authoritativePendingNewGameStreamEnabled = false;
+                ResetRemoteCoopStateLocked();
+                _receivedNewCoopWorldPrepared = false;
                 ResetLobbyReadyStateLocked();
                 InvalidateGeneratePayloadCacheLocked();
                 _mainThreadQueueDepth = _mainThreadQueue.Count;
@@ -427,6 +429,12 @@ namespace DeadCellsMultiplayerMod
             lock (Sync)
             {
                 _serverSeed = seed;
+            }
+            if (_role == NetRole.Host)
+            {
+                var coopId = MUser.GetCurrentCoopId();
+                if (!string.IsNullOrWhiteSpace(coopId))
+                    MUser.SetCoopId(coopId, _playerId, seed);
             }
             _log?.Information("[NetMod] Generated host seed {Seed} ({Reason})", seed, reason);
             return seed;
@@ -750,6 +758,7 @@ namespace DeadCellsMultiplayerMod
             }
 
             var json = BuildGeneratePayloadJson(levelDesc);
+            SendCoopStateToRemote();
             net.SendGeneratePayload(json);
         }
 
@@ -1360,7 +1369,7 @@ namespace DeadCellsMultiplayerMod
 
                 if (role == NetRole.Host)
                 {
-                    PrepareLobbyForNewNetworkSession();
+                    PrepareLobbyForNewNetworkSession(clearRemoteCoopState: true);
                     var streamEnabled = TryGetStreamEnabled(screen);
                     if (_menuTransport == ConnectionTransport.Steam)
                         ModEntry.Instance.StartSteamHostFromMenu(_mpPort);
@@ -1373,7 +1382,7 @@ namespace DeadCellsMultiplayerMod
                 }
                 else if (role == NetRole.Client)
                 {
-                    PrepareLobbyForNewNetworkSession();
+                    PrepareLobbyForNewNetworkSession(clearRemoteCoopState: true);
                     if (_menuTransport == ConnectionTransport.Steam)
                     {
                         if (_steamHostSteamId == 0UL)
@@ -1424,7 +1433,7 @@ namespace DeadCellsMultiplayerMod
                     return;
                 }
 
-                PrepareLobbyForNewNetworkSession();
+                PrepareLobbyForNewNetworkSession(clearRemoteCoopState: true);
                 if (_menuTransport == ConnectionTransport.Steam)
                 {
                     ModEntry.Instance.StartSteamHostFromMenu(_mpPort);

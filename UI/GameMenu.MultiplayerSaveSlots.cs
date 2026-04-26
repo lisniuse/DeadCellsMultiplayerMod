@@ -170,13 +170,20 @@ namespace DeadCellsMultiplayerMod
         {
             if (_multiplayerSaveMenuKind != MultiplayerSaveMenuKind.OriginalSourceSelection)
             {
+                int? selectedMultiplayerSlot = null;
                 if (_multiplayerSaveMenuKind == MultiplayerSaveMenuKind.MultiplayerSlots &&
                     TryGetSelectedSaveSlot(self, out var selectedSlot))
                 {
                     _preferredMultiplayerSaveSlot = selectedSlot;
+                    selectedMultiplayerSlot = selectedSlot;
                 }
 
                 orig(self);
+                if (selectedMultiplayerSlot.HasValue)
+                {
+                    SetCurrentSaveSlot(selectedMultiplayerSlot.Value);
+                    NotifyMultiplayerSaveSlotChanged();
+                }
                 return;
             }
 
@@ -189,6 +196,7 @@ namespace DeadCellsMultiplayerMod
 
             _preferredMultiplayerSaveSlot = _multiplayerSaveImportTargetSlot.Value;
             SetCurrentSaveSlot(_multiplayerSaveImportTargetSlot.Value);
+            NotifyMultiplayerSaveSlotChanged();
             _multiplayerSaveImportTargetSlot = null;
             SwitchSaveChoiceStore(self, MultiplayerSaveMenuKind.MultiplayerSlots);
         }
@@ -210,7 +218,20 @@ namespace DeadCellsMultiplayerMod
             if (_multiplayerSaveMenuKind == MultiplayerSaveMenuKind.OriginalSourceSelection)
                 return;
 
+            int? deletedMultiplayerSlot = null;
+            if (_multiplayerSaveMenuKind == MultiplayerSaveMenuKind.MultiplayerSlots &&
+                TryGetSelectedSaveSlot(self, out var selectedSlot))
+            {
+                deletedMultiplayerSlot = selectedSlot;
+            }
+
             orig(self);
+
+            if (deletedMultiplayerSlot.HasValue)
+            {
+                MUser.ClearCoopId(deletedMultiplayerSlot.Value);
+                NotifyMultiplayerSaveSlotChanged();
+            }
         }
 
         private static void Hook_SaveChoice_onDispose(Hook_SaveChoice.orig_onDispose orig, SaveChoice self)
@@ -892,6 +913,7 @@ namespace DeadCellsMultiplayerMod
                 EnsureMultiplayerSaveFolderExists();
                 var targetRelativePath = GetMultiplayerSaveRelativeFilePath(targetSlot);
                 dc.tool.File.Class.saveBytes.Invoke(MakeHLString(targetRelativePath), sourceBytes);
+                MUser.ClearCoopId(targetSlot);
                 return true;
             }
             catch (Exception ex)

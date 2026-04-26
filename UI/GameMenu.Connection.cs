@@ -74,7 +74,10 @@ namespace DeadCellsMultiplayerMod
                 var continueLabel = GetContinueButtonLabel(screen);
                 var startLabel = GetStartNormalModeButtonLabel();
                 var canLaunch = AllPlayersReady();
-                AddMenuButton(screen, continueLabel, () => ContinueHostRun(screen), Localize("Continue the selected multiplayer save"), canLaunch);
+                var continueCompatible = IsHostContinueCompatible(out var continueBlockReason);
+                var canContinue = canLaunch && continueCompatible;
+                var disabledContinueReason = canLaunch ? continueBlockReason : "Not all players ready";
+                AddMenuButton(screen, continueLabel, () => ContinueHostRun(screen), canContinue ? Localize("Continue the selected multiplayer save") : Localize(disabledContinueReason), canContinue);
                 AddMenuButton(screen, startLabel, () => StartHostRunNormalMode(screen), GetText.Instance.GetString("Launch game"), canLaunch);
                 AddMenuButton(screen, "Custom Mode", () => OpenHostCustomMode(screen), Localize("Configure and launch multiplayer custom mode"), canLaunch);
                 AddMenuButton(screen, GetReadyButtonLabel(), () => ToggleLocalReadyFromMenu(screen), Localize("Toggle your ready state"));
@@ -201,6 +204,7 @@ namespace DeadCellsMultiplayerMod
             lock (Sync)
             {
                 ResetLobbyLaunchStateLocked();
+                ResetRemoteCoopStateLocked();
             }
             ResetLobbyReadyState();
             ResetSteamState();
@@ -223,6 +227,7 @@ namespace DeadCellsMultiplayerMod
             ResetHostDisconnectCountdown();
             SendUsernameToRemote();
             SendLocalReadyState();
+            SendCoopStateToRemote();
 
             if (role == NetRole.Host)
             {
@@ -294,6 +299,10 @@ namespace DeadCellsMultiplayerMod
                 MultiplayerUI.PushSystemMessage(FormatLocalized("{0} disconnected from the server.", disconnectedName));
                 _remoteUsername = "guest";
                 ResetLobbyReadyState();
+                lock (Sync)
+                {
+                    ResetRemoteCoopStateLocked();
+                }
                 _genArrived = false;
                 _seedArrived = false;
                 if (_menuSelection == NetRole.Host)
@@ -362,6 +371,7 @@ namespace DeadCellsMultiplayerMod
                 var ld = GetCachedLevelDescSync();
                 if (ld != null)
                     net.SendLevelDesc(JsonConvert.SerializeObject(ld));
+                SendCoopStateToRemote();
             }
             catch (Exception ex)
             {
@@ -383,6 +393,7 @@ namespace DeadCellsMultiplayerMod
             {
                 _cachedLevelDescSync = null;
                 ResetLobbyLaunchStateLocked();
+                ResetRemoteCoopStateLocked();
             }
         }
 
@@ -634,7 +645,10 @@ namespace DeadCellsMultiplayerMod
                     rawDesc = string.Empty,
                     launchAction = string.Empty,
                     launchCustom = false,
-                    launchStreamEnabled = false
+                    launchStreamEnabled = false,
+                    newCoopWorldPrepared = false,
+                    coopId = string.Empty,
+                    hostHasContinueSave = false
                 });
                 if (payload == null) return;
 
@@ -650,6 +664,14 @@ namespace DeadCellsMultiplayerMod
                 }
 
                 ApplyReceivedPendingLaunch(payload.launchAction, payload.launchCustom, payload.launchStreamEnabled);
+                if (!string.IsNullOrWhiteSpace(payload.coopId))
+                    ReceiveRemoteCoopState(1, payload.coopId, payload.hostHasContinueSave);
+                lock (Sync)
+                {
+                    _receivedLaunchPayload = true;
+                    _receivedNewCoopWorldPrepared = payload.newCoopWorldPrepared;
+                }
+                TryStoreRemoteCoopIdForPendingNewGame();
 
                 lock (Sync)
                 {
