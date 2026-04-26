@@ -31,6 +31,7 @@ namespace DeadCellsMultiplayerMod
         private static NetRole _multiplayerSaveMenuReturnRole = NetRole.None;
         private static int? _multiplayerSaveImportTargetSlot;
         private static int? _preferredMultiplayerSaveSlot;
+        private static bool _forceMultiplayerSaveStore;
         private static ControlLabel? _multiplayerSaveImportControlLabel;
         private static string _multiplayerSaveDefaultTitle = string.Empty;
         private static bool _hasCapturedMultiplayerSaveDefaultTitle;
@@ -270,7 +271,7 @@ namespace DeadCellsMultiplayerMod
             if (_multiplayerSaveMenuKind == MultiplayerSaveMenuKind.OriginalSourceSelection)
                 return false;
 
-            return _role != NetRole.None || _multiplayerSaveMenuKind == MultiplayerSaveMenuKind.MultiplayerSlots || _multiplayerSaveMenuOpening;
+            return _forceMultiplayerSaveStore || _role != NetRole.None || _multiplayerSaveMenuKind == MultiplayerSaveMenuKind.MultiplayerSlots || _multiplayerSaveMenuOpening;
         }
 
         private static int ResolveSaveSlotNumber(int? slot)

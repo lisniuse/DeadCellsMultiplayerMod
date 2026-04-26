@@ -640,14 +640,19 @@ namespace DeadCellsMultiplayerMod
 
         public static bool SwapToLocalSerializerSync()
         {
-            if (!_localSerializerCaptured)
-                return false;
-
             try
             {
                 var serializerClass = dc.hxbit.Serializer.Class;
                 if (serializerClass == null)
                     return false;
+
+                if (!_localSerializerCaptured)
+                {
+                    _localSerializerSeq = serializerClass.SEQ;
+                    _localSerializerUid = serializerClass.UID;
+                    _localSerializerCaptured = true;
+                    return false;
+                }
 
                 if (serializerClass.SEQ == _localSerializerSeq &&
                     serializerClass.UID == _localSerializerUid)
@@ -856,6 +861,8 @@ namespace DeadCellsMultiplayerMod
 
         internal static void ClearNetworkLaunchState()
         {
+            RestoreLocalSerializerSyncIfCaptured();
+
             lock (_bossRuneLock)
             {
                 _remoteBossRune = null;

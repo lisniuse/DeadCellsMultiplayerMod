@@ -35,6 +35,7 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
         private string lastLobbyIdLabelText = string.Empty;
 
         private static ConnectionUI? Instance;
+        private static bool desiredVisible;
         private HSprite? spriteui;
 
 
@@ -45,13 +46,35 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
             MainPageLightingInitializer mainPage = new MainPageLightingInitializer(this);
             this.BuildUI();
             EventSystem.AddReceiver(this);
-            this.root.visible = set_visible;
+            this.root.visible = desiredVisible;
         }
 
         public static bool set_visible
         {
-            get => Instance?.root.visible ?? false;
-            set { if (Instance != null) Instance.root.visible = value; }
+            get
+            {
+                try
+                {
+                    return Instance?.root?.visible ?? desiredVisible;
+                }
+                catch
+                {
+                    return desiredVisible;
+                }
+            }
+            set
+            {
+                desiredVisible = value;
+                try
+                {
+                    var root = Instance?.root;
+                    if (root != null)
+                        root.visible = value;
+                }
+                catch
+                {
+                }
+            }
         }
 
         /// <summary>After gamepad connect/disconnect, window metrics can change; re-run layout to avoid blurred/scaled UI.</summary>
@@ -564,12 +587,12 @@ namespace DeadCellsMultiplayerMod.MultiplayerModUI.Connection
         /// </summary>
         public static void EnsureCreated(TitleScreen screen)
         {
-            if (Instance != null && ReferenceEquals(Instance.parent, screen))
+            if (Instance != null && ReferenceEquals(Instance.parent, screen) && Instance.root != null)
                 return;
             Instance = null;
             var connectionUI = new ConnectionUI(screen);
             screen.addChild(connectionUI);
-            connectionUI.root.set_visible(false);
+            set_visible = false;
         }
 
 

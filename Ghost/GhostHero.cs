@@ -250,10 +250,10 @@ namespace DeadCellsMultiplayerMod
         public void SetLabel(Entity entity, string? text)
         {
             if (entity == null || entity.spr == null) return;
-            var normalizedText = string.IsNullOrWhiteSpace(text) ? "Guest" : text;
+            var normalizedText = NormalizeLabelText(text);
             if (_labels.TryGetValue(entity, out var existing))
             {
-                if (existing.Label.parent != null)
+                if (existing.Label.parent != null && ReferenceEquals(existing.Label.parent, entity.spr))
                 {
                     if (!string.Equals(existing.TextValue, normalizedText, StringComparison.Ordinal))
                     {
@@ -278,6 +278,26 @@ namespace DeadCellsMultiplayerMod
             text_h2d.scaleY = targetScale;
             text_h2d.textColor = 0;
             _labels[entity] = new LabelState(text_h2d, normalizedText);
+        }
+
+        public bool NeedsLabelRefresh(Entity entity, string? text)
+        {
+            if (entity == null || entity.spr == null)
+                return false;
+
+            var normalizedText = NormalizeLabelText(text);
+            if (!_labels.TryGetValue(entity, out var existing))
+                return true;
+
+            if (!string.Equals(existing.TextValue, normalizedText, StringComparison.Ordinal))
+                return true;
+
+            return existing.Label.parent == null || !ReferenceEquals(existing.Label.parent, entity.spr);
+        }
+
+        private static string NormalizeLabelText(string? text)
+        {
+            return string.IsNullOrWhiteSpace(text) ? "Guest" : text.Trim();
         }
 
         private void RemoveLabel(Entity entity)
@@ -356,7 +376,11 @@ namespace DeadCellsMultiplayerMod
                 var entity = pair.Key;
                 var state = pair.Value;
                 var label = state.Label;
-                if (entity == null || label == null || entity.spr == null || label.parent == null)
+                if (entity == null ||
+                    label == null ||
+                    entity.spr == null ||
+                    label.parent == null ||
+                    !ReferenceEquals(label.parent, entity.spr))
                 {
                     if (entity != null)
                         _staleLabels.Add(entity);

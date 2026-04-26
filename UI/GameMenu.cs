@@ -92,6 +92,11 @@ namespace DeadCellsMultiplayerMod
         private static DateTime _hostDisconnectCountdownUntil = DateTime.MinValue;
         private static int _lastHostDisconnectCountdown = -1;
         private const int HostDisconnectCountdownSeconds = 5;
+        private static bool _hostDisconnectSavePending;
+        private static DateTime _hostDisconnectSaveRetryAt = DateTime.MinValue;
+        private static DateTime _hostDisconnectSaveDeadline = DateTime.MinValue;
+        private const int HostDisconnectSaveRetryMs = 500;
+        private const int HostDisconnectSaveMaxSeconds = 10;
         private static bool _seedArrived;
         private static string _username = "guest";
         private static string _remoteUsername = "guest";
@@ -189,6 +194,9 @@ namespace DeadCellsMultiplayerMod
                 _hostDisconnectCountdownActive = false;
                 _hostDisconnectCountdownUntil = DateTime.MinValue;
                 _lastHostDisconnectCountdown = -1;
+                _hostDisconnectSavePending = false;
+                _hostDisconnectSaveRetryAt = DateTime.MinValue;
+                _hostDisconnectSaveDeadline = DateTime.MinValue;
                 _menuTransport = ConnectionTransport.Lan;
                 _steamLobbyActive = false;
                 _steamLobbyId = 0;
@@ -395,6 +403,7 @@ namespace DeadCellsMultiplayerMod
             }
             if (previous == NetRole.Client && role != NetRole.Client)
             {
+                GameDataSync.SwapToLocalSerializerSync();
                 EnqueueMainThread(() =>
                 {
                     try

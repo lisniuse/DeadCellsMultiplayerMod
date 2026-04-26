@@ -459,6 +459,8 @@ namespace DeadCellsMultiplayerMod
                     var rebuiltBody = client.ApplyRemoteSkin(cleaned);
                     if (rebuiltBody && (clientHeads[index] != null || client.head != null))
                         instance.ScheduleGhostHeadRecreate(index, immediate: true);
+                    if (rebuiltBody && !string.IsNullOrWhiteSpace(clientLabels[index]))
+                        ApplyClientLabel(index, clientLabels[index]);
                 }
             }
         }
@@ -646,7 +648,8 @@ namespace DeadCellsMultiplayerMod
                     }
 
                     var newLabel = BuildRemoteLabel(remote.Username);
-                    if (!string.Equals(clientLabels[index], newLabel, StringComparison.Ordinal))
+                    if (!string.Equals(clientLabels[index], newLabel, StringComparison.Ordinal) ||
+                        ghost.NeedsLabelRefresh(client, newLabel))
                     {
                         var labelStart = RuntimeHitchWatch.Start();
                         ApplyClientLabel(index, newLabel);

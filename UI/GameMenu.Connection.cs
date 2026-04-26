@@ -314,6 +314,10 @@ namespace DeadCellsMultiplayerMod
                 ResetLobbyLaunchStateLocked();
             }
 
+            var saved = true;
+            if (wasInRun)
+                saved = TrySaveClientWorldBeforeHostAutoExit("host_disconnect");
+
             SetRole(NetRole.None);
             NetRef = null;
             _waitingForHost = false;
@@ -327,7 +331,7 @@ namespace DeadCellsMultiplayerMod
             _genArrived = false;
             MultiplayerUI.PushSystemMessage(Localize("Host disconnected from server."));
             if (wasInRun)
-                StartHostDisconnectCountdown();
+                StartHostDisconnectCountdown(savePending: !saved);
 
             EnqueueMainThreadCoalesced("ui:refresh-layout-after-disconnect", () => ConnectionUI.RefreshLayoutAfterDisconnect());
             RequestLobbyMenuRefresh();
@@ -399,11 +403,24 @@ namespace DeadCellsMultiplayerMod
                 _menuTransport = ConnectionTransport.Lan;
         }
 
-        private static void StartHostDisconnectCountdown()
+        private static void StartHostDisconnectCountdown(bool savePending = false)
         {
+            var now = DateTime.UtcNow;
             _hostDisconnectCountdownActive = true;
-            _hostDisconnectCountdownUntil = DateTime.UtcNow.AddSeconds(HostDisconnectCountdownSeconds);
+            _hostDisconnectCountdownUntil = now.AddSeconds(HostDisconnectCountdownSeconds);
             _lastHostDisconnectCountdown = HostDisconnectCountdownSeconds;
+            _hostDisconnectSavePending = savePending;
+            _forceMultiplayerSaveStore = savePending;
+            if (savePending)
+            {
+                _hostDisconnectSaveRetryAt = now.AddMilliseconds(HostDisconnectSaveRetryMs);
+                _hostDisconnectSaveDeadline = now.AddSeconds(HostDisconnectSaveMaxSeconds);
+            }
+            else
+            {
+                _hostDisconnectSaveRetryAt = DateTime.MinValue;
+                _hostDisconnectSaveDeadline = DateTime.MinValue;
+            }
             MultiplayerUI.PushSystemMessage(FormatLocalized("Back to menu in {0}...", HostDisconnectCountdownSeconds));
         }
 
@@ -412,6 +429,10 @@ namespace DeadCellsMultiplayerMod
             _hostDisconnectCountdownActive = false;
             _hostDisconnectCountdownUntil = DateTime.MinValue;
             _lastHostDisconnectCountdown = -1;
+            _hostDisconnectSavePending = false;
+            _forceMultiplayerSaveStore = false;
+            _hostDisconnectSaveRetryAt = DateTime.MinValue;
+            _hostDisconnectSaveDeadline = DateTime.MinValue;
         }
 
         private static void UpdateHostDisconnectCountdown()
@@ -419,7 +440,22 @@ namespace DeadCellsMultiplayerMod
             if (!_hostDisconnectCountdownActive)
                 return;
 
-            var remaining = (int)Math.Ceiling((_hostDisconnectCountdownUntil - DateTime.UtcNow).TotalSeconds);
+            var now = DateTime.UtcNow;
+            if (_hostDisconnectSavePending && now >= _hostDisconnectSaveRetryAt)
+            {
+                if (TrySaveClientWorldBeforeHostAutoExit("host_disconnect_retry"))
+                {
+                    _hostDisconnectSavePending = false;
+                    _forceMultiplayerSaveStore = false;
+                }
+                else
+                {
+                    _forceMultiplayerSaveStore = true;
+                    _hostDisconnectSaveRetryAt = now.AddMilliseconds(HostDisconnectSaveRetryMs);
+                }
+            }
+
+            var remaining = (int)Math.Ceiling((_hostDisconnectCountdownUntil - now).TotalSeconds);
             if (remaining < 0)
                 remaining = 0;
 
@@ -432,8 +468,89 @@ namespace DeadCellsMultiplayerMod
             if (remaining > 0)
                 return;
 
+            if (_hostDisconnectSavePending && now < _hostDisconnectSaveDeadline)
+            {
+                _hostDisconnectCountdownUntil = now.AddSeconds(1);
+                return;
+            }
+
             _hostDisconnectCountdownActive = false;
+            _hostDisconnectSavePending = false;
+            _forceMultiplayerSaveStore = false;
             ForceExitToMainMenu();
+        }
+
+        private static bool TrySaveClientWorldBeforeHostAutoExit(string reason)
+        {
+            try
+            {
+                var main = dc.Main.Class.ME;
+                var user = main?.user;
+                if (main == null || user == null)
+                    return true;
+
+                GameDataSync.SwapToOriginalUserData(user);
+                var serializerSwapped = GameDataSync.SwapToLocalSerializerSync();
+                _forceMultiplayerSaveStore = true;
+                try
+                {
+                    var saved = main.writeSave();
+                    if (saved)
+                    {
+                        if (!TryValidateClientMultiplayerSave(out var validationError))
+                        {
+                            _log?.Warning("[NetMod] Client multiplayer save validation failed before host-disconnect auto-exit ({Reason}): {Error}", reason, validationError);
+                            return false;
+                        }
+
+                        _log?.Information("[NetMod] Saved client multiplayer world before host-disconnect auto-exit ({Reason})", reason);
+                        return true;
+                    }
+
+                    _log?.Warning("[NetMod] Client world save is pending before host-disconnect auto-exit ({Reason})", reason);
+                    return false;
+                }
+                finally
+                {
+                    _forceMultiplayerSaveStore = false;
+                    if (!serializerSwapped)
+                        GameDataSync.SwapToLocalSerializerSync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Warning("[NetMod] Failed to save client world before host-disconnect auto-exit ({Reason}): {Message}", reason, ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryValidateClientMultiplayerSave(out string error)
+        {
+            error = string.Empty;
+            try
+            {
+                var savePath = GetMultiplayerSaveRelativeFilePath(null);
+                var bytes = dc.tool.File.Class.getBytes.Invoke(MakeHLString(savePath));
+                if (bytes == null)
+                {
+                    error = "saved bytes were null";
+                    return false;
+                }
+
+                var loaded = dc.tool.Save.Class.readSave.Invoke(bytes);
+                if (loaded == null)
+                {
+                    error = "readSave returned null";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
         }
 
         internal static string Localize(string message)

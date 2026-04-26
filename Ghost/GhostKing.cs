@@ -1103,8 +1103,6 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
                 glowKey.setGlowDatas(glowData);
                 
             }
-
-
             // Ambient light
             var General = 1.0;
             var radiusCase = 1.2 * General;

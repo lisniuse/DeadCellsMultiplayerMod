@@ -39,13 +39,26 @@ namespace DeadCellsMultiplayerMod
             }
             MainThreadDispatcher.SetMainMenuReady();
             TryDisconnectWhenReturningToMainMenu();
+            ResetOriginalMainMenuUiState();
             StoreTitleScreen(self);
             _mainMenuButtonAdded = false;
             ConnectionUI.EnsureCreated(self);
+            ConnectionUI.set_visible = false;
             orig(self);
 
             EnsureMainMenuMultiplayerButton(self);
             ProcessPendingOverlayJoinRequest(self);
+        }
+
+        private static void ResetOriginalMainMenuUiState()
+        {
+            _inHostStatusMenu = false;
+            _inClientWaitingMenu = false;
+            _menuSelection = NetRole.None;
+            _waitingForHost = false;
+            _clientConnecting = false;
+            _clientConnectAttempt = 0;
+            ConnectionUI.set_visible = false;
         }
 
         private static void ProcessPendingOverlayJoinRequest(TitleScreen screen)
