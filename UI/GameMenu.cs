@@ -89,6 +89,7 @@ namespace DeadCellsMultiplayerMod
         private static bool _suppressAutoButton;
         private static bool _worldExitHandled;
         private static bool _hostDisconnectCountdownActive;
+        private static WeakReference<dc.pr.Game>? _hostDisconnectCountdownGameRef;
         private static DateTime _hostDisconnectCountdownUntil = DateTime.MinValue;
         private static int _lastHostDisconnectCountdown = -1;
         private const int HostDisconnectCountdownSeconds = 5;
@@ -192,6 +193,7 @@ namespace DeadCellsMultiplayerMod
                 _deathRestartCooldownUntil = DateTime.MinValue;
                 _cachedLevelDescSync = null;
                 _hostDisconnectCountdownActive = false;
+                _hostDisconnectCountdownGameRef = null;
                 _hostDisconnectCountdownUntil = DateTime.MinValue;
                 _lastHostDisconnectCountdown = -1;
                 _hostDisconnectSavePending = false;
@@ -1466,6 +1468,7 @@ namespace DeadCellsMultiplayerMod
 
         private static void HandleWorldExit(bool isDisposeHook = false)
         {
+            ResetHostDisconnectCountdown();
             lock (Sync)
             {
                 if (_worldExitHandled) return;

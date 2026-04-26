@@ -407,6 +407,7 @@ namespace DeadCellsMultiplayerMod
         {
             var now = DateTime.UtcNow;
             _hostDisconnectCountdownActive = true;
+            CaptureHostDisconnectCountdownGame();
             _hostDisconnectCountdownUntil = now.AddSeconds(HostDisconnectCountdownSeconds);
             _lastHostDisconnectCountdown = HostDisconnectCountdownSeconds;
             _hostDisconnectSavePending = savePending;
@@ -427,6 +428,7 @@ namespace DeadCellsMultiplayerMod
         private static void ResetHostDisconnectCountdown()
         {
             _hostDisconnectCountdownActive = false;
+            _hostDisconnectCountdownGameRef = null;
             _hostDisconnectCountdownUntil = DateTime.MinValue;
             _lastHostDisconnectCountdown = -1;
             _hostDisconnectSavePending = false;
@@ -439,6 +441,13 @@ namespace DeadCellsMultiplayerMod
         {
             if (!_hostDisconnectCountdownActive)
                 return;
+
+            if (!IsHostDisconnectCountdownGameStillActive())
+            {
+                _log?.Information("[NetMod] Host-disconnect auto-exit canceled because client already left the run");
+                ResetHostDisconnectCountdown();
+                return;
+            }
 
             var now = DateTime.UtcNow;
             if (_hostDisconnectSavePending && now >= _hostDisconnectSaveRetryAt)
@@ -475,9 +484,53 @@ namespace DeadCellsMultiplayerMod
             }
 
             _hostDisconnectCountdownActive = false;
+            _hostDisconnectCountdownGameRef = null;
             _hostDisconnectSavePending = false;
             _forceMultiplayerSaveStore = false;
             ForceExitToMainMenu();
+        }
+
+        private static void CaptureHostDisconnectCountdownGame()
+        {
+            try
+            {
+                var game = dc.pr.Game.Class.ME ?? ModEntry.Instance?.game;
+                _hostDisconnectCountdownGameRef = game == null ? null : new WeakReference<dc.pr.Game>(game);
+            }
+            catch
+            {
+                _hostDisconnectCountdownGameRef = null;
+            }
+        }
+
+        private static bool IsHostDisconnectCountdownGameStillActive()
+        {
+            var gameRef = _hostDisconnectCountdownGameRef;
+            if (gameRef == null)
+                return true;
+
+            if (!gameRef.TryGetTarget(out var scheduledGame) || scheduledGame == null)
+                return false;
+
+            try
+            {
+                if (scheduledGame.destroyed)
+                    return false;
+            }
+            catch
+            {
+                return false;
+            }
+
+            try
+            {
+                var currentGame = dc.pr.Game.Class.ME ?? ModEntry.Instance?.game;
+                return ReferenceEquals(currentGame, scheduledGame);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool TrySaveClientWorldBeforeHostAutoExit(string reason)

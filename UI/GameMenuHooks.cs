@@ -52,6 +52,7 @@ namespace DeadCellsMultiplayerMod
 
         private static void ResetOriginalMainMenuUiState()
         {
+            ResetHostDisconnectCountdown();
             _inHostStatusMenu = false;
             _inClientWaitingMenu = false;
             _menuSelection = NetRole.None;
