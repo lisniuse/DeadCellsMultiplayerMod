@@ -1123,10 +1123,16 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
 
             var normalMapShader = (NormalMap)currentSprite.getShader(NormalMap.Class);
             if (normalMapShader != null)
+            {
                 currentSprite.removeShader(normalMapShader);
+                nrmShader = null;
+            }
 
             if (normalMap != null)
+            {
                 currentSprite.addOrUpdateNormalMapTexture(normalMap);
+                nrmShader = (NormalMap)currentSprite.getShader(NormalMap.Class);
+            }
 
             return true;
         }

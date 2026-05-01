@@ -13,6 +13,10 @@ namespace DeadCellsMultiplayerMod
         private const string MultiplayerSaveFolderName = "MSave";
         private const string MetadataExtension = ".coop.json";
         private static readonly object Sync = new();
+        private static int _cachedSlot = -1;
+        private static bool _cachedPathExists;
+        private static DateTime _cachedWriteUtc;
+        private static CoopMetadata? _cachedMetadata;
 
         public static string? GetCurrentCoopId()
         {
@@ -33,6 +37,12 @@ namespace DeadCellsMultiplayerMod
             return coopId;
         }
 
+        public static bool UpdateCoopRunSeed(int? lastSeed, string? lastHostId = null)
+        {
+            var coopId = GetCurrentCoopId();
+            return !string.IsNullOrWhiteSpace(coopId) && SetCoopId(coopId, lastHostId, lastSeed);
+        }
+
         public static bool SetCoopId(string? coopId, string? lastHostId = null, int? lastSeed = null)
         {
             var normalized = NormalizeCoopId(coopId);
@@ -43,17 +53,31 @@ namespace DeadCellsMultiplayerMod
             {
                 try
                 {
+                    var slot = ResolveSaveSlotNumber(null);
+                    var path = GetMetadataPathForSlot(slot);
+                    var normalizedHostId = NormalizeMetadataValue(lastHostId);
                     var now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    var path = GetMetadataPath(null);
                     var createdAt = now;
-                    if (TryLoad(null, out var existing) && !string.IsNullOrWhiteSpace(existing.CreatedAtUtc))
-                        createdAt = existing.CreatedAtUtc;
+
+                    if (TryLoad(slot, out var existing))
+                    {
+                        if (string.Equals(NormalizeCoopId(existing.CoopId), normalized, StringComparison.Ordinal) &&
+                            string.Equals(existing.LastHostId, normalizedHostId, StringComparison.Ordinal) &&
+                            existing.LastSeed == lastSeed &&
+                            !string.IsNullOrWhiteSpace(existing.CreatedAtUtc))
+                        {
+                            return true;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(existing.CreatedAtUtc))
+                            createdAt = existing.CreatedAtUtc;
+                    }
 
                     var metadata = new CoopMetadata
                     {
                         Version = CurrentVersion,
                         CoopId = normalized,
-                        LastHostId = NormalizeMetadataValue(lastHostId),
+                        LastHostId = normalizedHostId,
                         LastSeed = lastSeed,
                         CreatedAtUtc = createdAt,
                         UpdatedAtUtc = now
@@ -61,6 +85,7 @@ namespace DeadCellsMultiplayerMod
 
                     IODirectory.CreateDirectory(IOPath.GetDirectoryName(path)!);
                     IOFile.WriteAllText(path, JsonConvert.SerializeObject(metadata, Formatting.Indented));
+                    UpdateCacheLocked(slot, path, metadata);
                     return true;
                 }
                 catch
@@ -76,9 +101,12 @@ namespace DeadCellsMultiplayerMod
             {
                 try
                 {
-                    var path = GetMetadataPath(slot);
+                    var resolvedSlot = ResolveSaveSlotNumber(slot);
+                    var path = GetMetadataPathForSlot(resolvedSlot);
                     if (IOFile.Exists(path))
                         IOFile.Delete(path);
+
+                    InvalidateCacheLocked(resolvedSlot);
                 }
                 catch
                 {
@@ -140,15 +168,37 @@ namespace DeadCellsMultiplayerMod
             {
                 try
                 {
-                    var path = GetMetadataPath(slot);
-                    if (!IOFile.Exists(path))
+                    var resolvedSlot = ResolveSaveSlotNumber(slot);
+                    var path = GetMetadataPathForSlot(resolvedSlot);
+                    var exists = IOFile.Exists(path);
+                    var writeUtc = exists ? IOFile.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+
+                    if (_cachedSlot == resolvedSlot &&
+                        _cachedPathExists == exists &&
+                        _cachedWriteUtc == writeUtc)
+                    {
+                        if (_cachedMetadata == null)
+                            return false;
+
+                        metadata = _cachedMetadata;
+                        return true;
+                    }
+
+                    if (!exists)
+                    {
+                        UpdateCacheLocked(resolvedSlot, path, null);
                         return false;
+                    }
 
                     var loaded = JsonConvert.DeserializeObject<CoopMetadata>(IOFile.ReadAllText(path));
                     if (loaded == null || string.IsNullOrWhiteSpace(NormalizeCoopId(loaded.CoopId)))
+                    {
+                        UpdateCacheLocked(resolvedSlot, path, null);
                         return false;
+                    }
 
                     metadata = loaded;
+                    UpdateCacheLocked(resolvedSlot, path, loaded);
                     return true;
                 }
                 catch
@@ -158,11 +208,30 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
-        private static string GetMetadataPath(int? slot)
+        private static void UpdateCacheLocked(int slot, string path, CoopMetadata? metadata)
+        {
+            _cachedSlot = slot;
+            _cachedPathExists = metadata != null && IOFile.Exists(path);
+            _cachedWriteUtc = _cachedPathExists ? IOFile.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+            _cachedMetadata = metadata;
+        }
+
+        private static void InvalidateCacheLocked(int slot)
+        {
+            if (_cachedSlot != slot)
+                return;
+
+            _cachedSlot = -1;
+            _cachedPathExists = false;
+            _cachedWriteUtc = DateTime.MinValue;
+            _cachedMetadata = null;
+        }
+
+        private static string GetMetadataPathForSlot(int slot)
         {
             var fileName = string.Create(
                 CultureInfo.InvariantCulture,
-                $"user_{ResolveSaveSlotNumber(slot)}{MetadataExtension}");
+                $"user_{slot}{MetadataExtension}");
             return IOPath.Combine(GetMultiplayerSaveFolderPath(), fileName);
         }
 

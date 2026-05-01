@@ -15,6 +15,8 @@ namespace DeadCellsMultiplayerMod.Ghost
     {
         internal KingSkin source = null!;
         private bool _usingKingContext;
+        private string? _lastAttackAnimId;
+        private bool _restoreIdlePending;
         private static ObjFieldInfoCache _cachedAnimId;
         private static ObjFieldInfoCache _cachedAnimSpd;
         private static ObjFieldInfoCache _cachedFxId;
@@ -125,6 +127,10 @@ namespace DeadCellsMultiplayerMod.Ghost
             {
                 animManager2.reverse();
             }
+
+            _lastAttackAnimId = animId.ToString();
+            _restoreIdlePending = true;
+            animManager2.onEnd(TryRestoreIdleAfterAttack);
         }
 
         public override void prepare(double attackSpeed)
@@ -153,6 +159,38 @@ namespace DeadCellsMultiplayerMod.Ghost
         internal void SyncSource()
         {
             BindAreasToSource();
+        }
+
+        internal void TryRestoreIdleAfterAttack()
+        {
+            if(!_restoreIdlePending || string.IsNullOrWhiteSpace(_lastAttackAnimId))
+                return;
+
+            var spr = source?.spr;
+            var animManager = spr?._animManager;
+            if(spr == null || animManager == null)
+                return;
+
+            var current = spr.groupName?.ToString();
+            if(!string.Equals(current, _lastAttackAnimId, StringComparison.Ordinal))
+                return;
+
+            try
+            {
+                if(animManager.getPlayRatio() < 0.98)
+                    return;
+            }
+            catch
+            {
+            }
+
+            var idle = "idle".AsHaxeString();
+            if(!HasGroup(spr, idle))
+                return;
+
+            animManager.play(idle, null, null).loop(null);
+            _restoreIdlePending = false;
+            _lastAttackAnimId = null;
         }
 
         private void BindAreasToSource()

@@ -189,6 +189,9 @@ namespace DeadCellsMultiplayerMod.Ghost
                 }
             }
 
+            if(activeWeapon is KingWeapon kingWeapon && activeWeapon.isReady())
+                kingWeapon.TryRestoreIdleAfterAttack();
+
             if(pendingInterrupts > 0)
             {
                 pendingInterrupts = 0;

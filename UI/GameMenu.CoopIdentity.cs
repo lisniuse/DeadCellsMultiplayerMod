@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 
 namespace DeadCellsMultiplayerMod
@@ -9,7 +10,15 @@ namespace DeadCellsMultiplayerMod
         private static bool _receivedLaunchPayload;
         private static bool _receivedNewCoopWorldPrepared;
         private static bool _pendingNewCoopWorldIdAssigned;
+        private static string? _storedPendingNewCoopWorldCoopId;
+        private static int? _storedPendingNewCoopWorldSeed;
+        private static int _continueSaveCacheSlot = -1;
+        private static long _continueSaveCacheTicks;
+        private static bool _continueSaveCacheValid;
+        private static bool _continueSaveCacheHasSave;
+        private static string _continueSaveCacheReason = ContinueReasonOk;
         private static string _lastLoggedClientContinueBlockReason = string.Empty;
+        private const double ContinueSaveCacheSeconds = 1.0;
 
         public static void ReceiveRemoteCoopState(int userId, string? coopId, bool hasContinueSave)
         {
@@ -32,6 +41,8 @@ namespace DeadCellsMultiplayerMod
             _receivedLaunchPayload = false;
             _receivedNewCoopWorldPrepared = false;
             _pendingNewCoopWorldIdAssigned = false;
+            _storedPendingNewCoopWorldCoopId = null;
+            _storedPendingNewCoopWorldSeed = null;
             _lastLoggedClientContinueBlockReason = string.Empty;
         }
 
@@ -56,6 +67,7 @@ namespace DeadCellsMultiplayerMod
 
         private static void NotifyMultiplayerSaveSlotChanged()
         {
+            InvalidateLocalContinueSaveStateCache();
             SendCoopStateToRemote();
             RequestLobbyMenuRefresh();
         }
@@ -125,12 +137,23 @@ namespace DeadCellsMultiplayerMod
 
                 remoteCoopId = hostState.CoopId;
                 seed = _remoteSeed;
+                if (string.Equals(_storedPendingNewCoopWorldCoopId, remoteCoopId, StringComparison.Ordinal) &&
+                    _storedPendingNewCoopWorldSeed == seed)
+                {
+                    return;
+                }
             }
 
             if (!MUser.SetCoopId(remoteCoopId, GetRemoteHostIdentity(), seed))
             {
                 _log?.Warning("[NetMod] Failed to store host coop id for new coop world");
                 return;
+            }
+
+            lock (Sync)
+            {
+                _storedPendingNewCoopWorldCoopId = remoteCoopId;
+                _storedPendingNewCoopWorldSeed = seed;
             }
 
             _log?.Information("[NetMod] Stored host coop id {CoopId} for new coop world", remoteCoopId);
@@ -271,6 +294,34 @@ namespace DeadCellsMultiplayerMod
 
         private static bool HasLocalContinueSaveState(out string reason)
         {
+            var slot = ResolveCurrentSaveSlotForCache();
+            var now = Stopwatch.GetTimestamp();
+            lock (Sync)
+            {
+                if (_continueSaveCacheValid &&
+                    _continueSaveCacheSlot == slot &&
+                    Stopwatch.GetElapsedTime(_continueSaveCacheTicks, now).TotalSeconds < ContinueSaveCacheSeconds)
+                {
+                    reason = _continueSaveCacheReason;
+                    return _continueSaveCacheHasSave;
+                }
+            }
+
+            var hasSave = ReadLocalContinueSaveState(out reason);
+            lock (Sync)
+            {
+                _continueSaveCacheSlot = slot;
+                _continueSaveCacheTicks = now;
+                _continueSaveCacheValid = true;
+                _continueSaveCacheHasSave = hasSave;
+                _continueSaveCacheReason = reason;
+            }
+
+            return hasSave;
+        }
+
+        private static bool ReadLocalContinueSaveState(out string reason)
+        {
             try
             {
                 var relativePath = GetMultiplayerSaveRelativeFilePath(null);
@@ -303,6 +354,33 @@ namespace DeadCellsMultiplayerMod
                 _log?.Warning("[NetMod] Failed to validate multiplayer continue save: {Message}", ex.Message);
                 return false;
             }
+        }
+
+        private static void InvalidateLocalContinueSaveStateCache()
+        {
+            lock (Sync)
+            {
+                _continueSaveCacheValid = false;
+                _continueSaveCacheSlot = -1;
+                _continueSaveCacheTicks = 0;
+                _continueSaveCacheHasSave = false;
+                _continueSaveCacheReason = ContinueReasonOk;
+            }
+        }
+
+        private static int ResolveCurrentSaveSlotForCache()
+        {
+            try
+            {
+                var current = dc.Main.Class.ME?.options?.curSlot;
+                if (current.HasValue && current.Value >= 0)
+                    return current.Value;
+            }
+            catch
+            {
+            }
+
+            return 0;
         }
 
         private static void LogClientContinueBlockReasonLocked(string reason)

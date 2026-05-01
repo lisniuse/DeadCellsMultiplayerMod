@@ -431,11 +431,7 @@ namespace DeadCellsMultiplayerMod
                 _serverSeed = seed;
             }
             if (_role == NetRole.Host)
-            {
-                var coopId = MUser.GetCurrentCoopId();
-                if (!string.IsNullOrWhiteSpace(coopId))
-                    MUser.SetCoopId(coopId, _playerId, seed);
-            }
+                MUser.UpdateCoopRunSeed(seed, _playerId);
             _log?.Information("[NetMod] Generated host seed {Seed} ({Reason})", seed, reason);
             return seed;
         }
