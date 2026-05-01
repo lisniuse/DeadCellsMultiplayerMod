@@ -1,17 +1,10 @@
-using System.Net.Sockets;
-using System.Text;
-using Steamworks;
+using DeadCellsMultiplayerMod.Network;
 
 public sealed partial class NetNode
 {
-    private static byte[] Utf8ProtocolBytes(string line) => Encoding.UTF8.GetBytes(line);
-
     private void CloseClientConnection()
     {
-        try { _stream?.Close(); } catch { }
-        try { _client?.Close(); } catch { }
-        _stream = null;
-        _client = null;
+        DisposeLiteNetService();
     }
 
     private static bool IsRealtimeSteamLine(string line)
@@ -54,29 +47,13 @@ public sealed partial class NetNode
         return true;
     }
 
-    private static EP2PSend ResolveSteamSendType(string line)
-    {
-        if (line.StartsWith("MOBEVENT|", StringComparison.OrdinalIgnoreCase))
-            return EP2PSend.k_EP2PSendReliable;
-        return IsRealtimeSteamLine(line)
-            ? EP2PSend.k_EP2PSendUnreliable
-            : EP2PSend.k_EP2PSendReliable;
-    }
-
-    private int GetSteamOutgoingChannel()
-    {
-        return _role == NetRole.Host
-            ? SteamP2PChannelHostToClient
-            : SteamP2PChannelClientToHost;
-    }
-
     private bool HasAnyConnection()
     {
         if (_role == NetRole.Host)
         {
             lock (_clientsLock)
             {
-                return _useSteamTransport ? _steamClients.Count > 0 : _clients.Count > 0;
+                return _clients.Count > 0;
             }
         }
         if (_useSteamTransport)
@@ -84,7 +61,7 @@ public sealed partial class NetNode
             lock (_sync) return _hasRemote;
         }
 
-        return _stream != null && _client != null && _client.Connected;
+        return _binaryNetwork?.HasPeers == true;
     }
 
     /// <summary>Sends a pre-encoded mob protocol line (used by MobSyncWorker). Line must start with MOB.</summary>
@@ -110,138 +87,20 @@ public sealed partial class NetNode
         if (_role == NetRole.Host)
             return BroadcastLineSafe(line);
 
-        if (_useSteamTransport && _steamBridge != null)
-            return SendLineToSteamBridgeSafe(_steamHostId.m_SteamID, line, ResolveSteamSendType(line), GetSteamOutgoingChannel());
-
-        return SendLineToStreamSafe(_stream, _sendLock, line);
-    }
-
-    private async Task BroadcastLineSafe(string line)
-    {
-        if (_useSteamTransport && _steamBridge != null)
-        {
-            List<SteamClientConnection> steamSnapshot;
-            lock (_clientsLock)
-            {
-                steamSnapshot = new List<SteamClientConnection>(_steamClients.Count);
-                foreach (var c in _steamClients.Values)
-                    steamSnapshot.Add(c);
-            }
-            if (steamSnapshot.Count == 0) return;
-            var sendType = ResolveSteamSendType(line);
-            var channel = SteamP2PChannelHostToClient;
-            var bytes = Utf8ProtocolBytes(line);
-            foreach (var client in steamSnapshot)
-            {
-                _steamBridge.TrySend(client.SteamId.m_SteamID, sendType, channel, bytes, out _);
-            }
-            return;
-        }
-
-        List<ClientConnection> snapshot;
-        lock (_clientsLock)
-        {
-            snapshot = new List<ClientConnection>(_clients.Count);
-            foreach (var c in _clients.Values)
-                snapshot.Add(c);
-        }
-        if (snapshot.Count == 0) return;
-        var tasks = new Task[snapshot.Count];
-        for (var i = 0; i < snapshot.Count; i++)
-            tasks[i] = SendLineToClientSafe(snapshot[i], line);
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-    }
-
-    private async Task SendKnownUsersToSteamClientSafe(SteamClientConnection connection)
-    {
-        List<RemoteState> snapshot;
-        lock (_sync)
-        {
-            if (_remotes.Count == 0)
-                return;
-            snapshot = new List<RemoteState>(_remotes.Values);
-        }
-
-        foreach (var state in snapshot)
-        {
-            var username = state.Username;
-            if (string.IsNullOrWhiteSpace(username))
-                continue;
-            var line = BuildTaggedLine("USER", state.Id, username);
-            await SendLineToSteamClientSafe(connection, line).ConfigureAwait(false);
-            await SendLineToSteamClientSafe(connection, BuildReadyLine(state.Id, state.Ready)).ConfigureAwait(false);
-            await SendLineToSteamClientSafe(connection, BuildCoopStateLine(state.Id, state.CoopId, state.HasContinueSave)).ConfigureAwait(false);
-
-            if (!string.IsNullOrWhiteSpace(state.Skin))
-            {
-                var skinLine = BuildTaggedLine("SKIN", state.Id, state.Skin);
-                await SendLineToSteamClientSafe(connection, skinLine).ConfigureAwait(false);
-            }
-
-            if (!string.IsNullOrWhiteSpace(state.Head))
-            {
-                var headLine = BuildTaggedLine("HEAD", state.Id, state.Head);
-                await SendLineToSteamClientSafe(connection, headLine).ConfigureAwait(false);
-            }
-        }
-    }
-
-    private async Task SendLineToStreamSafe(NetworkStream? stream, SemaphoreSlim? sendLock, string line)
-    {
-        if (stream == null || sendLock == null) return;
-
-        var bytes = Utf8ProtocolBytes(line);
-        bool locked = false;
-        try
-        {
-            await sendLock.WaitAsync().ConfigureAwait(false);
-            locked = true;
-            await stream.WriteAsync(bytes.AsMemory(0, bytes.Length), CancellationToken.None).ConfigureAwait(false);
-            await stream.FlushAsync().ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException) { }
-        catch (Exception ex)
-        {
-            _log.Warning("[NetNode] send error: {msg}", ex.Message);
-        }
-        finally
-        {
-            if (locked) sendLock.Release();
-        }
-    }
-
-    private Task SendLineToSteamClientSafe(SteamClientConnection client, string line, EP2PSend? sendType = null)
-    {
-        if (_steamBridge == null)
-            return Task.CompletedTask;
-        var bytes = Utf8ProtocolBytes(line);
-        var st = sendType ?? ResolveSteamSendType(line);
-        if (!_steamBridge.TrySend(client.SteamId.m_SteamID, st, SteamP2PChannelHostToClient, bytes, out var err))
-            _log.Warning("[NetNode] Steam send failed to {SteamId}: {Error}", client.SteamId.m_SteamID, err);
+        TrySendLegacyLine(line, ResolveLegacyDelivery(line));
         return Task.CompletedTask;
     }
 
-    private Task SendLineToSteamBridgeSafe(ulong steamId, string line, EP2PSend sendType, int channel)
+    private Task BroadcastLineSafe(string line)
     {
-        if (_steamBridge == null || steamId == 0UL)
-            return Task.CompletedTask;
-
-        var bytes = Utf8ProtocolBytes(line);
-        if (bytes.Length > SteamMaxPacketSizeBytes)
-        {
-            _log.Warning(
-                "[NetNode] Steam payload too large for {SteamId}: {PayloadSize} bytes (limit {Limit} bytes)",
-                steamId,
-                bytes.Length,
-                SteamMaxPacketSizeBytes);
-            return Task.CompletedTask;
-        }
-
-        if (!_steamBridge.TrySend(steamId, sendType, channel, bytes, out var err))
-        {
-            var ctx = line.StartsWith("HELLO", StringComparison.Ordinal) ? " HELLO" : string.Empty;
-            _log.Warning("[NetNode] Steam send failed to {SteamId}: {Error}{Context}", steamId, err, ctx);
-        }
+        TrySendLegacyLine(line, ResolveLegacyDelivery(line));
         return Task.CompletedTask;
+    }
+
+    private static NetworkDelivery ResolveLegacyDelivery(string line)
+    {
+        return IsRealtimeSteamLine(line)
+            ? NetworkDelivery.Unreliable
+            : NetworkDelivery.ReliableOrdered;
     }
 }

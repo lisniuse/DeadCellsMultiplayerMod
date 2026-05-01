@@ -37,6 +37,8 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
         private virtual_cooldown_duration_flags_forbiddenItem_props_requiredItem_skill_? remoteDiveSkillInfos;
         private long _lastRemoteDiveStartTicks;
         private long _lastRemoteDiveLandTicks;
+        private long _lastVisualRecoverTick;
+        private const double VisualRecoverCooldownSeconds = 0.35;
 
         private const double RemoteDiveReplayMinSeconds = 0.08;
         private const int DiveAttackCooldownKey = 729808896;
@@ -1103,15 +1105,6 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
                 glowKey.setGlowDatas(glowData);
                 
             }
-            // Ambient light
-            var General = 1.0;
-            var radiusCase = 1.2 * General;
-            var Math = dc.Math.Class.random() * 0.20000000000000007;
-            General = 0.9 + Math;
-            var decayStart = 5.0 * General;
-            this.createLight(1161471, radiusCase, decayStart, 0.35);
-
-
             // Scarf
             initScarf();
 
@@ -1196,6 +1189,7 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
         public override void fixedUpdate()
         {
             EnsureRuntimeDependencies();
+            EnsureVisualSyncState();
             base.fixedUpdate();
             scarf?.push(0.0, Ref<bool>.Null);
         }
@@ -1258,6 +1252,34 @@ namespace DeadCellsMultiplayerMod.Ghost.GhostBase
             }
 
             return groupTracks.get("headBone".AsHaxeString()) as ArrayBytes_Int;
+        }
+
+        private void EnsureVisualSyncState()
+        {
+            if (destroyed || _level == null)
+                return;
+
+            var now = Stopwatch.GetTimestamp();
+            var cooldownTicks = (long)(Stopwatch.Frequency * VisualRecoverCooldownSeconds);
+            if (_lastVisualRecoverTick != 0 && now - _lastVisualRecoverTick < cooldownTicks)
+                return;
+
+            var spriteMissing = spr == null || spr._animManager == null;
+            var inCinematic = false;
+            try
+            {
+                var game = Game.Class.ME;
+                inCinematic = game?.curCine != null && !game.curCine.destroyed;
+            }
+            catch
+            {
+            }
+
+            if (!spriteMissing && !inCinematic)
+                return;
+
+            _lastVisualRecoverTick = now;
+            _ = ApplyRemoteSkin(RemoteSkinId);
         }
 
     }

@@ -20,6 +20,7 @@
   
   <ItemGroup>
     <PackageReference Include="DeadCellsCoreModding.MDK" Version="1.0.1" />
+    <PackageReference Include="LiteNetLib" Version="2.1.3" GeneratePathProperty="true" />
     <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.3" />
     <Reference Include="Steamworks.NET" />
     <None Include="$(SteamApi64HintPath)" Condition="Exists('$(SteamApi64HintPath)')" Link="steam_api64.dll">
@@ -33,6 +34,14 @@
       <_ModOutputDir>$(OutputPath)output\$(AssemblyName)\</_ModOutputDir>
     </PropertyGroup>
     <Copy SourceFiles="$(SteamApi64HintPath)" DestinationFolder="$(_ModOutputDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyLiteNetLib" AfterTargets="CopyOutputFiles" Condition="'$(PkgLiteNetLib)' != ''">
+    <PropertyGroup>
+      <_ModOutputDir>$(OutputPath)output\$(AssemblyName)\</_ModOutputDir>
+      <_LiteNetLibDll>$(PkgLiteNetLib)\lib\net8.0\LiteNetLib.dll</_LiteNetLibDll>
+    </PropertyGroup>
+    <Copy SourceFiles="$(_LiteNetLibDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(_LiteNetLibDll)')" />
+    <Copy SourceFiles="$(_LiteNetLibDll)" DestinationFolder="$(_ModOutputDir)" SkipUnchangedFiles="true" Condition="Exists('$(_LiteNetLibDll)')" />
   </Target>
   <PropertyGroup>
     <GenerateSinglePakFile>true</GenerateSinglePakFile>

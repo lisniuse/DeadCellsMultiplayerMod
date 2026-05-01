@@ -5,45 +5,6 @@ using DeadCellsMultiplayerMod.Interaction;
 
 public sealed partial class NetNode
 {
-    private bool TryHandleClientFastPathLine(string line)
-    {
-        if (string.IsNullOrEmpty(line))
-            return false;
-
-        try
-        {
-            if (line.StartsWith("HXSYNC|", StringComparison.Ordinal))
-            {
-                var payload = line["HXSYNC|".Length..];
-                lock (_sync) _hasRemote = true;
-                GameDataSync.ReceiveSerializerSync(payload);
-                return true;
-            }
-
-            if (line.StartsWith("LSEED|", StringComparison.Ordinal))
-            {
-                var payload = line["LSEED|".Length..];
-                lock (_sync) _hasRemote = true;
-                GameDataSync.ReceiveLevelSeed(payload);
-                return true;
-            }
-
-            if (line.StartsWith("LGRAPH|", StringComparison.Ordinal))
-            {
-                var payload = line["LGRAPH|".Length..];
-                lock (_sync) _hasRemote = true;
-                GameDataSync.ReceiveLevelGraph(payload);
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.Warning("[NetNode] Fast-path line handling failed: {msg}", ex.Message);
-        }
-
-        return false;
-    }
-
     private static bool TryReadBufferedLine(StringBuilder buffer, out string line)
     {
         for (var i = 0; i < buffer.Length; i++)
@@ -92,17 +53,6 @@ public sealed partial class NetNode
                 return true;
 
             lock (_sync) _hasRemote = true;
-            if (_role == NetRole.Host && _useSteamTransport && senderId.HasValue)
-            {
-                SteamClientConnection? steamConnection = null;
-                lock (_clientsLock)
-                {
-                    _steamClients.TryGetValue(senderId.Value, out steamConnection);
-                }
-
-                if (steamConnection != null)
-                    _ = Task.Run(() => SendInitialStateToSteamClient(steamConnection, forceSend: true));
-            }
             return true;
         }
 

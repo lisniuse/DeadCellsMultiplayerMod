@@ -330,23 +330,32 @@ namespace DeadCellsMultiplayerMod
                 ? string.Empty
                 : levelId.Trim();
             _localLastDoorMarkerToken = markerToken;
-            _remotePendingDoorMarkers.Clear();
         }
 
-        double last_x, last_y;
-        int lastDir;
+        double last_x = double.NaN;
+        double last_y = double.NaN;
+        int lastDir = int.MinValue;
 
-        private void SendHeroCoords()
+        private void ResetHeroPositionSendCache()
+        {
+            last_x = double.NaN;
+            last_y = double.NaN;
+            lastDir = int.MinValue;
+        }
+
+        private void SendHeroCoords(bool force = false)
         {
             if (_netRole == NetRole.None) return;
             if (_net == null || me == null) return;
             int dir = me.dir;
-            if (me is null || me.spr == null || me.spr.x == last_x && me.spr.y == last_y && lastDir == dir) return;
+            if (me is null || me.spr == null || (!force && me.spr.x == last_x && me.spr.y == last_y && lastDir == dir)) return;
 
-            _net.TickSend(me.spr.x, me.spr.y, dir);
-            last_x = me.spr.x;
-            last_y = me.spr.y;
-            lastDir = dir;
+            if (_net.TickSend(me.spr.x, me.spr.y, dir))
+            {
+                last_x = me.spr.x;
+                last_y = me.spr.y;
+                lastDir = dir;
+            }
         }
 
         public static double[] rLastX = new double[NetNode.MaxClientSlots];
@@ -737,27 +746,9 @@ namespace DeadCellsMultiplayerMod
                 return false;
             }
 
-            if (!remote.HasRoom ||
-                !remote.RoomId.HasValue ||
-                remote.RoomId.Value < 0 ||
-                string.IsNullOrWhiteSpace(remote.RoomLevelId))
-            {
-                return true;
-            }
-
-            if (!TryGetCurrentVisibilityContext(out var localContextLevelId, out var localBranchToken))
-            {
-                localContextLevelId = localLevelId;
-                localBranchToken = _localLastDoorMarkerToken >= 0 ? _localLastDoorMarkerToken : 0;
-            }
-
-            var remoteContextLevelId = remote.RoomLevelId.Trim();
-            if (!string.Equals(remoteContextLevelId, localContextLevelId, StringComparison.Ordinal))
-                return false;
-
-            if (remote.RoomId.Value != localBranchToken)
-                return false;
-
+            // Room marker replication is still noisy around level/bootstrap transitions and can
+            // briefly diverge even when both players are in the same active map. Prefer level-only
+            // visibility until room marker sync is made authoritative.
             return true;
         }
 
@@ -790,7 +781,6 @@ namespace DeadCellsMultiplayerMod
                 LevelId = markerLevelId,
                 UpdatedAtTicks = Stopwatch.GetTimestamp()
             };
-            _remotePendingDoorMarkers.Remove(remote.Id);
         }
 
         private void QueueClientDisposeWithTransition(int slot)
@@ -837,8 +827,19 @@ namespace DeadCellsMultiplayerMod
             if (_ghost == null || me == null || me._level == null)
                 return null;
 
-            var created = _ghost.CreateGhostKing(me._level);
+            GhostKing created;
+            try
+            {
+                created = _ghost.CreateGhostKing(me._level);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("[NetMod] Failed to create remote GhostKing slot={Slot} remoteId={RemoteId}: {Message}", slot, clientIds[slot], ex.Message);
+                return null;
+            }
+
             clients[slot] = created;
+            Logger.Information("[NetMod] Created remote GhostKing slot={Slot} remoteId={RemoteId}", slot, clientIds[slot]);
 
             var knownSkin = clientSkins[slot];
             created.ApplyRemoteSkin(knownSkin);
@@ -927,7 +928,6 @@ namespace DeadCellsMultiplayerMod
             {
                 clientSlotByRemoteId.Remove(previousRemoteId);
                 _remoteLastDoorMarkers.Remove(previousRemoteId);
-                _remotePendingDoorMarkers.Remove(previousRemoteId);
                 ClearCachedRemoteDiveSkillInfo(previousRemoteId);
             }
 
@@ -1451,7 +1451,6 @@ namespace DeadCellsMultiplayerMod
             _localLastDoorMarkerLevelId = string.Empty;
             _localLastDoorMarkerToken = int.MinValue;
             _remoteLastDoorMarkers.Clear();
-            _remotePendingDoorMarkers.Clear();
             _pendingClientDisposeTicks.Clear();
         }
 

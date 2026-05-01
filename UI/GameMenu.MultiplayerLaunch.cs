@@ -69,7 +69,10 @@ namespace DeadCellsMultiplayerMod
             }
 
             if (sendToRemote)
+            {
+                SendLaunchModeToRemote();
                 SendCachedGeneratePayload();
+            }
         }
 
         private static void NormalizePendingNewGameLaunch(ref bool custom, ref bool streamEnabled)
@@ -538,6 +541,56 @@ namespace DeadCellsMultiplayerMod
                 _pendingLaunchCustom = launchCustom;
                 _pendingLaunchStreamEnabled = launchStreamEnabled;
             }
+        }
+
+        public static void ReceiveLaunchMode(
+            int actionValue,
+            bool launchCustom,
+            bool launchStreamEnabled,
+            bool newCoopWorldPrepared,
+            string? coopId,
+            bool hostHasContinueSave)
+        {
+            var action = Enum.IsDefined(typeof(PendingLaunchAction), actionValue)
+                ? (PendingLaunchAction)actionValue
+                : PendingLaunchAction.NewGame;
+
+            ApplyReceivedPendingLaunch(action.ToString(), launchCustom, launchStreamEnabled);
+
+            if (!string.IsNullOrWhiteSpace(coopId))
+                ReceiveRemoteCoopState(1, coopId, hostHasContinueSave);
+
+            lock (Sync)
+            {
+                _receivedLaunchPayload = true;
+                _receivedNewCoopWorldPrepared = newCoopWorldPrepared;
+            }
+
+            TryStoreRemoteCoopIdForPendingNewGame();
+            RequestLobbyMenuRefresh();
+        }
+
+        private static void SendLaunchModeToRemote()
+        {
+            var net = NetRef;
+            if (net == null || !net.IsAlive || !net.IsHost)
+                return;
+
+            PendingLaunchAction action;
+            bool custom;
+            bool streamEnabled;
+            bool newCoopWorldPrepared;
+            lock (Sync)
+            {
+                action = _pendingLaunchAction;
+                custom = _pendingLaunchCustom;
+                streamEnabled = _pendingLaunchStreamEnabled;
+                newCoopWorldPrepared = _pendingNewCoopWorldIdAssigned;
+            }
+
+            var coopId = MUser.GetCurrentCoopId() ?? string.Empty;
+            var hostHasContinueSave = HasLocalContinueSaveState(out _);
+            net.SendLaunchMode((int)action, custom, streamEnabled, newCoopWorldPrepared, coopId, hostHasContinueSave);
         }
 
         private static bool IsPendingLaunchReadyForAutoStartLocked()

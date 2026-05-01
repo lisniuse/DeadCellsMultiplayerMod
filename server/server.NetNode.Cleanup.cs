@@ -35,15 +35,7 @@ public sealed partial class NetNode
             _pendingBossRuneUpdateCells.Clear();
             _pendingInterPortalEvents.Clear();
         }
-        if (_useSteamTransport)
-        {
-            if (_steamHostId.m_SteamID != 0UL)
-                _steamBridge?.TryClosePeer(_steamHostId.m_SteamID);
-        }
-        else
-        {
-            CloseClientConnection();
-        }
+        CloseClientConnection();
         GameMenu.EnqueueMainThreadCoalesced("net:remote-disconnected", () => GameMenu.NotifyRemoteDisconnected(_role));
     }
 

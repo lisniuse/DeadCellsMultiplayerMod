@@ -3,12 +3,15 @@ using DeadCellsMultiplayerMod;
 
 public sealed partial class NetNode
 {
-    public void TickSend(double cx, double cy, int dir)
+    private const int SafeLegacyPacketBytes = 950;
+
+    public bool TickSend(double cx, double cy, int dir)
     {
-        if (!HasAnyConnection()) return;
-        if (ID <= 0) return;
+        if (!HasAnyConnection()) return false;
+        if (ID <= 0) return false;
         var line = BuildPosLine(ID, cx, cy, dir);
         _ = SendLineSafe(line);
+        return true;
     }
 
     public void LevelSend(int senderId, string lvl) => SendLevelId(senderId, lvl);
@@ -28,6 +31,11 @@ public sealed partial class NetNode
             _log.Information("[NetNode] Skip sending seed {Seed}: no connected client", seed);
             return;
         }
+        if (TrySendBinarySeed(seed))
+        {
+            _log.Information("[NetNode] Sent seed {Seed}", seed);
+            return;
+        }
         var line = $"SEED|{seed}\n";
         _ = SendLineSafe(line);
         _log.Information("[NetNode] Sent seed {Seed}", seed);
@@ -36,6 +44,9 @@ public sealed partial class NetNode
     public void SendRunRestart(int seed)
     {
         if (!HasAnyConnection())
+            return;
+
+        if (TrySendBinaryRestart(seed))
             return;
 
         var line = string.Create(CultureInfo.InvariantCulture, $"RESTART|{seed}\n");
@@ -99,6 +110,9 @@ public sealed partial class NetNode
         if (!HasAnyConnection())
             return;
 
+        if (TrySendBinaryReady(ID, ready))
+            return;
+
         _ = SendLineSafe(BuildReadyLine(ID, ready));
     }
 
@@ -117,11 +131,28 @@ public sealed partial class NetNode
         if (!HasAnyConnection())
             return;
 
+        if (ID > 0 && TrySendBinaryCoopState(ID, safeCoopId, hasContinueSave))
+        {
+            _log.Information("[NetNode] Sent coop id state hasId={HasId} hasContinue={HasContinue}", !string.IsNullOrWhiteSpace(safeCoopId), hasContinueSave);
+            return;
+        }
+
         var line = ID > 0
             ? BuildCoopStateLine(ID, safeCoopId, hasContinueSave)
             : $"COOPID|{safeCoopId}|{(hasContinueSave ? 1 : 0)}\n";
         _ = SendLineSafe(line);
         _log.Information("[NetNode] Sent coop id state hasId={HasId} hasContinue={HasContinue}", !string.IsNullOrWhiteSpace(safeCoopId), hasContinueSave);
+    }
+
+    public void SendLaunchMode(int action, bool custom, bool streamEnabled, bool newCoopWorldPrepared, string? coopId, bool hostHasContinueSave)
+    {
+        if (_role != NetRole.Host)
+            return;
+        if (!HasAnyConnection())
+            return;
+
+        var safeCoopId = SanitizeProtocolToken(coopId, 128);
+        TrySendBinaryLaunchMode(action, custom, streamEnabled, newCoopWorldPrepared, safeCoopId, hostHasContinueSave);
     }
 
     public void SendBossRune(int bossRune)
@@ -312,16 +343,7 @@ public sealed partial class NetNode
             return;
 
         var line = payload.EndsWith('\n') ? payload : payload + "\n";
-        try
-        {
-            var task = SendLineSafe(line);
-            if (!task.Wait(timeoutMs))
-                _log.Warning("[NetNode] Timed out sending control line \"{Payload}\"", payload);
-        }
-        catch (Exception ex)
-        {
-            _log.Warning("[NetNode] Failed to send control line \"{Payload}\": {Message}", payload, ex.Message);
-        }
+        _ = SendLineSafe(line);
     }
 
 
@@ -486,15 +508,35 @@ public sealed partial class NetNode
         if (states == null || states.Count == 0)
             return;
 
-        if (MobWireBinary.UseBinaryWire && MobWireBinary.TryBuildMobStatesBinary(states, out var bin) && bin != null)
-        {
-            var line = "MOBSTATE2|" + Convert.ToBase64String(bin) + "\n";
-            _ = SendLineSafe(line);
+        if (TrySendMobStatesBatch(states))
             return;
+
+        // Chunk fallback to avoid oversize legacy packets (LiteNet max single payload is small).
+        var chunk = new List<MobStateSnapshot>(states.Count);
+        for (int i = 0; i < states.Count; i++)
+        {
+            chunk.Add(states[i]);
+            if (TrySendMobStatesBatch(chunk))
+                continue;
+
+            if (chunk.Count > 1)
+            {
+                var last = chunk[chunk.Count - 1];
+                chunk.RemoveAt(chunk.Count - 1);
+                TrySendMobStatesBatch(chunk);
+                chunk.Clear();
+                chunk.Add(last);
+            }
+
+            if (!TrySendMobStatesBatch(chunk))
+            {
+                _log.Warning("[NetNode] Dropped oversized MOBSTATE entry index={Index} generation={Generation}", chunk[0].Index, chunk[0].Generation);
+                chunk.Clear();
+            }
         }
 
-        var textLine = MobWireCodec.BuildMobStatesLine(states);
-        _ = SendLineSafe(textLine);
+        if (chunk.Count > 0)
+            TrySendMobStatesBatch(chunk);
     }
 
     public void SendMobMoves(IReadOnlyList<MobMoveSnapshot> moves)
@@ -746,5 +788,33 @@ public sealed partial class NetNode
     {
         var line = payload.EndsWith('\n') ? payload : payload + "\n";
         _ = SendLineSafe(line);
+    }
+
+    private bool TrySendMobStatesBatch(IReadOnlyList<MobStateSnapshot> states)
+    {
+        if (states == null || states.Count == 0)
+            return true;
+
+        if (MobWireBinary.UseBinaryWire && MobWireBinary.TryBuildMobStatesBinary(states, out var bin) && bin != null)
+        {
+            var line = "MOBSTATE2|" + Convert.ToBase64String(bin) + "\n";
+            if (GetLegacyWireByteCount(line) <= SafeLegacyPacketBytes)
+            {
+                _ = SendLineSafe(line);
+                return true;
+            }
+        }
+
+        var textLine = MobWireCodec.BuildMobStatesLine(states);
+        if (GetLegacyWireByteCount(textLine) > SafeLegacyPacketBytes)
+            return false;
+
+        _ = SendLineSafe(textLine);
+        return true;
+    }
+
+    private static int GetLegacyWireByteCount(string line)
+    {
+        return string.IsNullOrEmpty(line) ? 0 : System.Text.Encoding.UTF8.GetByteCount(line);
     }
 }

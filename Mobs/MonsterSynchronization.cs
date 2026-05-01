@@ -100,10 +100,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly HashSet<Mob> s_validationSeenMobsScratch = new(ReferenceEqualityComparer.Instance);
         private static readonly HashSet<int> s_validationSeenSyncIdsScratch = new();
         private static int authoritativeClientBossDieDepth;
+        private static long s_lastControlledRebuildTick;
         private const string MobSyncWorkerDisableEnv = "DCCM_MOB_SYNC_WORKER";
         private const string MobSyncAsyncInProcEnv = "DCCM_MOB_SYNC_ASYNC_INPROC";
         private static bool s_trackedMobValidationPending = true;
         private const string ExplicitEmptyStatePayloadMarker = "~";
+        private const double MappingInvalidRebuildCooldownSeconds = 2.0;
 
         /// <summary>Per-type eligibility cache so IsSyncMob never allocates a string on the hot per-frame path.</summary>
         private static readonly ConcurrentDictionary<System.Type, bool> s_syncMobTypeCache = new();

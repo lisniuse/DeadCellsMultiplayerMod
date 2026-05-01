@@ -434,6 +434,24 @@ internal static class MobSyncTrace
             candidateIdentityToken);
     }
 
+    public static void LogRebuildRejectionWithDivergence(
+        string reason,
+        string role,
+        string levelId,
+        int trackedCurrent,
+        int entityCount,
+        int candidateTracked)
+    {
+        Log.Warning(
+            "[MobSync] REBUILD rejected divergent reason={Reason} role={Role} level={LevelId} trackedCurrent={TrackedCurrent} entityCount={EntityCount} candidateTracked={CandidateTracked}",
+            reason ?? string.Empty,
+            role ?? string.Empty,
+            levelId ?? string.Empty,
+            trackedCurrent,
+            entityCount,
+            candidateTracked);
+    }
+
     public static void LogDeferredMobRegistration(string role, string levelId, string mobType)
     {
         if (!Enabled)
@@ -510,6 +528,27 @@ internal static class MobSyncTrace
             y,
             candidateCount,
             rebound);
+    }
+
+    public static void LogMappingFailureRate(int failures, int attempts, double failureRate, string triggerReason)
+    {
+        Log.Warning(
+            "[MobSync] mapping failure rate failures={Failures} attempts={Attempts} failureRate={FailureRate:P1} triggerReason={TriggerReason}",
+            failures,
+            attempts,
+            failureRate,
+            triggerReason ?? string.Empty);
+    }
+
+    public static void LogForcedRebuild(string trigger, int failures, int attempts, double failureRate, int sampleSyncId)
+    {
+        Log.Warning(
+            "[MobSync] forced registry rebuild trigger={Trigger} failures={Failures} attempts={Attempts} failureRate={FailureRate:P1} sampleSyncId={SampleSyncId}",
+            trigger ?? string.Empty,
+            failures,
+            attempts,
+            failureRate,
+            sampleSyncId);
     }
 
     public static void LogPacketGenerationRejected(string context, int packetGeneration, int currentGeneration, int count)

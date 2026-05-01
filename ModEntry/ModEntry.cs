@@ -183,10 +183,8 @@ namespace DeadCellsMultiplayerMod
         private readonly Dictionary<int, RemoteDownedCorpse> _remoteDownedCines = new();
         private readonly HashSet<int> _downedAnnouncements = new();
         private readonly Dictionary<int, RemoteDoorMarkerState> _remoteLastDoorMarkers = new();
-        private readonly Dictionary<int, RemoteDoorMarkerState> _remotePendingDoorMarkers = new();
         private readonly Dictionary<int, long> _pendingClientDisposeTicks = new();
         private const double ClientDisposeTransitionSeconds = 0.28;
-        private const double PendingDoorMarkerHideMaxSeconds = 1.5;
         private const double GhostHeadDormantUpdateSeconds = 0.20;
         private const double GhostHeadRecreateRetrySeconds = 0.25;
 
@@ -840,7 +838,12 @@ namespace DeadCellsMultiplayerMod
             levelId = l.id.ToString();
             var net = _net;
             Logger.Information("[NetMod] _LevelStruct.get hook role={Role} level={LevelId}", _netRole, levelId);
-            SendLevel(levelId);
+            var activeHeroLevelId = me?._level?.map?.id?.ToString();
+            if (!string.IsNullOrWhiteSpace(activeHeroLevelId) &&
+                string.Equals(activeHeroLevelId.Trim(), levelId, StringComparison.Ordinal))
+            {
+                SendLevel(levelId);
+            }
 
             if (_netRole == NetRole.Host)
                 GameDataSync.SendLevelSeed(levelId, rng, net);
@@ -968,6 +971,8 @@ namespace DeadCellsMultiplayerMod
             SendCurrentRoomTarget(force: true);
             _net?.ClearMobSyncQueues();
             EnsureHeroVisibilityAfterRoomChange(me);
+            ResetHeroPositionSendCache();
+            SendHeroCoords(force: true);
 
             if (_netRole != NetRole.None)
             {
@@ -1005,8 +1010,13 @@ namespace DeadCellsMultiplayerMod
             me = self;
             me._targetable = true;
             EnsureHeroVisibilityAfterRoomChange(me);
+            var currentLevelId = GetCurrentLevelId();
+            if (!string.IsNullOrWhiteSpace(currentLevelId))
+                SendLevel(currentLevelId);
             SendCurrentRoomTarget(force: true);
             SendEquippedWeapons(self.inventory);
+            ResetHeroPositionSendCache();
+            SendHeroCoords(force: true);
             MarkDiveNetGuardAfterSpawnOrRoomChange();
         }
 
@@ -1063,7 +1073,12 @@ namespace DeadCellsMultiplayerMod
 
             _ghostBootstrapNet = net;
             EnsureHeroVisibilityAfterRoomChange(me);
+            var currentLevelId = GetCurrentLevelId();
+            if (!string.IsNullOrWhiteSpace(currentLevelId))
+                SendLevel(currentLevelId);
             SendCurrentRoomTarget(force: true);
+            ResetHeroPositionSendCache();
+            SendHeroCoords(force: true);
             if (me.inventory != null)
                 SendEquippedWeapons(me.inventory);
             if (net.IsHost)

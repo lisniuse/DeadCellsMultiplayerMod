@@ -1732,6 +1732,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         hit.Type ?? string.Empty,
                         BuildMobStateTypeSignature(registryMob),
                         "position_mismatch");
+                    TriggerControlledRebuildOnInvalidMappingLocked("hit_position_mismatch", hit.MobIndex);
                     return null;
                 }
 
@@ -1744,6 +1745,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 hit.Type ?? string.Empty,
                 registryMob != null ? BuildMobStateTypeSignature(registryMob) : string.Empty,
                 registryMob == null ? "missing_sync_id" : "type_mismatch");
+            TriggerControlledRebuildOnInvalidMappingLocked(
+                registryMob == null ? "hit_missing_sync_id" : "hit_type_mismatch",
+                hit.MobIndex);
 
             return null;
         }

@@ -30,13 +30,13 @@ namespace DeadCellsMultiplayerMod
     {
         public readonly ulong RemoteSteamId;
         public readonly int Channel;
-        public readonly string Payload;
+        public readonly byte[] Payload;
 
-        public SteamP2PWorkerPacket(ulong remoteSteamId, int channel, string payload)
+        public SteamP2PWorkerPacket(ulong remoteSteamId, int channel, byte[] payload)
         {
             RemoteSteamId = remoteSteamId;
             Channel = channel;
-            Payload = payload ?? string.Empty;
+            Payload = payload ?? Array.Empty<byte>();
         }
     }
 
@@ -254,9 +254,14 @@ namespace DeadCellsMultiplayerMod
 
         public bool TrySend(ulong steamId, EP2PSend sendType, int channel, byte[] payload, out string error)
         {
+            return TrySend(steamId, sendType, channel, payload, payload?.Length ?? 0, out error);
+        }
+
+        public bool TrySend(ulong steamId, EP2PSend sendType, int channel, byte[] payload, int length, out string error)
+        {
             error = string.Empty;
 
-            if (_disposed || payload == null || payload.Length == 0)
+            if (_disposed || payload == null || length <= 0 || length > payload.Length)
             {
                 error = "Steam P2P worker is not available";
                 return false;
@@ -268,7 +273,7 @@ namespace DeadCellsMultiplayerMod
                 SteamId = steamId,
                 Channel = channel,
                 SendType = sendType.ToString(),
-                Payload = Convert.ToBase64String(payload)
+                Payload = Convert.ToBase64String(payload, 0, length)
             };
 
             return TryWriteCommand(command, out error);
@@ -425,8 +430,7 @@ namespace DeadCellsMultiplayerMod
                             continue;
                         }
 
-                        var payload = Encoding.UTF8.GetString(bytes);
-                        _packets.Enqueue(new SteamP2PWorkerPacket(evt.SteamId, evt.Channel, payload));
+                        _packets.Enqueue(new SteamP2PWorkerPacket(evt.SteamId, evt.Channel, bytes));
                         continue;
                     }
 

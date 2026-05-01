@@ -1,7 +1,6 @@
 using System.Net;
-using System.Net.Sockets;
-using System.Text;
 using DeadCellsMultiplayerMod;
+using DeadCellsMultiplayerMod.Network;
 using DeadCellsMultiplayerMod.Interaction;
 using Serilog;
 using Steamworks;
@@ -9,68 +8,24 @@ using Steamworks;
 public enum NetRole { None, Host, Client }
 public enum RemoteAttackAction { Attack, Interrupt }
 
-public sealed partial class NetNode : IDisposable
+public sealed partial class NetNode : IDisposable, INetworkPacketHandler
 {
     private readonly ILogger _log;
     private readonly NetRole _role;
 
     private sealed class ClientConnection : IDisposable
     {
-        public TcpClient Client { get; }
-        public NetworkStream Stream { get; }
-        public SemaphoreSlim SendLock { get; } = new(1, 1);
+        public int PeerId { get; }
         public int AssignedId { get; }
-        public EndPoint? RemoteEndPoint => Client.Client?.RemoteEndPoint;
 
-        public ClientConnection(TcpClient client, int assignedId)
+        public ClientConnection(int peerId, int assignedId)
         {
-            Client = client;
-            Stream = client.GetStream();
+            PeerId = peerId;
             AssignedId = assignedId;
         }
 
         public void Dispose()
         {
-            try { Stream.Close(); } catch { }
-            try { Client.Close(); } catch { }
-            try { SendLock.Dispose(); } catch { }
-        }
-    }
-
-    private sealed class SteamClientConnection : IDisposable
-    {
-        public CSteamID SteamId { get; }
-        public SemaphoreSlim SendLock { get; } = new(1, 1);
-        public int AssignedId { get; }
-        private readonly object _initialStateSync = new();
-        private DateTime _lastInitialStateSentUtc = DateTime.MinValue;
-
-        public SteamClientConnection(CSteamID steamId, int assignedId)
-        {
-            SteamId = steamId;
-            AssignedId = assignedId;
-        }
-
-        public bool TryReserveInitialStateSend(TimeSpan minInterval, bool force = false)
-        {
-            var now = DateTime.UtcNow;
-            lock (_initialStateSync)
-            {
-                if (!force &&
-                    _lastInitialStateSentUtc != DateTime.MinValue &&
-                    now - _lastInitialStateSentUtc < minInterval)
-                {
-                    return false;
-                }
-
-                _lastInitialStateSentUtc = now;
-                return true;
-            }
-        }
-
-        public void Dispose()
-        {
-            try { SendLock.Dispose(); } catch { }
         }
     }
 
@@ -504,17 +459,9 @@ public sealed partial class NetNode : IDisposable
         }
     }
 
-    private TcpListener? _listener;   // host
-    private TcpClient? _client;     // client
-    private NetworkStream? _stream;
-    private Task? _steamTransportTask;
     private readonly bool _useSteamTransport;
     private readonly CSteamID _steamHostId;
-    private SteamP2PWorkerBridge? _steamBridge;
-    private const int SteamP2PChannelClientToHost = 0;
-    private const int SteamP2PChannelHostToClient = 1;
-    private const uint SteamMaxPacketSizeBytes = 16u * 1024u * 1024u;
-    private const int SteamMinReceiveBufferBytes = 64 * 1024;
+    private SteamNetworkService? _steamNetwork;
     private static int _connectedClientCount;
 
     private int ID;
@@ -548,9 +495,9 @@ public sealed partial class NetNode : IDisposable
     }
 
     private readonly object _clientsLock = new();
+    private readonly object _binaryPeerLock = new();
     private readonly Dictionary<int, ClientConnection> _clients = new();
-    private readonly Dictionary<int, SteamClientConnection> _steamClients = new();
-    private readonly Dictionary<ulong, int> _steamClientIdsBySteam = new();
+    private readonly Dictionary<int, int> _binaryPeerUserIds = new();
     private readonly Dictionary<int, RemoteState> _remotes = new();
     private List<RemoteAttack> _pendingAttacks = new();
     private List<RemoteChatMessage> _pendingChatMessages = new();
@@ -581,15 +528,11 @@ public sealed partial class NetNode : IDisposable
     private readonly IPEndPoint _destEp;   // client connect
 
     private CancellationTokenSource? _cts;
-    private Task? _acceptTask;
-    private Task? _recvTask;
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private INetworkService? _binaryNetwork;
+    private readonly PacketManager _packetManager = new();
+    private readonly OutboundQueue _outboundQueue = new();
+    private readonly NetworkDiagnostics _networkDiagnostics = new();
     private bool _disposed;
-    private long _lastSteamPacketReceivedTicks;
-    private long _lastSteamKeepAliveSentTicks;
-    private const double SteamReceiveTimeoutSeconds = 18.0;
-    private const double SteamKeepAliveSeconds = 6.0;
-    private static readonly byte[] SteamKeepAliveBytes = Encoding.UTF8.GetBytes("PING\n");
 
     private readonly object _sync = new();
     private bool _hasRemote;
@@ -621,8 +564,6 @@ public sealed partial class NetNode : IDisposable
             {
                 lock (_clientsLock)
                 {
-                    if (_useSteamTransport)
-                        return _steamClients.Count > 0;
                     return _clients.Count > 0;
                 }
             }
@@ -630,23 +571,20 @@ public sealed partial class NetNode : IDisposable
         }
     }
     public bool IsAlive =>
-        _useSteamTransport
-            ? _cts != null && !_cts.IsCancellationRequested
-            : (_role == NetRole.Host && _listener != null) ||
-              (_role == NetRole.Client && _client != null);
+        _binaryNetwork != null && _binaryNetwork.IsRunning;
     public bool IsHost => _role == NetRole.Host;
 
     public IPEndPoint? ListenerEndpoint =>
         _useSteamTransport
             ? null
-            : _listener != null ? (IPEndPoint?)_listener.LocalEndpoint : null;
+            : _role == NetRole.Host ? _bindEp : null;
 
     public static NetNode CreateHost(ILogger log, IPEndPoint ep)  => new(log, NetRole.Host,  ep);
     public static NetNode CreateClient(ILogger log, IPEndPoint ep)=> new(log, NetRole.Client, ep);
     public static NetNode CreateSteamHost(ILogger log, int hostPort) => new(log, NetRole.Host, new CSteamID(0), hostPort);
     public static NetNode CreateSteamClient(ILogger log, ulong hostSteamId) => new(log, NetRole.Client, new CSteamID(hostSteamId), 0);
 
-    internal SteamConnect.HostLobbyResult? HostLobbyResult => _steamBridge?.HostLobbyResult;
+    internal SteamConnect.HostLobbyResult? HostLobbyResult => _steamNetwork?.HostLobbyResult;
     private NetNode(ILogger log, NetRole role, IPEndPoint ep)
     {
         _log  = log;
