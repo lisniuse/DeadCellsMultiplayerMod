@@ -801,12 +801,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 currentIdentityToken = s_levelIdentityToken;
                 identityReady = s_levelIdentityReady;
                 lastResetReason = s_lastResetReason;
-                if (IsHost(net))
-                {
-                    shouldSuppressEnteredLog =
-                        ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(self, candidateIdentityToken) ||
-                        ShouldIgnoreForeignNonAuthoritativeEntitiesPostCreateLocked(self, candidateIdentityToken);
-                }
+                shouldSuppressEnteredLog =
+                    ShouldIgnoreCommittedIdentityEntitiesPostCreateLocked(self, candidateIdentityToken) ||
+                    ShouldIgnoreForeignNonAuthoritativeEntitiesPostCreateLocked(self, candidateIdentityToken);
             }
 
             if (!shouldSuppressEnteredLog)
@@ -824,9 +821,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             orig(self);
-            if (IsHost(net) &&
-                (TryIgnoreCommittedIdentityEntitiesPostCreate(self) ||
-                 TryIgnoreForeignNonAuthoritativeEntitiesPostCreate(self)))
+            if (TryIgnoreCommittedIdentityEntitiesPostCreate(self) ||
+                TryIgnoreForeignNonAuthoritativeEntitiesPostCreate(self))
             {
                 return;
             }

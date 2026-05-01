@@ -429,13 +429,19 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             if (candidateTrackedCount <= 0)
             {
+                if (sameIdentity || baselineTrackedCount > 0)
+                {
+                    reason = sameIdentity ? "same_identity_empty" : "baseline_identity_empty";
+                    return false;
+                }
+
                 if (candidateEntityCount > 0)
                 {
-                    reason = sameIdentity ? "forced_recover_same_identity_empty" : "forced_recover_candidate_empty";
+                    reason = "forced_recover_candidate_empty";
                     return true;
                 }
 
-                reason = sameIdentity ? "same_identity_empty" : "candidate_empty";
+                reason = "candidate_empty";
                 return false;
             }
 
@@ -480,7 +486,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return existingIndex;
 
             var syncId = -1;
-            if (TryGetMobSyncId(mob, out syncId) && TryGetTrackedMobBySyncIdLocked(syncId, out var existingMob) && existingMob != null)
+            if (TryGetMobSyncId(mob, out syncId) &&
+                trackedMobBySyncId.TryGetValue(syncId, out var existingMob) &&
+                existingMob != null)
             {
                 existingIndex = FindTrackedMobIndexLocked(existingMob);
                 if (existingIndex < 0)

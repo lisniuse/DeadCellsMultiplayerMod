@@ -59,7 +59,6 @@ internal static class SyncMobIdRegistry
             var candidateMobCount = 0;
             var preservedIdCount = 0;
             var newlyAssignedIdCount = 0;
-            var skippedClientMobCount = 0;
             var sameIdentity = identityToken > 0 && currentIdentityToken > 0 && identityToken == currentIdentityToken;
             var previousAssignments = new Dictionary<Mob, int>(MobToId, ReferenceEqualityComparer.Instance);
             var previousIdToMob = new Dictionary<int, Mob>(IdToMob);
@@ -90,16 +89,6 @@ internal static class SyncMobIdRegistry
                     continue;
                 }
 
-                if (!isHostAuthoritative)
-                {
-                    Log.Warning(
-                        "[MobSync] client-side attempted syncId creation during rebuild identityToken={IdentityToken} mob={Mob}",
-                        currentIdentityToken,
-                        DescribeMob(mob));
-                    skippedClientMobCount++;
-                    continue;
-                }
-
                 var assignedId = AllocateNextSyncIdLocked();
                 if (previousIdToMob.TryGetValue(assignedId, out var previousMob) &&
                     previousMob != null &&
@@ -127,7 +116,7 @@ internal static class SyncMobIdRegistry
                 candidateMobCount,
                 preservedIdCount,
                 newlyAssignedIdCount,
-                skippedClientMobCount,
+                0,
                 IdToMob.Count);
         }
     }
