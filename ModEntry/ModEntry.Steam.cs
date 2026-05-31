@@ -23,6 +23,8 @@ namespace DeadCellsMultiplayerMod
 
         private static void TryDeferredSteamOverlayCallbackRegistration()
         {
+            if (s_steamOverlayDisabled)
+                return;
             if (!s_steamOverlayCallbackPending || (s_steamOverlayJoinCallback != null && s_steamRichPresenceJoinCallback != null))
                 return;
             if (s_steamOverlayCallbackRetryCount >= SteamOverlayCallbackMaxRetries)
@@ -33,22 +35,31 @@ namespace DeadCellsMultiplayerMod
             }
             s_steamOverlayCallbackRetryCount++;
             var shouldLogFailure = s_steamOverlayCallbackRetryCount == 1 || s_steamOverlayCallbackRetryCount % 60 == 0;
-            if (!TryEnsureSteamApiInitialized($"callback registration attempt {s_steamOverlayCallbackRetryCount}", shouldLogFailure))
+            try
             {
-                if (shouldLogFailure)
-                    Instance?.Logger.Debug("[NetMod] Steam overlay: SteamAPI.Init()=false (attempt {Attempt}). Trying callback without Init (game may have Steam).", s_steamOverlayCallbackRetryCount);
+                if (!TryEnsureSteamApiInitialized($"callback registration attempt {s_steamOverlayCallbackRetryCount}", shouldLogFailure))
+                {
+                    if (shouldLogFailure)
+                        Instance?.Logger.Debug("[NetMod] Steam overlay: SteamAPI.Init()=false (attempt {Attempt}). Trying callback without Init (game may have Steam).", s_steamOverlayCallbackRetryCount);
+                    s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
+                    s_steamRichPresenceJoinCallback = Callback<GameRichPresenceJoinRequested_t>.Create(OnGameRichPresenceJoinRequested);
+                    s_steamOverlayCallbackPending = false;
+                    StartSteamCallbackPumpTimer();
+                    Instance?.Logger.Information("[NetMod] Steam overlay join callbacks registered (game had Steam initialized)");
+                    return;
+                }
                 s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
                 s_steamRichPresenceJoinCallback = Callback<GameRichPresenceJoinRequested_t>.Create(OnGameRichPresenceJoinRequested);
                 s_steamOverlayCallbackPending = false;
                 StartSteamCallbackPumpTimer();
-                Instance?.Logger.Information("[NetMod] Steam overlay join callbacks registered (game had Steam initialized)");
-                return;
+                Instance?.Logger.Information("[NetMod] Steam overlay join callbacks registered (attempt {Attempt})", s_steamOverlayCallbackRetryCount);
             }
-            s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
-            s_steamRichPresenceJoinCallback = Callback<GameRichPresenceJoinRequested_t>.Create(OnGameRichPresenceJoinRequested);
-            s_steamOverlayCallbackPending = false;
-            StartSteamCallbackPumpTimer();
-            Instance?.Logger.Information("[NetMod] Steam overlay join callbacks registered (attempt {Attempt})", s_steamOverlayCallbackRetryCount);
+            catch
+            {
+                Instance?.Logger.Warning("[NetMod] Steam overlay callback registration failed. Disabling overlay features.");
+                s_steamOverlayDisabled = true;
+                s_steamOverlayCallbackPending = false;
+            }
         }
 
         private static void WriteOverlayJoinDiagnostic(string callbackType, string data)
@@ -72,9 +83,16 @@ namespace DeadCellsMultiplayerMod
 
         private static void TryRegisterSteamOverlayJoinCallback()
         {
-            if (s_steamOverlayJoinCallback != null)
+            if (s_steamOverlayDisabled || s_steamOverlayJoinCallback != null)
                 return;
-            s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
+            try
+            {
+                s_steamOverlayJoinCallback = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
+            }
+            catch
+            {
+                s_steamOverlayDisabled = true;
+            }
         }
 
         private static void OnGameLobbyJoinRequested(GameLobbyJoinRequested_t data)
@@ -142,7 +160,17 @@ namespace DeadCellsMultiplayerMod
 
         private static void TryRunSteamCallbacks()
         {
-            SteamAPI.RunCallbacks();
+            if (!s_steamApiReady)
+                return;
+            try
+            {
+                SteamAPI.RunCallbacks();
+            }
+            catch
+            {
+                Instance?.Logger.Warning("[NetMod][Steam] SteamAPI.RunCallbacks failed. Disabling overlay features.");
+                s_steamOverlayDisabled = true;
+            }
         }
 
         /// <summary>
@@ -199,9 +227,11 @@ namespace DeadCellsMultiplayerMod
             return false;
         }
 
+        private static bool s_steamOverlayDisabled;
+
         private static void TryPollSteamOverlayJoinFromLaunchData()
         {
-            if (!s_steamApiReady)
+            if (!s_steamApiReady || s_steamOverlayDisabled)
                 return;
 
             var nowTicks = Environment.TickCount64;
@@ -210,33 +240,50 @@ namespace DeadCellsMultiplayerMod
 
             s_nextSteamLaunchPollTicks = nowTicks + SteamOverlayLaunchPollIntervalMs;
 
-            string steamLaunchCommand = string.Empty;
-            var launchCommandLength = SteamApps.GetLaunchCommandLine(out steamLaunchCommand, 2048);
-            steamLaunchCommand = (steamLaunchCommand ?? string.Empty).Trim();
-            if (launchCommandLength > 0 &&
-                !string.IsNullOrWhiteSpace(steamLaunchCommand) &&
-                !string.Equals(steamLaunchCommand, s_lastSteamLaunchCommand, StringComparison.Ordinal))
+            try
             {
-                s_lastSteamLaunchCommand = steamLaunchCommand;
-                var lobbyId = TryParseLobbyIdFromConnectString(steamLaunchCommand);
-                if (lobbyId > 0UL)
+                string steamLaunchCommand = string.Empty;
+                var launchCommandLength = SteamApps.GetLaunchCommandLine(out steamLaunchCommand, 2048);
+                steamLaunchCommand = (steamLaunchCommand ?? string.Empty).Trim();
+                if (launchCommandLength > 0 &&
+                    !string.IsNullOrWhiteSpace(steamLaunchCommand) &&
+                    !string.Equals(steamLaunchCommand, s_lastSteamLaunchCommand, StringComparison.Ordinal))
                 {
-                    Instance?.Logger.Information("[NetMod][Steam] Detected overlay join from Steam launch command: {Command}", steamLaunchCommand);
-                    EnqueueAndProcessOverlayJoin(lobbyId, "SteamApps.GetLaunchCommandLine");
-                    return;
+                    s_lastSteamLaunchCommand = steamLaunchCommand;
+                    var lobbyId = TryParseLobbyIdFromConnectString(steamLaunchCommand);
+                    if (lobbyId > 0UL)
+                    {
+                        Instance?.Logger.Information("[NetMod][Steam] Detected overlay join from Steam launch command: {Command}", steamLaunchCommand);
+                        EnqueueAndProcessOverlayJoin(lobbyId, "SteamApps.GetLaunchCommandLine");
+                        return;
+                    }
                 }
             }
-
-            var connectLobby = (SteamApps.GetLaunchQueryParam("connect_lobby") ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(connectLobby) ||
-                string.Equals(connectLobby, s_lastSteamLaunchConnectLobbyParam, StringComparison.Ordinal))
-                return;
-
-            s_lastSteamLaunchConnectLobbyParam = connectLobby;
-            if (ulong.TryParse(connectLobby, out var lobbyId2) && lobbyId2 > 0UL)
+            catch
             {
-                Instance?.Logger.Information("[NetMod][Steam] Detected overlay join from Steam launch query param connect_lobby={LobbyId}", lobbyId2);
-                EnqueueAndProcessOverlayJoin(lobbyId2, "SteamApps.GetLaunchQueryParam");
+                Instance?.Logger.Warning("[NetMod][Steam] SteamApps.GetLaunchCommandLine failed. Disabling overlay join polling.");
+                s_steamOverlayDisabled = true;
+                return;
+            }
+
+            try
+            {
+                var connectLobby = (SteamApps.GetLaunchQueryParam("connect_lobby") ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(connectLobby) ||
+                    string.Equals(connectLobby, s_lastSteamLaunchConnectLobbyParam, StringComparison.Ordinal))
+                    return;
+
+                s_lastSteamLaunchConnectLobbyParam = connectLobby;
+                if (ulong.TryParse(connectLobby, out var lobbyId2) && lobbyId2 > 0UL)
+                {
+                    Instance?.Logger.Information("[NetMod][Steam] Detected overlay join from Steam launch query param connect_lobby={LobbyId}", lobbyId2);
+                    EnqueueAndProcessOverlayJoin(lobbyId2, "SteamApps.GetLaunchQueryParam");
+                }
+            }
+            catch
+            {
+                Instance?.Logger.Warning("[NetMod][Steam] SteamApps.GetLaunchQueryParam failed. Disabling overlay join polling.");
+                s_steamOverlayDisabled = true;
             }
         }
 
@@ -249,7 +296,11 @@ namespace DeadCellsMultiplayerMod
             if (s_steamCallbackPumpTimer != null)
                 return;
             s_steamCallbackPumpTimer = new Timer(
-                _ => SteamAPI.RunCallbacks(),
+                _ =>
+                {
+                    if (s_steamOverlayDisabled) return;
+                    try { SteamAPI.RunCallbacks(); } catch { s_steamOverlayDisabled = true; }
+                },
                 null,
                 TimeSpan.FromMilliseconds(100),
                 TimeSpan.FromMilliseconds(100));
