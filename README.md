@@ -62,16 +62,18 @@ If you are using a **non-Steam version** of Dead Cells:
 1. Download the latest release of **DCCM** from the official repository:
    👉 [https://github.com/dead-cells-core-modding/core](https://github.com/dead-cells-core-modding/core)
 
-2. Open your Dead Cells game directory.
+2. Extract the DCCM files to your Dead Cells game directory (the `coremod` folder will be created).
 
-3. Create a folder named `coremod`.
+3. Rename `steam.hdll` to `steam.hdll.bak` in the game root directory (this triggers Goldberg emulator auto-detection).
 
-4. Extract the downloaded DCCM files into the `coremod` folder.
+4. Open `coremod\config\modcore.json` and ensure `EnableGoldberg` is set to `true`:
+   ```json
+   {
+     "EnableGoldberg": true
+   }
+   ```
 
-5. Open modcore.json that's in `your_game_path\Dead Cells\coremod\config\modcore.json`
-
-6. Ensure that EnableGoldberg is true! 
-<img width="351" height="163" alt="image" src="https://github.com/user-attachments/assets/8886c291-e0fc-45fe-80e8-4a40550b61aa" />
+5. Install [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/current/runtime) (Desktop Runtime, Windows x64) if not already installed.
 
 
 ---
@@ -86,12 +88,12 @@ If you are using the **Steam version** of the game:
 
 ---
 
-### 🔹 Non-Steam version(DCCM doesn't support non-steam play now)
+### 🔹 Non-Steam version (GOG / other store versions)
 
 If you are using a **non-Steam version** of Dead Cells:
 
 1. Navigate to your **DCCM directory**
-2. Create a folder named `mods` (if it doesn’t exist)
+2. Create a folder named `mods` (if it doesn't exist)
 3. Extract the **DeadCellsMultiplayerMod** folder into the `mods` directory
 
 Example:
@@ -102,11 +104,36 @@ Your game path/
         └── DeadCellsMultiplayerMod/
 ```
 
+#### ⚙️ Required configuration for non-Steam versions
+
+1. **Rename `steam.hdll`** in the game root directory to `steam.hdll.bak` — this triggers DCCM to load the Goldberg Steam emulator instead of the real Steam API.
+
+2. **Enable Goldberg** in `coremod\config\modcore.json`:
+   ```json
+   "EnableGoldberg": true
+   ```
+
+3. **Launch the game** via `coremod\core\host\startup\DeadCellsModding.exe` directly (not through SteamStartShell).
+
+> ⚠️ **Limitations on non-Steam versions:**
+> - **TCP/LAN multiplayer** works normally (this is the default mode)
+> - **Steam P2P mode** is not available (requires a real Steam client with Steam Networking)
+> - **Steam overlay "Join Game"** is not available
+>
+> For online play with friends, use virtual LAN software (Hamachi, Radmin VPN, ZeroTier) and connect via IP address.
+Your game path/
+ └──coremod/
+    └── mods/
+        └── DeadCellsMultiplayerMod/
+```
+
 ---
 
 ### 3️⃣ Run the game via DCCM
 
-Start **Dead Cells** using **DCCM**.  
+**Steam version:** Start Dead Cells via Steam as usual. DCCM loads automatically.
+
+**Non-Steam version:** Launch directly via `coremod\core\host\startup\DeadCellsModding.exe`.  
 On the first launch, required configuration files will be generated automatically.
 
 ---

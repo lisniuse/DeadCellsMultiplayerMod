@@ -667,6 +667,36 @@ namespace DeadCellsMultiplayerMod
         {
             var bootstrapResponsePath = Environment.GetEnvironmentVariable(SteamP2PWorkerEnvironment.EnvBootstrapResponsePath);
 
+            // Init Steam early so we can report failure before entering the main try block.
+            // On non-Steam environments (Goldberg, Rune, etc.) these native calls may
+            // cause access violations that bypass managed exception handlers.
+            try
+            {
+                SteamConnect.PrepareSteamNativePathForRuntime();
+                if (SteamAPI.RestartAppIfNecessary(new AppId_t(DeadCellsAppId)))
+                {
+                    if (!string.IsNullOrWhiteSpace(bootstrapResponsePath))
+                        TryWriteBootstrapResponse(bootstrapResponsePath, false, "Steam requested app restart");
+                    Environment.Exit(1);
+                    return;
+                }
+
+                if (!SteamAPI.Init())
+                {
+                    if (!string.IsNullOrWhiteSpace(bootstrapResponsePath))
+                        TryWriteBootstrapResponse(bootstrapResponsePath, false, "Steam API init failed in Steam P2P worker");
+                    Environment.Exit(1);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!string.IsNullOrWhiteSpace(bootstrapResponsePath))
+                    TryWriteBootstrapResponse(bootstrapResponsePath, false, $"Steam init error: {ex.Message}");
+                Environment.Exit(1);
+                return;
+            }
+
             try
             {
                 var roleText = Environment.GetEnvironmentVariable(SteamP2PWorkerEnvironment.EnvRole) ?? string.Empty;
@@ -679,13 +709,6 @@ namespace DeadCellsMultiplayerMod
 
                 if (!ulong.TryParse(hostSteamIdRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var hostSteamId))
                     hostSteamId = 0UL;
-
-                SteamConnect.PrepareSteamNativePathForRuntime();
-                if (SteamAPI.RestartAppIfNecessary(new AppId_t(DeadCellsAppId)))
-                    throw new InvalidOperationException("Steam requested app restart");
-
-                if (!SteamAPI.Init())
-                    throw new InvalidOperationException("Steam API init failed in Steam P2P worker");
 
                 var sessionFailQueue = new ConcurrentQueue<WorkerEvent>();
                 using var p2pFailCallback = Callback<P2PSessionConnectFail_t>.Create(data =>
