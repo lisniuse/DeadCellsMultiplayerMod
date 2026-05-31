@@ -458,7 +458,6 @@ namespace DeadCellsMultiplayerMod
             EnqueueMainThread(() =>
             {
                 ModEntry.ResetDownedPlayersForRestart();
-                DismissGameOverScreen();
 
                 var game = ModEntry.Instance?.game;
                 if (game?.user == null)
@@ -493,7 +492,6 @@ namespace DeadCellsMultiplayerMod
             EnqueueMainThread(() =>
             {
                 ModEntry.ResetDownedPlayersForRestart();
-                DismissGameOverScreen();
 
                 var game = ModEntry.Instance?.game;
                 if (game?.user == null)
@@ -542,23 +540,6 @@ namespace DeadCellsMultiplayerMod
 
             seed = 0;
             return false;
-        }
-
-        private static void DismissGameOverScreen()
-        {
-            try
-            {
-                var go = dc.ui.GameOver.Class.ME;
-                if (go != null)
-                {
-                    try { go.remove(); } catch { }
-                    try { go.destroy(); } catch { }
-                    try { go.dispose(); } catch { }
-                }
-            }
-            catch
-            {
-            }
         }
 
         public static void ReceiveLevelDesc(string json)

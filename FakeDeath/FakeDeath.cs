@@ -1460,20 +1460,6 @@ namespace DeadCellsMultiplayerMod
             _allDownedGameOverShown = false;
             _allDownedRestartQueued = false;
             _allDownedRestartAtTicks = 0;
-
-            try
-            {
-                var gameOver = GameOver.Class.ME;
-                if (gameOver != null)
-                {
-                    try { gameOver.remove(); } catch { }
-                    try { gameOver.destroy(); } catch { }
-                    try { gameOver.dispose(); } catch { }
-                }
-            }
-            catch
-            {
-            }
         }
 
         private bool TryUpdateDownedPositionFromCorpse(double corpseX, double corpseY)
