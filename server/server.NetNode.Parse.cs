@@ -893,15 +893,21 @@ public sealed partial class NetNode
             return false;
 
         var parts = payload.Split('|');
-        if (parts.Length < 2)
+        if (parts.Length < 3)
             return false;
 
-        if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+        var action = parts[0]?.Trim() ?? string.Empty;
+        if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
             return false;
-        if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+        if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
             return false;
 
-        ev = new InterBridgeLeverEvent(x, y);
+        var cooldownKey = parts.Length > 3 ? (parts[3] ?? string.Empty) : string.Empty;
+        var cooldownIdx = 0;
+        if (parts.Length > 4)
+            int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out cooldownIdx);
+
+        ev = new InterBridgeLeverEvent(x, y, action, cooldownKey, cooldownIdx);
         return true;
     }
 

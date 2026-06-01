@@ -138,10 +138,16 @@ public readonly struct InterBridgeLeverEvent
 {
     public readonly double X;
     public readonly double Y;
+    public readonly string Action;
+    public readonly string CooldownKey;
+    public readonly int CooldownIdx;
 
-    public InterBridgeLeverEvent(double x, double y)
+    public InterBridgeLeverEvent(double x, double y, string action, string cooldownKey = "", int cooldownIdx = 0)
     {
         X = x;
         Y = y;
+        Action = action ?? string.Empty;
+        CooldownKey = cooldownKey ?? string.Empty;
+        CooldownIdx = cooldownIdx;
     }
 }

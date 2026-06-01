@@ -916,7 +916,7 @@ public sealed partial class NetNode
                 }
 
                 if (_role == NetRole.Host && senderId.HasValue)
-                    forwardLine = $"INTERBRIDGE|{ev.X.ToString(CultureInfo.InvariantCulture)}|{ev.Y.ToString(CultureInfo.InvariantCulture)}\n";
+                    forwardLine = $"INTERBRIDGE|{ev.Action}|{ev.X.ToString(CultureInfo.InvariantCulture)}|{ev.Y.ToString(CultureInfo.InvariantCulture)}|{ev.CooldownKey}|{ev.CooldownIdx}\n";
             }
             return true;
         }

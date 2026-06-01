@@ -8,6 +8,7 @@ using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using HaxeProxy.Runtime;
 using ModCore.Events;
 using ModCore.Events.Interfaces.Game.Hero;
+using ModCore.Utilities;
 using Serilog;
 using System.Reflection;
 
@@ -79,6 +80,7 @@ public class InteractionSync :
         Hook_SwitchBossRune.updateCells += Hook_SwitchBossRune_updateCells;
         Hook_BridgeLever.canBeActivated += Hook_BridgeLever_canBeActivated;
         Hook_BridgeLever.onActivate += Hook_BridgeLever_onActivate;
+        Hook_PurpleBridge.onCooldownEnd += Hook_PurpleBridge_onCooldownEnd;
     }
 
 
@@ -170,12 +172,34 @@ public class InteractionSync :
 
         try
         {
-            var (x, y) = GetEntityPixelPos(self);
-            net.SendInterBridgeLever(x, y);
+            var bridge = self.bridge;
+            if (bridge?.spr == null)
+                return;
+            var (x, y) = GetEntityPixelPos(bridge);
+            net.SendInterBridgeLever(x, y, "extend");
         }
         catch (Exception ex)
         {
             _log.Warning(ex, "[InteractionSync] Failed to send bridge lever activate");
+        }
+    }
+
+    private void Hook_PurpleBridge_onCooldownEnd(Hook_PurpleBridge.orig_onCooldownEnd orig, PurpleBridge self, dc.String k, int idx)
+    {
+        orig(self, k, idx);
+
+        var net = GameMenu.NetRef;
+        if (!IsNetReadyForSend(net) || !net!.IsHost)
+            return;
+
+        try
+        {
+            var (x, y) = GetEntityPixelPos(self);
+            net.SendInterBridgeLever(x, y, "retract", k?.ToString() ?? string.Empty, idx);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[InteractionSync] Failed to send bridge cooldown end");
         }
     }
 
@@ -620,23 +644,24 @@ public class InteractionSync :
         _applyingRemoteBridgeLeverEvents = true;
         try
         {
-            var localHero = ModEntry.me;
             foreach (var ev in events)
             {
-                var lever = FindBridgeLeverByPos(level, ev.X, ev.Y);
-                if (lever == null)
+                var bridge = FindPurpleBridgeByPos(level, ev.X, ev.Y);
+                if (bridge == null)
                 {
-                    _log.Warning("[InteractionSync] No BridgeLever found at x={X} y={Y}", ev.X, ev.Y);
+                    _log.Warning("[InteractionSync] No PurpleBridge found at x={X} y={Y} for action={Action}", ev.X, ev.Y, ev.Action);
                     continue;
                 }
                 try
                 {
-                    if (localHero != null)
-                        lever.onActivate(localHero, false);
+                    if (ev.Action == "retract")
+                        bridge.onCooldownEnd(ev.CooldownKey.AsHaxeString(), ev.CooldownIdx);
+                    else
+                        bridge.onDistantTrigger(bridge, ModEntry.me);
                 }
                 catch (Exception ex)
                 {
-                    _log.Warning(ex, "[InteractionSync] BridgeLever.onActivate failed x={X} y={Y}", ev.X, ev.Y);
+                    _log.Warning(ex, "[InteractionSync] PurpleBridge.{Action} failed x={X} y={Y}", ev.Action, ev.X, ev.Y);
                 }
             }
         }
@@ -646,9 +671,9 @@ public class InteractionSync :
         }
     }
 
-    private static BridgeLever? FindBridgeLeverByPos(Level level, double x, double y)
+    private static PurpleBridge? FindPurpleBridgeByPos(Level level, double x, double y)
     {
-        return FindInteractByPos<BridgeLever>(level, x, y, BridgeLeverPosTolerance);
+        return FindInteractByPos<PurpleBridge>(level, x, y, BridgeLeverPosTolerance);
     }
 
     private void ScanAndSyncBridgeInitialState()
@@ -661,24 +686,27 @@ public class InteractionSync :
         if (!IsNetReadyForSend(net))
             return;
 
-        // 记录已扫描的关卡引用；关卡变化时会再次扫描（修复此前一会话只扫一次、真正的桥关卡被跳过的问题）。
         _bridgeInitialStateSyncedLevel = level;
 
         try
         {
             for (var i = 0; i < level.entities.length; i++)
             {
-                var e = level.entities.getDyn(i) as BridgeLever;
-                if (e?.spr == null)
+                var lever = level.entities.getDyn(i) as BridgeLever;
+                if (lever?.spr == null)
                     continue;
 
                 try
                 {
-                    if (e.canBeActivated(ModEntry.me))
+                    if (lever.canBeActivated(ModEntry.me))
                         continue;
 
-                    var (x, y) = GetEntityPixelPos(e);
-                    net!.SendInterBridgeLever(x, y);
+                    var bridge = lever.bridge;
+                    if (bridge?.spr == null)
+                        continue;
+
+                    var (x, y) = GetEntityPixelPos(bridge);
+                    net!.SendInterBridgeLever(x, y, "extend");
                 }
                 catch { }
             }

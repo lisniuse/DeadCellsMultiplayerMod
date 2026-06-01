@@ -715,14 +715,14 @@ public sealed partial class NetNode
         SendRaw($"INTERPORTAL|{action}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
     }
 
-    public void SendInterBridgeLever(double x, double y)
+    public void SendInterBridgeLever(double x, double y, string action = "extend", string cooldownKey = "", int cooldownIdx = 0)
     {
         if (!HasAnyConnection())
             return;
         if (ID <= 0)
             return;
 
-        SendRaw($"INTERBRIDGE|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
+        SendRaw($"INTERBRIDGE|{action}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{cooldownKey}|{cooldownIdx}");
     }
 
     private void SendRaw(string payload)
