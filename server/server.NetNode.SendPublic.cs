@@ -103,6 +103,22 @@ public sealed partial class NetNode
         // _log.Information("[NetNode] Sent boss rune {BossRune}", bossRune);
     }
 
+    public void SendPermanentItems(string itemsList)
+    {
+        if (_role == NetRole.Host)
+        {
+            lock (_hostCacheSync)
+            {
+                _cachedHostPermanentItems = itemsList;
+            }
+        }
+
+        if (!HasAnyConnection())
+            return;
+
+        SendRaw("PERMRUNES|" + itemsList);
+    }
+
     public void SendLevelDesc(string json)
     {
         var safeJson = (json ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);

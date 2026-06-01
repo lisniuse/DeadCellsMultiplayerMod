@@ -376,6 +376,8 @@ public sealed partial class NetNode
             cachedHeroHeadSkin = _cachedHostHeroHeadSkin;
         }
 
+        var cachedPermanentItems = _cachedHostPermanentItems;
+
         if (cachedSerializerSeq.HasValue && cachedSerializerUid.HasValue)
             await SendLineToSteamClientSafe(connection, $"HXSYNC|{cachedSerializerSeq.Value}|{cachedSerializerUid.Value}\n").ConfigureAwait(false);
         if (cachedBossRune.HasValue)
@@ -393,6 +395,8 @@ public sealed partial class NetNode
         if (!string.IsNullOrWhiteSpace(cachedHeroHeadSkin))
             await SendLineToSteamClientSafe(connection, BuildTaggedLine("HEAD", 1, cachedHeroHeadSkin)).ConfigureAwait(false);
         await SendKnownUsersToSteamClientSafe(connection).ConfigureAwait(false);
+        if (cachedPermanentItems != null)
+            await SendLineToSteamClientSafe(connection, $"PERMRUNES|{cachedPermanentItems}\n").ConfigureAwait(false);
         if (_role == NetRole.Host && TryBuildLocalHpLine(out var localHpLine))
             await SendLineToSteamClientSafe(connection, localHpLine).ConfigureAwait(false);
     }

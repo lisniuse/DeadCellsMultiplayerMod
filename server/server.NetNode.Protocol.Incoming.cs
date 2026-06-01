@@ -144,6 +144,13 @@ public sealed partial class NetNode
             return true;
         }
 
+        if (line.StartsWith("PERMRUNES|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["PERMRUNES|".Length..];
+            GameDataSync.ReceivePermanentItems(payload);
+            return true;
+        }
+
         if (line.StartsWith("BOSSRUNE_UPDATE_CELLS|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["BOSSRUNE_UPDATE_CELLS|".Length..].Trim();

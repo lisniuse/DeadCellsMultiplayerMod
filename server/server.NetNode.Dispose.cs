@@ -68,6 +68,7 @@ public sealed partial class NetNode
             _cachedHostHeroHeadSkin = null;
             _cachedHostLevelGraphPayload = null;
             _cachedHostLevelGraphsByLevelId.Clear();
+            _cachedHostPermanentItems = null;
         }
         lock (_sync)
         {

@@ -167,6 +167,10 @@ public sealed partial class NetNode
                         await SendLineToClientSafe(connection, $"LGRAPH|{cachedLevelGraphPayload}\n").ConfigureAwait(false);
                 }
 
+                var cachedPermanentItems = _cachedHostPermanentItems;
+                if (cachedPermanentItems != null)
+                    await SendLineToClientSafe(connection, $"PERMRUNES|{cachedPermanentItems}\n").ConfigureAwait(false);
+
                 GameMenu.EnqueueMainThread(() =>
                 {
                     GameMenu.NetRef = this;

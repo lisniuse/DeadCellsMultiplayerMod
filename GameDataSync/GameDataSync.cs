@@ -87,8 +87,9 @@ namespace DeadCellsMultiplayerMod
         private static bool _origItemMetaWasNull;
         private static bool _origBossRuneCaptured;
         private static int _origBossRune;
-        private static bool _hasRemoteBossRune;
-        private static bool _suppressDeathBroadcast;
+    private static bool _hasRemoteBossRune;
+    private static string? _remotePermanentItems;
+    private static bool _suppressDeathBroadcast;
         private static readonly object _levelSeedLock = new();
         private static string? _remoteLevelId;
         private static double? _remoteLevelSeed;
@@ -149,6 +150,7 @@ namespace DeadCellsMultiplayerMod
                 else
                     Seed = lvl;
                 SendBossRune(self, net);
+                SendPermanentItems(self, net);
                 SendSerializerSync(net);
                 if (shouldSynchronizeSeed)
                     net.SendSeed(Seed);
@@ -171,6 +173,8 @@ namespace DeadCellsMultiplayerMod
                 {
                     _log?.Warning("[NetMod] Remote boss rune not received yet");
                 }
+
+                ApplyStoredPermanentItems();
 
                 CaptureOriginalUserData(self, allowReplaceWhenBetter: true);
             }
@@ -682,6 +686,84 @@ namespace DeadCellsMultiplayerMod
                 }
             });
 
+        }
+
+        public static void SendPermanentItems(User self, NetNode? net)
+        {
+            if (self?.itemMeta?.permanentItems == null)
+                return;
+
+            if (net == null || !net.IsAlive)
+                return;
+
+            try
+            {
+                var items = self.itemMeta.permanentItems;
+                var ids = new List<string>();
+                for (int i = 0; i < items.length; i++)
+                {
+                    var id = items.getDyn(i)?.ToString();
+                    if (!string.IsNullOrWhiteSpace(id))
+                        ids.Add(id);
+                }
+                if (ids.Count > 0)
+                    net.SendPermanentItems(string.Join(",", ids));
+            }
+            catch (Exception ex)
+            {
+                _log?.Warning(ex, "[GameDataSync] Failed to send permanent items");
+            }
+        }
+
+        public static void ReceivePermanentItems(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload))
+                return;
+
+            var net = GameMenu.NetRef;
+            if (net != null && net.IsHost)
+                return;
+
+            _remotePermanentItems = payload;
+
+            GameMenu.EnqueueMainThread(() =>
+            {
+                try
+                {
+                    ApplyStoredPermanentItems();
+                }
+                catch (Exception ex)
+                {
+                    _log?.Warning(ex, "[GameDataSync] Failed to apply permanent items");
+                }
+            });
+        }
+
+        private static void ApplyStoredPermanentItems(User? user = null)
+        {
+            var payload = _remotePermanentItems;
+            if (string.IsNullOrWhiteSpace(payload))
+                return;
+
+            user ??= dc.Main.Class.ME?.user;
+            if (user?.itemMeta == null)
+                return;
+
+            var parts = payload.Split(',');
+            foreach (var part in parts)
+            {
+                var id = part.Trim();
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+
+                try
+                {
+                    var runeKey = id.AsHaxeString();
+                    if (!user.itemMeta.hasPermanentItem(runeKey))
+                        user.itemMeta.addPermanentItem(runeKey);
+                }
+                catch { }
+            }
         }
 
         public static bool TryGetHostBossRune(out int bossRune)

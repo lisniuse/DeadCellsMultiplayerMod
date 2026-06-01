@@ -588,6 +588,7 @@ public sealed partial class NetNode : IDisposable
     private string? _cachedHostHeroHeadSkin;
     private string? _cachedHostLevelGraphPayload;
     private readonly Dictionary<string, string> _cachedHostLevelGraphsByLevelId = new(StringComparer.Ordinal);
+    private string? _cachedHostPermanentItems;
 
     public bool HasRemote
     {
