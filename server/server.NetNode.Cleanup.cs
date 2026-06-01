@@ -34,6 +34,7 @@ public sealed partial class NetNode
             _pendingInterBreakableGroundEvents.Clear();
             _pendingBossRuneUpdateCells.Clear();
             _pendingInterPortalEvents.Clear();
+            _pendingInterBridgeLeverEvents.Clear();
         }
         if (_useSteamTransport)
         {

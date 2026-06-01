@@ -699,6 +699,16 @@ public sealed partial class NetNode
         SendRaw($"INTERPORTAL|{action}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
     }
 
+    public void SendInterBridgeLever(double x, double y)
+    {
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+
+        SendRaw($"INTERBRIDGE|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
+    }
+
     private void SendRaw(string payload)
     {
         var line = payload.EndsWith('\n') ? payload : payload + "\n";

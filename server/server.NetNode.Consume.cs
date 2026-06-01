@@ -437,6 +437,22 @@ public sealed partial class NetNode
         }
     }
 
+    public bool TryConsumeInterBridgeLeverEvents(out List<InterBridgeLeverEvent> events)
+    {
+        lock (_sync)
+        {
+            if (_pendingInterBridgeLeverEvents.Count == 0)
+            {
+                events = new List<InterBridgeLeverEvent>();
+                return false;
+            }
+
+            events = new List<InterBridgeLeverEvent>(_pendingInterBridgeLeverEvents);
+            _pendingInterBridgeLeverEvents.Clear();
+            return events.Count > 0;
+        }
+    }
+
     public bool TryGetRemoteHpSnapshots(out List<RemoteHpSnapshot> snapshot)
     {
         lock (_sync)

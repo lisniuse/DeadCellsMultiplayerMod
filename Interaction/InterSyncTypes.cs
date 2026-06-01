@@ -133,3 +133,15 @@ public readonly struct InterPortalEvent
         Action = action ?? string.Empty;
     }
 }
+
+public readonly struct InterBridgeLeverEvent
+{
+    public readonly double X;
+    public readonly double Y;
+
+    public InterBridgeLeverEvent(double x, double y)
+    {
+        X = x;
+        Y = y;
+    }
+}

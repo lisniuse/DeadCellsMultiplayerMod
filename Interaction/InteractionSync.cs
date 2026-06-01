@@ -27,6 +27,7 @@ public class InteractionSync :
     private const double SwitchBossRunePosTolerance = 32.0;
     private const double ElevatorPosTolerance = 48.0;
     private const double PortalPosTolerance = 48.0;
+    private const double BridgeLeverPosTolerance = 32.0;
     private const double TileSizePx = 24.0;
     private const double DoorProximityRadiusPx = 100.0;
     private static readonly double DoorProximityRadiusSq = DoorProximityRadiusPx * DoorProximityRadiusPx;
@@ -43,8 +44,11 @@ public class InteractionSync :
     private bool _applyingRemoteBreakableGroundEvents;
     private bool _applyingRemotePortalEvents;
     private bool _applyingRemoteElevatorEvents;
+    private bool _applyingRemoteBridgeLeverEvents;
     /// <summary>Throttle elevator INTERELEV sends — onStep can fire every frame while riding.</summary>
     private readonly Dictionary<Elevator, long> _elevatorLastInterSendTickMs = new();
+    /// <summary>已完成桥杠杆初始状态扫描的关卡引用；关卡变化时重新扫描（每关一次）。</summary>
+    private Level? _bridgeInitialStateSyncedLevel;
 
     public InteractionSync(ModEntry entry)
     {
@@ -73,6 +77,8 @@ public class InteractionSync :
         Hook_SwitchBossRune.canBeActivated += Hook_SwitchBossRune_canBeActivated;
         Hook_SwitchBossRune.close += Hook_SwitchBossRune_close;
         Hook_SwitchBossRune.updateCells += Hook_SwitchBossRune_updateCells;
+        Hook_BridgeLever.canBeActivated += Hook_BridgeLever_canBeActivated;
+        Hook_BridgeLever.onActivate += Hook_BridgeLever_onActivate;
     }
 
 
@@ -143,6 +149,33 @@ public class InteractionSync :
         catch (Exception ex)
         {
             _log.Warning(ex, "[InteractionSync] Failed to send boss rune updateCells");
+        }
+    }
+
+    private bool Hook_BridgeLever_canBeActivated(Hook_BridgeLever.orig_canBeActivated orig, BridgeLever self, Hero by)
+    {
+        var net = GameMenu.NetRef;
+        if (net != null && !net.IsHost)
+            return false;
+        return orig(self, by);
+    }
+
+    private void Hook_BridgeLever_onActivate(Hook_BridgeLever.orig_onActivate orig, BridgeLever self, Hero by, bool lp)
+    {
+        orig(self, by, lp);
+
+        var net = GameMenu.NetRef;
+        if (!IsNetReadyForSend(net) || !net!.IsHost)
+            return;
+
+        try
+        {
+            var (x, y) = GetEntityPixelPos(self);
+            net.SendInterBridgeLever(x, y);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[InteractionSync] Failed to send bridge lever activate");
         }
     }
 
@@ -439,6 +472,14 @@ public class InteractionSync :
         {
             ApplyRemoteBossRuneUpdateCells(updateCellsEvents);
         }
+
+        if (net.TryConsumeInterBridgeLeverEvents(out var bridgeLeverEvents))
+        {
+            ApplyRemoteBridgeLeverEvents(bridgeLeverEvents);
+        }
+
+        if (net.IsHost && !ReferenceEquals(ModEntry.me?._level, _bridgeInitialStateSyncedLevel))
+            ScanAndSyncBridgeInitialState();
     }
 
     private void CheckAndCloseDoorsWhenNoOneNearby()
@@ -566,6 +607,86 @@ public class InteractionSync :
     private static SwitchBossRune? FindSwitchBossRuneByPos(Level level, double x, double y)
     {
         return FindInteractByPos<SwitchBossRune>(level, x, y, SwitchBossRunePosTolerance);
+    }
+
+    private void ApplyRemoteBridgeLeverEvents(List<InterBridgeLeverEvent> events)
+    {
+        var level = ModEntry.me?._level;
+        if (level?.entities == null || events == null || events.Count == 0)
+            return;
+
+        if (_applyingRemoteBridgeLeverEvents)
+            return;
+        _applyingRemoteBridgeLeverEvents = true;
+        try
+        {
+            var localHero = ModEntry.me;
+            foreach (var ev in events)
+            {
+                var lever = FindBridgeLeverByPos(level, ev.X, ev.Y);
+                if (lever == null)
+                {
+                    _log.Warning("[InteractionSync] No BridgeLever found at x={X} y={Y}", ev.X, ev.Y);
+                    continue;
+                }
+                try
+                {
+                    if (localHero != null)
+                        lever.onActivate(localHero, false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "[InteractionSync] BridgeLever.onActivate failed x={X} y={Y}", ev.X, ev.Y);
+                }
+            }
+        }
+        finally
+        {
+            _applyingRemoteBridgeLeverEvents = false;
+        }
+    }
+
+    private static BridgeLever? FindBridgeLeverByPos(Level level, double x, double y)
+    {
+        return FindInteractByPos<BridgeLever>(level, x, y, BridgeLeverPosTolerance);
+    }
+
+    private void ScanAndSyncBridgeInitialState()
+    {
+        var level = ModEntry.me?._level;
+        if (level?.entities == null)
+            return;
+
+        var net = GameMenu.NetRef;
+        if (!IsNetReadyForSend(net))
+            return;
+
+        // 记录已扫描的关卡引用；关卡变化时会再次扫描（修复此前一会话只扫一次、真正的桥关卡被跳过的问题）。
+        _bridgeInitialStateSyncedLevel = level;
+
+        try
+        {
+            for (var i = 0; i < level.entities.length; i++)
+            {
+                var e = level.entities.getDyn(i) as BridgeLever;
+                if (e?.spr == null)
+                    continue;
+
+                try
+                {
+                    if (e.canBeActivated(ModEntry.me))
+                        continue;
+
+                    var (x, y) = GetEntityPixelPos(e);
+                    net!.SendInterBridgeLever(x, y);
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "[InteractionSync] ScanAndSyncBridgeInitialState failed");
+        }
     }
 
     private void ApplyRemoteDoorEvents(List<InterDoorEvent> events)

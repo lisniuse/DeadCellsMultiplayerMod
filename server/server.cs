@@ -552,6 +552,7 @@ public sealed partial class NetNode : IDisposable
     private readonly List<InterBreakableGroundEvent> _pendingInterBreakableGroundEvents = new();
     private readonly List<InterBossRuneUpdateCellsEvent> _pendingBossRuneUpdateCells = new();
     private readonly List<InterPortalEvent> _pendingInterPortalEvents = new();
+    private readonly List<InterBridgeLeverEvent> _pendingInterBridgeLeverEvents = new();
     private int _primaryRemoteId;
 
     private readonly IPEndPoint _bindEp;   // host bind

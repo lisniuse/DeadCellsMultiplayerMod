@@ -886,6 +886,25 @@ public sealed partial class NetNode
         return true;
     }
 
+    private static bool TryParseInterBridgePayload(string payload, out InterBridgeLeverEvent ev)
+    {
+        ev = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|');
+        if (parts.Length < 2)
+            return false;
+
+        if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            return false;
+        if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            return false;
+
+        ev = new InterBridgeLeverEvent(x, y);
+        return true;
+    }
+
     private static bool TryParsePositionLine(string line, int? senderId, out int remoteId, out double rx, out double ry, out int dir, out bool hasDir)
     {
         remoteId = 0;
