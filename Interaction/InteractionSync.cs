@@ -646,18 +646,22 @@ public class InteractionSync :
         {
             foreach (var ev in events)
             {
+                _log.Information("[BRIDGE-DIAG] apply begin action={Action} x={X} y={Y} key={Key} idx={Idx}", ev.Action, ev.X, ev.Y, ev.CooldownKey, ev.CooldownIdx);
                 var bridge = FindPurpleBridgeByPos(level, ev.X, ev.Y);
                 if (bridge == null)
                 {
                     _log.Warning("[InteractionSync] No PurpleBridge found at x={X} y={Y} for action={Action}", ev.X, ev.Y, ev.Action);
                     continue;
                 }
+                _log.Information("[BRIDGE-DIAG] found bridge sprNull={SprNull}; calling {Call}",
+                    bridge.spr == null, ev.Action == "retract" ? "onCooldownEnd" : "onDistantTrigger");
                 try
                 {
                     if (ev.Action == "retract")
                         bridge.onCooldownEnd(ev.CooldownKey.AsHaxeString(), ev.CooldownIdx);
                     else
                         bridge.onDistantTrigger(bridge, ModEntry.me);
+                    _log.Information("[BRIDGE-DIAG] apply done action={Action}", ev.Action);
                 }
                 catch (Exception ex)
                 {

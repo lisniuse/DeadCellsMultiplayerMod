@@ -330,6 +330,8 @@ namespace DeadCellsMultiplayerMod
         {
             Instance = this;
 
+            InstallGlobalCrashLogging();
+
             this.gds = new GameDataSync(Logger);
             InitializeOptionalModule(
                 DebugModuleId.MultiplayerModLang,
@@ -388,6 +390,56 @@ namespace DeadCellsMultiplayerMod
 
                 Logger.Information("[NetMod][Debug] Module disabled by settings: {Module}", moduleName);
             }
+        }
+
+        private static bool s_crashLoggingInstalled;
+
+        /// <summary>
+        /// 全局崩溃捕获：任何冒泡到顶、即将让进程退出的未处理托管异常（含未被 catch 的 Hashlink 异常），
+        /// 在进程死亡前同步写入独立的崩溃文件（File.AppendAllText 立即落盘，不依赖 Serilog 缓冲），
+        /// 同时也尝试经 Serilog 记一份。用于定位那些不一定来自桥、原因未知的闪退。
+        /// </summary>
+        private void InstallGlobalCrashLogging()
+        {
+            if (s_crashLoggingInstalled)
+                return;
+            s_crashLoggingInstalled = true;
+
+            try
+            {
+                AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+                    WriteCrashRecord("UnhandledException", e.ExceptionObject as Exception, e.IsTerminating);
+                System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) =>
+                {
+                    WriteCrashRecord("UnobservedTaskException", e.Exception, false);
+                    e.SetObserved();
+                };
+            }
+            catch (Exception ex)
+            {
+                try { Logger.Warning(ex, "[CRASH-DIAG] Failed to install global crash logging"); } catch { }
+            }
+        }
+
+        private void WriteCrashRecord(string source, Exception? ex, bool terminating)
+        {
+            var text =
+                $"==== [CRASH-DIAG] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} source={source} terminating={terminating} ===={Environment.NewLine}"
+                + (ex?.ToString() ?? "(no exception object)") + Environment.NewLine + Environment.NewLine;
+
+            // 1) 同步直写独立文件，保证即使硬退出也能落盘。
+            try
+            {
+                string dir;
+                try { dir = System.IO.Path.Combine(ModCore.Storage.FolderInfo.CoreRoot.FullPath, "logs"); }
+                catch { dir = AppContext.BaseDirectory; }
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "mp_crash.log"), text);
+            }
+            catch { }
+
+            // 2) 也走 Serilog 记一份（可能因缓冲丢失，但作为补充）。
+            try { Logger.Fatal("[CRASH-DIAG] {Source} terminating={Terminating}{NL}{Detail}", source, terminating, Environment.NewLine, ex?.ToString()); } catch { }
         }
 
         void IOnAdvancedModuleInitializing.OnAdvancedModuleInitializing(ModEntry entry)
