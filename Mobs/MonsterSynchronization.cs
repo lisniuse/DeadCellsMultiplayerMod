@@ -43,6 +43,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly Dictionary<int, ClientMobState> clientMobTargets = new();
         private static readonly Dictionary<int, Entity?> clientCachedAttackTargetByLocalIndex = new();
         private static readonly Dictionary<int, long> hostContactAttackSendTick = new();
+        // 在主机端追踪持盾敌人的冲刺突刺，以便我们能对 GhostKing（客户端玩家）触发接触伤害，
+        // 因为原生碰撞检测无法识别 GhostKing。
+        private static readonly Dictionary<int, long> hostDashLungeWindowUntilTick = new();
         private static readonly Dictionary<int, QueuedOldSkillMarker> clientQueuedOldSkillMarkers = new();
         private static readonly Dictionary<int, int> clientLastReportedMobLife = new();
         private static readonly Dictionary<int, long> clientLastMobHitReportTick = new();
@@ -567,6 +570,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             orig(self);
+
+            if (IsSyncMob(self))
+                TryDriveHostDashLungeContact(self);
         }
 
         private static void Hook_Mob_onDie(Hook_Mob.orig_onDie orig, Mob self)

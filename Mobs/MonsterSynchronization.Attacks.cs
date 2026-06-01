@@ -193,6 +193,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             clientCachedAttackTargetByLocalIndex.Clear();
             clientQueuedOldSkillMarkers.Clear();
             hostContactAttackSendTick.Clear();
+            hostDashLungeWindowUntilTick.Clear();
             hostAttackRetargetLockUntilTick.Clear();
             hostLastRetargetEvalTickByLocalIndex.Clear();
             clientLastReportedMobLife.Clear();

@@ -1046,6 +1046,82 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             TrySendHostMobAttack(ownerMob, OldSkillChargeCompletePacketPrefix + skillId, false, null);
+
+            // 持盾敌人的冲刺技能通过在移动过程中物理突刺目标来造成伤害。
+            // 原生碰撞检测只能识别真实的 Hero 实体，无法识别 GhostKing（客户端玩家）。
+            // 因此我们需要打开一个短暂的检测窗口，手动驱动突刺碰撞（见 postUpdate 中的 TryDriveHostDashLungeContact）。
+            if (IsDashLungeSkill(ownerMob, skillId) && TryGetMobSyncId(ownerMob, out var dashSyncId))
+            {
+                lock (Sync)
+                {
+                    hostDashLungeWindowUntilTick[dashSyncId] =
+                        OffsetTimestampBySeconds(Stopwatch.GetTimestamp(), HostDashLungeWindowSeconds);
+                }
+            }
+        }
+
+        private static bool IsDashLungeSkill(Mob mob, string skillId)
+        {
+            if (string.Equals(skillId, "dash", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return string.Equals(GetMobRuntimeClassKeySafe(mob), "Shield", StringComparison.OrdinalIgnoreCase) &&
+                   skillId.IndexOf("dash", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        // 在主机端每帧（postUpdate）为同步怪物调用。当持盾冲刺窗口打开时，
+        // 如果突刺中的怪物与 GhostKing 重叠，则发送一个接触攻击包，使客户端能在本地英雄身上重播伤害。
+        // 闪避机制仍然有效：GhostKing 的位置从客户端同步，因此滚躲开的客户端不会被判定为重叠。
+        private static void TryDriveHostDashLungeContact(Mob mob)
+        {
+            if (mob == null || ModEntry.clients == null)
+                return;
+            if (!TryGetMobSyncId(mob, out var syncId))
+                return;
+
+            long until;
+            lock (Sync)
+            {
+                if (!hostDashLungeWindowUntilTick.TryGetValue(syncId, out until))
+                    return;
+            }
+
+            if (Stopwatch.GetTimestamp() > until)
+            {
+                lock (Sync) { hostDashLungeWindowUntilTick.Remove(syncId); }
+                return;
+            }
+
+            var mx = GetWorldX(mob);
+            var my = GetWorldY(mob);
+
+            for (int i = 0; i < ModEntry.clients.Length; i++)
+            {
+                var ghost = ModEntry.clients[i];
+                if (ghost == null || ModEntry.clientIds[i] <= 0)
+                    continue;
+                if (ModEntry.IsEntityDownedForCombat(ghost))
+                    continue;
+
+                double dx, dy;
+                try
+                {
+                    dx = System.Math.Abs(GetWorldX(ghost) - mx);
+                    dy = System.Math.Abs(GetWorldY(ghost) - my);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (dx > HostDashLungeContactRangeX || dy > HostDashLungeContactRangeY)
+                    continue;
+
+                // 每次冲刺只触发一次伤害：突刺命中后立即关闭检测窗口。
+                lock (Sync) { hostDashLungeWindowUntilTick.Remove(syncId); }
+                TrySendHostMobAttack(mob, ContactAttackPacketSkillId, false, null, ghost);
+                return;
+            }
         }
 
         private bool Hook_OldSkill_prepare(Hook_OldSkill.orig_prepare orig, OldSkill self, int? data)

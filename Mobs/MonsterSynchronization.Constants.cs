@@ -26,6 +26,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double ClientBossNetworkAttackMotionPreserveSeconds = 0.85;
         private const double ClientBossNetworkAttackAiPreserveSeconds = 1.2;
         private const double HostContactAttackSendCooldownSeconds = 0.3;
+        // 持盾冲刺突刺：冲刺执行后持续检测与 GhostKing 碰撞的时间窗口，以及碰撞检测的范围框大小。
+        private const double HostDashLungeWindowSeconds = 1.6;
+        private const double HostDashLungeContactRangeX = 42.0;
+        private const double HostDashLungeContactRangeY = 42.0;
         private const double HostRetargetRefreshSeconds = 0.105;
         private const double HostActiveStateEvalSeconds = 0.066;
         private const double HostFarStateEvalSeconds = 0.29;
