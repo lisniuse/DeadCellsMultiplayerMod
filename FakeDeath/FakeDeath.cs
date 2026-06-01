@@ -828,6 +828,11 @@ namespace DeadCellsMultiplayerMod
             try { me.cancelSkillControlLock(); } catch { }
             try { me._targetable = false; } catch { }
 
+            // 主机假死、但仍有存活客机时：清空属于死亡演出的 game.curCine。
+            // 否则游戏认为"过场中"，会全局压制怪物攻击 AI（怪会移动/朝向但不攻击）。
+            // 参考 RemoteDownedCorpse 对远程倒地演出的同样处理。
+            ClearHostDeathCinematicBlockForAliveTeammate();
+
             var cine = _localDeadCine;
             if (cine != null && cine.TryGetCorpsePixelPosition(out var corpseX, out var corpseY))
             {
@@ -836,6 +841,29 @@ namespace DeadCellsMultiplayerMod
 
             SnapHeroToDownedPosition(me, _localHeldX, _localHeldY, clampToGround: false);
             SendLocalDownedState(net, isDowned: true, force: false);
+        }
+
+        // 主机假死期间，若 game.curCine 仍指向我们的死亡演出，则清空它，让游戏退出"过场态"，
+        // 从而不再压制怪物攻击 AI（移动本就不受影响，问题只在攻击执行被过场门控）。
+        private void ClearHostDeathCinematicBlockForAliveTeammate()
+        {
+            try
+            {
+                var game = me?._level?.game ?? dc.pr.Game.Class.ME;
+                if (game == null)
+                    return;
+
+                var cur = game.curCine;
+                if (cur == null)
+                    return;
+
+                // 仅清除我们自己的死亡演出，避免误伤其他正当过场（如真正的菜单/Boss 演出）。
+                if (_localDeadCine != null && ReferenceEquals(cur, _localDeadCine))
+                    game.curCine = null;
+            }
+            catch
+            {
+            }
         }
 
         private void MaintainPostRevivePositionLock()

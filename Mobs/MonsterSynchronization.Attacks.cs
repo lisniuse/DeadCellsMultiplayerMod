@@ -46,7 +46,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var targetEntity = ResolveMobAttackTargetEntity(mob, explicitTarget);
 
             var targetUserId = ResolveHostTargetUserId(targetEntity, net!.id);
-            if (ModEntry.IsLocalPlayerDowned() && targetUserId > 0 && targetUserId != net.id)
+
+            // 仅当全员倒地时才停止发送攻击；否则即便主机倒地，也应继续把攻击发给仍存活的客机。
+            if (!IsAnyNonDownedPlayerPresent())
                 return;
 
             var x = GetWorldX(mob);
@@ -1061,7 +1063,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (ShouldSkipHostRetargetEvaluation(mob))
                 return;
 
-            if (ModEntry.IsLocalPlayerDowned())
+            // 仅当全员倒地时才清空目标并停止重定向；否则主机倒地后怪物应改为追击仍存活的客机。
+            if (!IsAnyNonDownedPlayerPresent())
             {
                 TryClearHostMobLivingPlayerTargets(mob);
                 return;
@@ -1246,10 +1249,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             if (ReferenceEquals(candidate, mob))
                 return;
+            // 倒地玩家不可作为目标；但其他存活玩家仍应被检测到（即便主机自己已倒地）。
             if (ModEntry.IsEntityDownedForCombat(candidate))
-                return;
-
-            if (ModEntry.IsLocalPlayerDowned() && IsPlayerCombatTargetEntity(candidate))
                 return;
 
             try
@@ -1492,6 +1493,25 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 var client = ModEntry.clients[i];
                 if (client != null && ReferenceEquals(entity, client))
+                    return true;
+            }
+
+            return false;
+        }
+
+        // 是否还有任意"未倒地"的玩家可作为战斗目标（本机英雄或任一在线客机）。
+        // 用于区分"会话中仍有人存活"与"全员倒地"：只有全员倒地时才真正冻结怪物战斗，
+        // 否则即使主机倒地，怪物也应继续追击并攻击仍存活的客机玩家。
+        private static bool IsAnyNonDownedPlayerPresent()
+        {
+            var localHero = ModEntry.me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            if (localHero != null && !ModEntry.IsEntityDownedForCombat(localHero))
+                return true;
+
+            for (int i = 0; i < ModEntry.clients.Length; i++)
+            {
+                var client = ModEntry.clients[i];
+                if (client != null && ModEntry.clientIds[i] > 0 && !ModEntry.IsEntityDownedForCombat(client))
                     return true;
             }
 

@@ -997,7 +997,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private void Hook_Mob_contactAttack(Hook_Mob.orig_contactAttack orig, Mob self, Entity pow)
         {
             var net = GameMenu.NetRef;
-            if (IsHost(net) && ModEntry.IsLocalPlayerDowned() && IsPlayerCombatTargetEntity(pow))
+            // 仅当全员倒地时才抑制接触攻击；主机倒地但客机存活时，怪物仍应能接触攻击存活玩家。
+            if (IsHost(net) && !IsAnyNonDownedPlayerPresent() && IsPlayerCombatTargetEntity(pow))
                 return;
 
             orig(self, pow);
@@ -1012,7 +1013,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private void Hook_Mob_onTouch(Hook_Mob.orig_onTouch orig, Mob self, Entity atk)
         {
             var net = GameMenu.NetRef;
-            if (IsHost(net) && ModEntry.IsLocalPlayerDowned() && IsPlayerCombatTargetEntity(atk))
+            // 仅当全员倒地时才抑制接触攻击；主机倒地但客机存活时，怪物仍应能接触攻击存活玩家。
+            if (IsHost(net) && !IsAnyNonDownedPlayerPresent() && IsPlayerCombatTargetEntity(atk))
                 return;
 
             orig(self, atk);

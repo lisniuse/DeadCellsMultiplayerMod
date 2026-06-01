@@ -475,7 +475,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             var netUi = GameMenu.NetRef;
-            if (IsClient(netUi) && ModEntry.IsSessionHostDowned(netUi))
+
+            // 此前：主机倒地时客机丢弃所有怪物攻击重放，导致主机死亡后怪物对客机不再造成伤害。
+            // 改为：仅当本机玩家自己倒地时才停止重放（倒地者不应继续挨打）；主机倒地不影响客机继续战斗。
+            if (IsClient(netUi) && ModEntry.IsLocalPlayerDowned())
                 return;
 
             var skillId = intent.SkillId;
