@@ -1056,6 +1056,11 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             if (!IsMobHostileToPlayers(mob))
                 return;
+
+            // 倒地玩家（含倒地的主机自身）不应继续被攻击。_targetable=false 只阻止"新锁定"，
+            // 不会清除死亡前就锁定的旧目标，否则怪物会一直攻击主机尸体。每帧丢弃指向已倒地实体的目标。
+            ClearDownedCombatTargets(mob);
+
             var hasDownedTarget = HasDownedPlayerCombatTarget(mob);
             var hasLivingTarget = HasValidLivingPlayerCombatTarget(mob);
             if (!hasDownedTarget && hasLivingTarget && ShouldSuppressHostRetarget(mob))
@@ -1236,6 +1241,35 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 var nt = mob.nemesisTarget;
                 if (nt != null && IsPlayerCombatTargetEntity(nt))
+                    mob.setNemesisTarget(null);
+            }
+            catch
+            {
+            }
+        }
+
+        // 清除指向"已倒地玩家"（含倒地的主机自身）的攻击/宿敌目标，避免怪物持续攻击倒地者的尸体。
+        // 与 TryClearHostMobLivingPlayerTargets 互补：后者清的是存活玩家目标（全员倒地时用），
+        // 这里专清已倒地目标（IsPlayerCombatTargetEntity 对倒地者返回 false，故那边清不到）。
+        private static void ClearDownedCombatTargets(Mob mob)
+        {
+            if (mob == null)
+                return;
+
+            try
+            {
+                var at = mob.aTarget;
+                if (at != null && ModEntry.IsEntityDownedForCombat(at))
+                    mob.setAttackTarget(null);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var nt = mob.nemesisTarget;
+                if (nt != null && ModEntry.IsEntityDownedForCombat(nt))
                     mob.setNemesisTarget(null);
             }
             catch
