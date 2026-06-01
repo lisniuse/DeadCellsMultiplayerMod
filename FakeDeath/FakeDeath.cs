@@ -154,6 +154,17 @@ namespace DeadCellsMultiplayerMod
                 if (_localFakeDead)
                     return;
 
+                // 诅咒状态(curseCounter>0)下，这次受击会触发原生秒杀(走真·死亡，队友无法复活)。
+                // 必须在 orig 之前转为假死/倒地：先 EnterLocalFakeDeath 置位 _localFakeDead，
+                // 并跳过 orig 的致死逻辑，使主机进入可被队友 R 复活的倒地态，而不是真死。
+                var cursed = false;
+                try { cursed = self.curseCounter > 0; } catch { }
+                if (cursed)
+                {
+                    EnterLocalFakeDeath(self, net);
+                    return;
+                }
+
                 orig(self, a);
 
                 if (_localFakeDead)
