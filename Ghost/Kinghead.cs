@@ -284,6 +284,21 @@ namespace DeadCellsMultiplayerMod.KingHead
 
             try
             {
+                // 在 base.updateHeadFx 之前喂入正确的 headBlack（头部黑化/光照值）。
+                // 客机先死、全员倒地重开后，GhostKing 头部的 headBlack 会卡在 0（全黑），导致头本体
+                // 被涂黑、只剩 Add 叠加的星光层可见。主机自身头部的值正确（同区域光照），在 base
+                // 计算/渲染之前同步过来，使本帧渲染即用正确值。
+                if (ghostVisible)
+                {
+                    try
+                    {
+                        var hostHead = hero.heroHead;
+                        if (hostHead != null)
+                            this.headBlack = hostHead.headBlack;
+                    }
+                    catch { }
+                }
+
                 base.updateHeadFx(c1);
                 this.postUpdate();
 
@@ -294,7 +309,9 @@ namespace DeadCellsMultiplayerMod.KingHead
                     try { this.customBackSpr?.set_visible(false); } catch { }
                     try { this.headNormalSb?.set_visible(false); } catch { }
                     try { this.headAddSb?.set_visible(false); } catch { }
-                    try { this.headBlack = 0; } catch { }
+                    // 不再把 headBlack 置 0：隐藏已由 set_visible(false) 实现，置 0 会污染头部光照值，
+                    // 且引擎不会每帧重算恢复——客机先死被长时间隐藏后，这个 0 会残留到重开，
+                    // 导致 GhostKing 头本体被涂黑、只剩星光。
                     try { this.eye?.set_visible(false); } catch { }
                 }
             }
