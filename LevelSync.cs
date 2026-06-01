@@ -208,6 +208,11 @@ namespace DeadCellsMultiplayerMod
             if (net == null || !net.IsAlive || net.IsHost)
                 return;
 
+            // 死亡重开期间禁止"同关卡原地重载"：它会带 offset 保留旧英雄（武器/血量/位置都残留）。
+            // 改为放行，让客机走与首次开局一致的全新 newGame 流程，从头重生（满血、出生点、清空背包）。
+            if (ModEntry.Instance?._pendingDeathRestartFullHeal == true)
+                return;
+
             var hero = ModEntry.me;
             var level = hero?._level;
             if (hero == null || level == null || level.map == null)

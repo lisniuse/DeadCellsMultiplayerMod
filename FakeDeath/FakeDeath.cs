@@ -1566,6 +1566,8 @@ namespace DeadCellsMultiplayerMod
             try
             {
                 instance.ResetFakeDeathState(unlockLocalHero: true, sendNetworkUpState: false);
+                // 标记：本次是死亡重开，重生时补满血（修复客机重开后残留假死 1 血）。
+                instance._pendingDeathRestartFullHeal = true;
             }
             catch
             {

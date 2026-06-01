@@ -120,6 +120,9 @@ namespace DeadCellsMultiplayerMod
         public InventItem inventItem = null!;
         private bool _inventorySyncGuard;
         private bool _localFakeDead;
+        // 全员倒地重开时置位：下一次英雄重生（hook_hero_wakeup）时把英雄补满血，
+        // 修复客机重开后残留假死的 1 血。一次性消费。
+        internal bool _pendingDeathRestartFullHeal;
         private bool _localExitPenaltyApplied;
         private long _localFakeDeadStartedTicks;
         private DeadBase? _localDeadCine;
@@ -947,6 +950,22 @@ namespace DeadCellsMultiplayerMod
             me._targetable = true;
             _debugExplorerRevealAppliedSignature = string.Empty;
             orig(self, lvl, cx, cy);
+
+            // 死亡重开后的首次重生：补满血，清除残留的假死 1 血（主机由原生新游戏天然满血，
+            // 客机此前会残留 1 血）。一次性消费，正常关卡过渡不受影响（过关保留血量）。
+            if (_pendingDeathRestartFullHeal)
+            {
+                _pendingDeathRestartFullHeal = false;
+                try { self.fullHeal(); } catch { }
+
+                // 显式广播"存活"状态，清除对端对本机的倒地追踪。否则（尤其客机先死时）对端会因
+                // 重开前迟到的倒地包把本机永久当作倒地，导致主机看不到客机、怪物只攻击主机。
+                if (_netRole != NetRole.None && _net != null)
+                {
+                    try { SendLocalDownedState(_net, isDowned: false, force: true); } catch { }
+                }
+            }
+
             EnsureHeroVisibilityAfterRoomChange(me);
             SendCurrentRoomTarget(force: true);
             SendEquippedWeapons(self.inventory);
