@@ -27,7 +27,7 @@ param(
     [string]$CoreRepo = "$PSScriptRoot\..\core",
     [string]$Config   = "Debug",
     [string]$StartScript = "D:\dgames\Start-DeadCells-P1P2.ps1",
-    [switch]$NoStartAfterBuild
+    [switch]$StartAfterBuild
 )
 $ErrorActionPreference = "Stop"
 
@@ -149,7 +149,7 @@ if ($LASTEXITCODE -eq 0) {
         }
     }
 
-    if (-not $NoStartAfterBuild) {
+    if ($StartAfterBuild) {
         if (Test-Path -LiteralPath $StartScript) {
             Write-Host "`n启动双开游戏: $StartScript" -ForegroundColor Green
             & pwsh -NoProfile -ExecutionPolicy Bypass -File $StartScript
