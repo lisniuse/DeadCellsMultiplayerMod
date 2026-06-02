@@ -430,7 +430,10 @@ namespace DeadCellsMultiplayerMod
                 _bossDebugPopupLineCount = GetBossDebugVisibleLineCount(_bossDebugPopupFirstIndex);
                 for (int i = 0; i < _bossDebugPopupLineCount; i++)
                 {
-                    var line = popup.text(string.Empty.AsHaxeString(), BossDebugMenuNormalColor, false);
+                    var itemIndex = _bossDebugPopupFirstIndex + i;
+                    var selected = itemIndex == _bossDebugSelectedIndex;
+                    var label = (selected ? "> " : "  ") + GetBossDebugLineLabel(itemIndex);
+                    var line = popup.text(label.AsHaxeString(), selected ? BossDebugMenuSelectedColor : BossDebugMenuNormalColor, false);
                     if (line != null)
                         _bossDebugPopupLines.Add(line);
                 }
