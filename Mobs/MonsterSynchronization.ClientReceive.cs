@@ -1730,7 +1730,56 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             lock (Sync)
             {
-                return ResolveMobBySyncIdLocked(die.MobIndex);
+                var mob = ResolveMobBySyncIdLocked(die.MobIndex);
+                if (mob != null)
+                    return mob;
+
+                if (string.IsNullOrWhiteSpace(die.Type))
+                    return null;
+
+                var bestMob = default(Mob);
+                var bestDistanceSq = double.MaxValue;
+                var candidateCount = 0;
+                QuantizeWorldPositionToPixelsInt32(die.X, die.Y, out var qRefX, out var qRefY);
+
+                for (int i = 0; i < trackedMobs.Count; i++)
+                {
+                    var candidate = trackedMobs[i];
+                    if (candidate == null)
+                        continue;
+                    if (!IsStateRebindCandidateLocked(candidate))
+                        continue;
+                    if (SyncMobIdRegistry.TryGetExistingSyncId(candidate, out _))
+                        continue;
+                    if (!DoesMobMatchStateType(candidate, die.Type))
+                        continue;
+
+                    QuantizeWorldPositionToPixelsInt32(GetWorldX(candidate), GetWorldY(candidate), out var qMobX, out var qMobY);
+                    var dx = qMobX - qRefX;
+                    var dy = qMobY - qRefY;
+                    var distanceSq = (double)dx * dx + (double)dy * dy;
+                    if (distanceSq > MobStateTypeOrphanRebindSearchRadiusSq)
+                        continue;
+                    if (distanceSq > bestDistanceSq + MobFallbackMinimumScoreGap)
+                        continue;
+
+                    if (distanceSq + MobFallbackMinimumScoreGap < bestDistanceSq)
+                    {
+                        bestMob = null;
+                        candidateCount = 0;
+                        bestDistanceSq = distanceSq;
+                    }
+
+                    candidateCount++;
+                    bestMob = candidate;
+                }
+
+                if (bestMob == null || candidateCount != 1)
+                    return null;
+
+                TryRebindTrackedMobSyncIdLocked(bestMob, die.MobIndex);
+                MobSyncTrace.LogBindSyncId("die", die.MobIndex, die.Type, die.X, die.Y);
+                return bestMob;
             }
         }
 

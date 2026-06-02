@@ -363,6 +363,7 @@ public sealed partial class NetNode
         string? cachedLevelGraphPayload;
         string? cachedHeroSkin;
         string? cachedHeroHeadSkin;
+        string? cachedPermanentItemsPayload;
         lock (_hostCacheSync)
         {
             cachedBossRune = _cachedHostBossRune;
@@ -374,6 +375,7 @@ public sealed partial class NetNode
             cachedLevelGraphPayload = _cachedHostLevelGraphPayload;
             cachedHeroSkin = _cachedHostHeroSkin;
             cachedHeroHeadSkin = _cachedHostHeroHeadSkin;
+            cachedPermanentItemsPayload = _cachedHostPermanentItemsPayload;
         }
 
         if (cachedSerializerSeq.HasValue && cachedSerializerUid.HasValue)
@@ -388,6 +390,8 @@ public sealed partial class NetNode
             await SendLineToSteamClientSafe(connection, $"LSEED|{cachedLevelSeedPayload}\n").ConfigureAwait(false);
         if (cachedLevelGraphPayload != null)
             await SendLineToSteamClientSafe(connection, $"LGRAPH|{cachedLevelGraphPayload}\n").ConfigureAwait(false);
+        if (cachedPermanentItemsPayload != null)
+            await SendLineToSteamClientSafe(connection, $"PERMRUNES|{cachedPermanentItemsPayload}\n").ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(cachedHeroSkin))
             await SendLineToSteamClientSafe(connection, BuildTaggedLine("SKIN", 1, cachedHeroSkin)).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(cachedHeroHeadSkin))

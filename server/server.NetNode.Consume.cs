@@ -318,15 +318,7 @@ public sealed partial class NetNode
     {
         lock (_sync)
         {
-            if (_pendingInterBridgeLeverEvents.Count == 0)
-            {
-                events = new List<InterBridgeLeverEvent>();
-                return false;
-            }
-
-            events = new List<InterBridgeLeverEvent>(_pendingInterBridgeLeverEvents);
-            _pendingInterBridgeLeverEvents.Clear();
-            return events.Count > 0;
+            return TryConsumePendingListLocked(ref _pendingInterBridgeLeverEvents, out events);
         }
     }
 

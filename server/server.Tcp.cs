@@ -137,6 +137,7 @@ public sealed partial class NetNode
                     string? cachedLevelDescPayload;
                     string? cachedLevelSeedPayload;
                     string? cachedLevelGraphPayload;
+                    string? cachedPermanentItemsPayload;
                     lock (_hostCacheSync)
                     {
                         cachedBossRune = _cachedHostBossRune;
@@ -146,6 +147,7 @@ public sealed partial class NetNode
                         cachedLevelDescPayload = _cachedHostLevelDescPayload;
                         cachedLevelSeedPayload = _cachedHostLevelSeedPayload;
                         cachedLevelGraphPayload = _cachedHostLevelGraphPayload;
+                        cachedPermanentItemsPayload = _cachedHostPermanentItemsPayload;
                     }
 
                     if (cachedSerializerSeq.HasValue && cachedSerializerUid.HasValue)
@@ -165,6 +167,9 @@ public sealed partial class NetNode
 
                     if (cachedLevelGraphPayload != null)
                         await SendLineToClientSafe(connection, $"LGRAPH|{cachedLevelGraphPayload}\n").ConfigureAwait(false);
+
+                    if (cachedPermanentItemsPayload != null)
+                        await SendLineToClientSafe(connection, $"PERMRUNES|{cachedPermanentItemsPayload}\n").ConfigureAwait(false);
                 }
 
                 GameMenu.EnqueueMainThreadCoalesced("net:remote-connected", () =>

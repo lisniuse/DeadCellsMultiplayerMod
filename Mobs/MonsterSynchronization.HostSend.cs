@@ -477,6 +477,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
+        private static long OffsetTimestampBySeconds(long timestamp, double seconds)
+        {
+            if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds <= 0)
+                return timestamp;
+
+            var ticks = (long)System.Math.Round(seconds * Stopwatch.Frequency, MidpointRounding.AwayFromZero);
+            return timestamp + ticks;
+        }
+
         private static bool IsDashLungeSkill(Mob mob, string skillId)
         {
             if (string.Equals(skillId, "dash", StringComparison.OrdinalIgnoreCase))

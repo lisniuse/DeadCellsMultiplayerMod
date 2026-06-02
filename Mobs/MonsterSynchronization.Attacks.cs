@@ -995,6 +995,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             QuantizeWorldPositionToPixelsInt32(state.X, state.Y, out var qRefX, out var qRefY);
             var preferredStateSignature = ExtractAffectPresenceSignature(state.StatePayload);
+            var bestDistanceSq = double.MaxValue;
 
             for (int i = 0; i < trackedMobs.Count; i++)
             {
@@ -1011,7 +1012,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     continue;
 
                 QuantizeWorldPositionToPixelsInt32(GetWorldX(mob!), GetWorldY(mob), out var qMobX, out var qMobY);
-                if (qMobX != qRefX || qMobY != qRefY)
+                var dx = qMobX - qRefX;
+                var dy = qMobY - qRefY;
+                var distanceSq = (double)dx * dx + (double)dy * dy;
+                if (distanceSq > MobStateTypeOrphanRebindSearchRadiusSq)
                     continue;
 
                 var normalizedPreferredDir = NormalizeDir(state.Dir);
@@ -1055,6 +1059,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     {
                         continue;
                     }
+                }
+
+                if (distanceSq > bestDistanceSq + MobFallbackMinimumScoreGap)
+                    continue;
+
+                if (distanceSq + MobFallbackMinimumScoreGap < bestDistanceSq)
+                {
+                    uniqueMob = null;
+                    candidateCount = 0;
+                    bestDistanceSq = distanceSq;
                 }
 
                 candidateCount++;

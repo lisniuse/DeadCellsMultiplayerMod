@@ -168,6 +168,11 @@ namespace DeadCellsMultiplayerMod
             _mainThreadQueue.Enqueue(action);
         }
 
+        internal static void EnqueueMainThreadCoalesced(string coalesceKey, Action action)
+        {
+            EnqueueMainThread(action);
+        }
+
         internal static void ProcessMainThreadQueue()
         {
             ModEntry.PumpSteamCallbacksForOverlay();

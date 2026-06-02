@@ -813,7 +813,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 if (TryGetCurrentLevelIdentityToken(out var identityToken))
                 {
-                    var update = new NetNode.MobEventUpdate(dieSyncId, dieX, dieY, 0, SingleEvent("die"), generation: identityToken);
+                    var mobType = BuildMobStateTypeSignature(self);
+                    var update = new NetNode.MobEventUpdate(dieSyncId, dieX, dieY, 0, SingleEvent("die"), mobType, identityToken);
                     MobSyncTrace.LogSendMobEvents(MobSyncNetRoleForTrace(dieNet), SingleUpdate(update));
                     dieNet.SendMobEvents(SingleUpdate(update));
                 }

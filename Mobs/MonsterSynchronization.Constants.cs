@@ -16,6 +16,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double HostMobStateMidPositionEpsilon = 1.20;
         private const double HostMobStateDormantPositionEpsilon = 6.00;
         private const double MobFallbackMinimumScoreGap = 4.0;
+        private const double MobStateTypeOrphanRebindSearchRadius = 1200.0;
+        private const double MobStateTypeOrphanRebindSearchRadiusSq = MobStateTypeOrphanRebindSearchRadius * MobStateTypeOrphanRebindSearchRadius;
         private const double ClientAiAuthorityLockDurationSeconds = 99999.0;
         private const double AuthoritativeAffectPresenceSeconds = 99999.0;
         private const double PixelsPerCase = 24.0;

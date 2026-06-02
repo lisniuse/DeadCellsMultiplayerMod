@@ -144,6 +144,14 @@ public sealed partial class NetNode
             return true;
         }
 
+        if (line.StartsWith("PERMRUNES|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["PERMRUNES|".Length..];
+            lock (_sync) _hasRemote = true;
+            GameDataSync.ReceivePermanentItems(payload);
+            return true;
+        }
+
         if (line.StartsWith("BOSSRUNE_UPDATE_CELLS|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["BOSSRUNE_UPDATE_CELLS|".Length..].Trim();
@@ -936,7 +944,7 @@ public sealed partial class NetNode
                                 continue;
                             if (ev.StartsWith("attack|", StringComparison.Ordinal) && _role != NetRole.Host)
                             {
-                                if (TryParseMobAttackEvent(ev, u.Index, u.X, u.Y, u.Dir, u.Type, u.Generation, out var attack))
+                                if (TryParseMobAttackEvent(ev, u.Index, u.X, u.Y, u.Dir, u.Type ?? string.Empty, u.Generation, out var attack))
                                     _pendingMobAttacks.Add(attack);
                             }
                             else if (ev.StartsWith("hit|", StringComparison.Ordinal))
@@ -948,7 +956,7 @@ public sealed partial class NetNode
                             }
                             else if (ev == "die")
                             {
-                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y, u.Generation);
+                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y, u.Generation, u.Type ?? string.Empty);
                                 _pendingMobDies.Add(die);
                                 if (_role == NetRole.Host && senderId.HasValue)
                                     hasDieToForward = true;

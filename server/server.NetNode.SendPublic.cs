@@ -103,6 +103,23 @@ public sealed partial class NetNode
         // _log.Information("[NetNode] Sent boss rune {BossRune}", bossRune);
     }
 
+    public void SendPermanentItems(string itemsList)
+    {
+        var safeItems = (itemsList ?? string.Empty).Replace("|", string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+        if (_role == NetRole.Host)
+        {
+            lock (_hostCacheSync)
+            {
+                _cachedHostPermanentItemsPayload = string.IsNullOrWhiteSpace(safeItems) ? null : safeItems;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(safeItems) || !HasAnyConnection())
+            return;
+
+        SendRaw("PERMRUNES|" + safeItems);
+    }
+
     public void SendLevelDesc(string json)
     {
         var safeJson = (json ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
@@ -523,7 +540,7 @@ public sealed partial class NetNode
         SendRaw(payload);
     }
 
-    public void SendMobDie(int mobIndex, double x, double y, int generation = 0)
+    public void SendMobDie(int mobIndex, double x, double y, int generation = 0, string type = "")
     {
         if (_role != NetRole.Client && _role != NetRole.Host)
             return;
@@ -534,7 +551,7 @@ public sealed partial class NetNode
 
         var payload = string.Create(
             CultureInfo.InvariantCulture,
-            $"MOBDIE|{ID}|{mobIndex}|{x}|{y}|{generation}");
+            $"MOBDIE|{ID}|{mobIndex}|{x}|{y}|{generation}|{type ?? string.Empty}");
         SendRaw(payload);
     }
 

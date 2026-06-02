@@ -395,10 +395,16 @@ public sealed partial class NetNode
             return false;
 
         var generation = 0;
-        if (parts.Length > 4)
-            int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out generation);
+        var typeIndex = 4;
+        if (parts.Length > 4 &&
+            int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedGeneration))
+        {
+            generation = parsedGeneration;
+            typeIndex = 5;
+        }
 
-        die = new MobDie(parsedUserId, mobIndex, x, y, generation);
+        var type = parts.Length > typeIndex ? parts[typeIndex] : string.Empty;
+        die = new MobDie(parsedUserId, mobIndex, x, y, generation, type);
         return true;
     }
 
