@@ -471,7 +471,6 @@ namespace DeadCellsMultiplayerMod
             var lineCount = GetBossDebugVisibleLineCount(firstIndex);
             if (_bossDebugPopup != null &&
                 (_bossDebugPopupPage != _bossDebugMenuPage ||
-                 _bossDebugPopupFirstIndex != firstIndex ||
                  _bossDebugPopupLineCount != lineCount))
             {
                 CloseBossDebugPopup();
@@ -479,6 +478,7 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
+            _bossDebugPopupFirstIndex = firstIndex;
             for (int i = 0; i < _bossDebugPopupLines.Count; i++)
             {
                 var line = _bossDebugPopupLines[i];
