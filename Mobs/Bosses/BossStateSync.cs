@@ -65,6 +65,8 @@ public static class BossStateSync
         if (mob == null || mob.destroyed || string.IsNullOrWhiteSpace(payload))
             return;
 
+        BossDiag.Phase($"ApplyBossStateFromPayload type={mob.GetType().Name} payload={payload}");
+
         int? phaseVal = null;
         int? actionVal = null;
 
@@ -98,7 +100,10 @@ public static class BossStateSync
 #pragma warning disable CS8604, CS8625 // Gardener phase/action are Haxe-bound; compare via runtime equality
                     var currentPhase = gardener.phase;
                     if (!Equals(currentPhase, phaseVal.Value))
+                    {
+                        BossDiag.Phase($"gardener.phase set -> {phaseVal.Value}");
                         gardener.phase = phaseVal.Value;
+                    }
 #pragma warning restore CS8604, CS8625
                 }
 
@@ -110,7 +115,10 @@ public static class BossStateSync
                     {
                         BossAction? newAction = CreateBossActionByIndex(actionVal.Value);
                         if (newAction is not null)
+                        {
+                            BossDiag.Phase($"gardener.action set -> {actionVal.Value}");
                             gardener.action = newAction;
+                        }
                     }
                 }
             }
@@ -125,13 +133,18 @@ public static class BossStateSync
             {
                 var currentPhase = collector.phase;
                 if (currentPhase != phaseVal.Value)
+                {
+                    BossDiag.Phase($"collector.phase set -> {phaseVal.Value}");
                     collector.phase = phaseVal.Value;
+                }
             }
             catch
             {
                 // ignore
             }
         }
+
+        BossDiag.Phase("ApplyBossStateFromPayload-done");
     }
 
     private static int? TryGetBossActionIndex(BossAction? action)

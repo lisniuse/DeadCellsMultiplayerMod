@@ -1310,6 +1310,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 TryWakeMobForForcedSimulation(mob);
                 try
                 {
+                    if (Bosses.BossSyncHelpers.IsBossMob(mob))
+                        Bosses.BossDiag.Phase($"MobDies onDie(A) BOSS type={mob.GetType().Name}");
                     RunWithAuthoritativeClientBossDie(mob, () =>
                     {
                         RunWithSuppressedMobDieSend(() =>
@@ -1431,7 +1433,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     {
                         if (update.IsBoss)
                         {
+                            Bosses.BossDiag.Phase($"MobHits HostBossFinishingHit BOSS type={mob.GetType().Name}");
                             TryApplyHostBossFinishingHit(mob, update.TargetMaxLife);
+                            Bosses.BossDiag.Phase("MobHits HostBossFinishingHit done");
                         }
                         else
                         {

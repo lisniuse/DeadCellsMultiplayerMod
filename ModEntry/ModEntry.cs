@@ -331,6 +331,7 @@ namespace DeadCellsMultiplayerMod
             Instance = this;
 
             InstallGlobalCrashLogging();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Init(Logger);
 
             this.gds = new GameDataSync(Logger);
             InitializeOptionalModule(
@@ -1040,12 +1041,18 @@ namespace DeadCellsMultiplayerMod
         public void OnFrameUpdate(double dt)
         {
             if (!_ready) return;
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Heartbeat();
             GameMenu.ProcessMainThreadQueue();
             GameMenu.TickMenu(dt);
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("DetectAndSendBossCine");
             DetectAndSendBossCine();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossHeroTeleport");
             ApplyReceivedBossHeroTeleport();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossCine");
             ApplyReceivedBossCine();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("SuppressRemoteBossDeathCineIfNeeded");
             SuppressRemoteBossDeathCineIfNeeded();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("OnFrameUpdate-done");
         }
         void IOnHeroUpdate.OnHeroUpdate(double dt)
         {

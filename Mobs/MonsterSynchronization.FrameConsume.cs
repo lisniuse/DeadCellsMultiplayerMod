@@ -12,24 +12,34 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
     {
         private static async Task RunHostIncomingFrameConsumeAsync(NetNode net)
         {
+            Bosses.BossDiag.Phase("Host.Consume.ClientMobStates");
             ConsumeIncomingClientMobStates(net);
             await Task.Yield();
+            Bosses.BossDiag.Phase("Host.Consume.MobDraws");
             ConsumeIncomingMobDraws(net);
             await Task.Yield();
+            Bosses.BossDiag.Phase("Host.Consume.MobDies");
             ConsumeIncomingMobDies(net);
             await Task.Yield();
+            Bosses.BossDiag.Phase("Host.Consume.MobHits");
             ConsumeIncomingMobHits(net);
+            Bosses.BossDiag.Phase("Host.Consume.done");
         }
 
         private static async Task RunClientIncomingFrameConsumeAsync(NetNode net)
         {
+            Bosses.BossDiag.Phase("Client.Consume.HostMobStates");
             ConsumeIncomingHostMobStates(net);
             await Task.Yield();
+            Bosses.BossDiag.Phase("Client.Consume.HostMobAttacks");
             ConsumeIncomingHostMobAttacks(net);
             await Task.Yield();
+            Bosses.BossDiag.Phase("Client.Consume.MobDies");
             ConsumeIncomingMobDies(net);
             await Task.Yield();
+            Bosses.BossDiag.Phase("Client.Consume.MobHits");
             ConsumeIncomingMobHits(net);
+            Bosses.BossDiag.Phase("Client.Consume.done");
         }
     }
 }

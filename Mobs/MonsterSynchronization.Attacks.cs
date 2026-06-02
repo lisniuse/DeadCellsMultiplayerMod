@@ -1076,7 +1076,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             if (!TryResolveDetectedHostCombatTarget(mob, out var selected))
+            {
+                if (Bosses.BossSyncHelpers.IsBossMob(mob))
+                    Bosses.BossDiag.Phase($"BossRetarget no-target localDowned={ModEntry.IsLocalPlayerDowned()}");
                 return;
+            }
+
+            if (Bosses.BossSyncHelpers.IsBossMob(mob))
+                Bosses.BossDiag.Phase($"BossRetarget -> setAttackTarget localDowned={ModEntry.IsLocalPlayerDowned()}");
 
             try
             {

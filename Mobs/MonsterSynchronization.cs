@@ -577,6 +577,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static void Hook_Mob_onDie(Hook_Mob.orig_onDie orig, Mob self)
         {
+            if (self != null && Bosses.BossSyncHelpers.IsBossMob(self))
+                Bosses.BossDiag.Log($"Mob_onDie BOSS type={self.GetType().Name} role={(IsClient(GameMenu.NetRef) ? "client" : "host")} suppressClientDie={ShouldSuppressClientBossDie(self)}");
+
             if (ShouldSuppressClientBossDie(self))
             {
                 MarkSuppressedClientBossDie(self);

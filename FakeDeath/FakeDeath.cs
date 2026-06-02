@@ -744,6 +744,15 @@ namespace DeadCellsMultiplayerMod
             if (hero == null)
                 return;
 
+            try
+            {
+                var lvl = hero._level?.map?.id?.ToString() ?? "?";
+                var cine = dc.pr.Game.Class.ME?.curCine;
+                Mobs.Bosses.BossDiag.Log(
+                    $"EnterLocalFakeDeath level={lvl} bossLevel={ModEntry.IsBossLevel(lvl)} curCine={cine?.GetType().Name ?? "null"} role={(net.IsHost ? "host" : "client")}");
+            }
+            catch { }
+
             ResetAllDownedGameOverState();
             _localFakeDead = true;
             _localExitPenaltyApplied = false;
