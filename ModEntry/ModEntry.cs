@@ -443,6 +443,83 @@ namespace DeadCellsMultiplayerMod
             try { Logger.Fatal("[CRASH-DIAG] {Source} terminating={Terminating}{NL}{Detail}", source, terminating, Environment.NewLine, ex?.ToString()); } catch { }
         }
 
+        /// <summary>同步直写一行到 mp_crash.log（硬崩也能留住），用于诊断。</summary>
+        internal void AppendMpCrashLine(string line)
+        {
+            try
+            {
+                string dir;
+                try { dir = System.IO.Path.Combine(ModCore.Storage.FolderInfo.CoreRoot.FullPath, "logs"); }
+                catch { dir = AppContext.BaseDirectory; }
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "mp_crash.log"),
+                    $"==== [NULLSPR-DIAG] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {line} ===={Environment.NewLine}");
+            }
+            catch { }
+            try { Logger.Warning("[NULLSPR-DIAG] {Line}", line); } catch { }
+        }
+
+        private readonly Dictionary<string, long> _interactGuardNextLogTick = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// [INTERACT-GUARD] 捕获交互路径里的 HL 异常并写出完整 .NET 栈（节流：同一来源每秒最多一次），
+        /// 用于定位 "Null access .groupName" 究竟发生在哪个方法/实体。返回是否捕获到异常。
+        /// </summary>
+        private void LogInteractGuardException(string where, Exception ex, string? extra = null)
+        {
+            try
+            {
+                var now = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (_interactGuardNextLogTick.TryGetValue(where, out var next) && now < next)
+                    return;
+                _interactGuardNextLogTick[where] = now + System.Diagnostics.Stopwatch.Frequency; // 1s 节流
+
+                string dir;
+                try { dir = System.IO.Path.Combine(ModCore.Storage.FolderInfo.CoreRoot.FullPath, "logs"); }
+                catch { dir = AppContext.BaseDirectory; }
+                System.IO.Directory.CreateDirectory(dir);
+                var text =
+                    $"==== [INTERACT-GUARD] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} where={where}"
+                    + (extra != null ? $" {extra}" : "") + $" ===={Environment.NewLine}"
+                    + ex.ToString() + Environment.NewLine + Environment.NewLine;
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "mp_crash.log"), text);
+            }
+            catch { }
+            try { Logger.Warning(ex, "[INTERACT-GUARD] {Where} {Extra}", where, extra); } catch { }
+        }
+
+        private static string DescribeInteractive(dc.en.Interactive? inter)
+        {
+            if (inter == null)
+                return "inter=null";
+            try
+            {
+                var tn = inter.GetType().Name;
+                bool sprNull;
+                try { sprNull = inter.spr == null; } catch { sprNull = true; }
+                return $"inter={tn} sprNull={sprNull}";
+            }
+            catch { return "inter=?"; }
+        }
+
+        private void Hook_Hero_updateInteraction(Hook_Hero.orig_updateInteraction orig, Hero self)
+        {
+            try { orig(self); }
+            catch (Exception ex) { LogInteractGuardException("Hero.updateInteraction", ex); }
+        }
+
+        private bool Hook_Hero_canUseInteractive(Hook_Hero.orig_canUseInteractive orig, Hero self, dc.en.Interactive inter)
+        {
+            try { return orig(self, inter); }
+            catch (Exception ex) { LogInteractGuardException("Hero.canUseInteractive", ex, DescribeInteractive(inter)); return false; }
+        }
+
+        private void Hook_Hero_onUseInteractive(Hook_Hero.orig_onUseInteractive orig, Hero self, dc.en.Interactive inter)
+        {
+            try { orig(self, inter); }
+            catch (Exception ex) { LogInteractGuardException("Hero.onUseInteractive", ex, DescribeInteractive(inter)); }
+        }
+
         void IOnAdvancedModuleInitializing.OnAdvancedModuleInitializing(ModEntry entry)
         {
             if (s_hooksInstalled)
@@ -453,6 +530,12 @@ namespace DeadCellsMultiplayerMod
             Hook_Game.init += Hook_gameinit;
             Hook_Hero.wakeup += hook_hero_wakeup;
             Hook_Hero.onLevelChanged += hook_level_changed;
+            // [INTERACT-GUARD] 客机与 NPC 交互"即将触发"时偶发 "Null access .groupName" 硬崩。
+            // 用 try/catch 包住交互路径的 vanilla 方法：既能把 HL 异常以 .NET 异常形式捕获、写出
+            // 完整调用栈定位真凶，又能吞掉异常避免整进程闪退。定位到根因后再移除这层兜底。
+            Hook_Hero.updateInteraction += Hook_Hero_updateInteraction;
+            Hook_Hero.canUseInteractive += Hook_Hero_canUseInteractive;
+            Hook_Hero.onUseInteractive += Hook_Hero_onUseInteractive;
             Hook_User.newGame += GameDataSync.user_hook_new_game;
             Hook_User.unserialize += Hook_User_unserialize;
             Hook_Game.onDispose += Hook_Game_onDispose;
