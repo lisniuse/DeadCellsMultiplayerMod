@@ -19,7 +19,7 @@ public enum DebugModuleId
 
 public sealed class MultiplayerSettingsData
 {
-    public bool EnableMobsSync { get; set; } = true;
+    public bool EnableMobsSync { get; set; } = false;
 
     public double MobsInterpolationQuality { get; set; } = 0.20;
 
@@ -37,7 +37,7 @@ public sealed class MultiplayerSettingsData
 
     public bool ModuleLevelInitEnabled { get; set; } = true;
 
-    public bool ModuleMobsSynchronizationEnabled { get; set; } = true;
+    public bool ModuleMobsSynchronizationEnabled { get; set; } = false;
 
     public bool ModuleMinimapRevealEnabled { get; set; } = true;
 
