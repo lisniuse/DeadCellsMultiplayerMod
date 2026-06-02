@@ -373,6 +373,7 @@ namespace DeadCellsMultiplayerMod
                 DebugModuleId.ConnectionUI,
                 "ConnectionUI",
                 () => ConnectionUI.Initialize(this));
+            _ = new BossTestTeleportUi(this);
 
             GameMenu.Initialize(Logger);
             s_steamOverlayCallbackPending = true;
@@ -1130,6 +1131,8 @@ namespace DeadCellsMultiplayerMod
             DetectAndSendBossCine();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossHeroTeleport");
             ApplyReceivedBossHeroTeleport();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossTestTeleport");
+            ApplyReceivedBossTestTeleport();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossCine");
             ApplyReceivedBossCine();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("SuppressRemoteBossDeathCineIfNeeded");

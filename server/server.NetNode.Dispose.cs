@@ -86,6 +86,7 @@ public sealed partial class NetNode
             _pendingExitReadyStates.Clear();
             _pendingBossCineLevelIds.Clear();
             _pendingBossHeroTeleports.Clear();
+            _pendingBossTestTeleports.Clear();
             _pendingPlayerDownStates.Clear();
             _pendingPlayerReviveRequests.Clear();
         }

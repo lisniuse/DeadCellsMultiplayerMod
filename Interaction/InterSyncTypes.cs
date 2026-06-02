@@ -94,6 +94,22 @@ public readonly struct BossHeroTeleportEvent
     }
 }
 
+public readonly struct BossTestTeleportEvent
+{
+    public readonly int UserId;
+    public readonly double X;
+    public readonly double Y;
+    public readonly int Dir;
+
+    public BossTestTeleportEvent(int userId, double x, double y, int dir)
+    {
+        UserId = userId;
+        X = x;
+        Y = y;
+        Dir = dir;
+    }
+}
+
 public readonly struct InterBreakableGroundEvent
 {
     public readonly double X;

@@ -649,6 +649,17 @@ public sealed partial class NetNode
             $"BOSSHEROTELE|{ID.ToString(CultureInfo.InvariantCulture)}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{dir.ToString(CultureInfo.InvariantCulture)}");
     }
 
+    public void SendBossTestTeleport(double x, double y, int dir)
+    {
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+
+        SendRaw(
+            $"BOSSTESTTP|{ID.ToString(CultureInfo.InvariantCulture)}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{dir.ToString(CultureInfo.InvariantCulture)}");
+    }
+
     public void SendInterDoor(int userId, double x, double y, string action, bool broken)
     {
         if (!HasAnyConnection())

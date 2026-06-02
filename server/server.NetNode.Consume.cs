@@ -226,6 +226,14 @@ public sealed partial class NetNode
         }
     }
 
+    public bool TryConsumeBossTestTeleportEvents(out List<BossTestTeleportEvent> events)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingBossTestTeleports, out events);
+        }
+    }
+
     public bool TryConsumePlayerDownStates(out List<PlayerDownState> states)
     {
         lock (_sync)
