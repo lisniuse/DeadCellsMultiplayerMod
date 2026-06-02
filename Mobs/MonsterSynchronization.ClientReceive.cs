@@ -210,20 +210,29 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         continue;
 
                     var mergedAnimPayload = move.AnimPayload ?? string.Empty;
+                    var life = GetMobLifeOrFallback(mob, 1);
+                    var maxLife = 1;
+                    try { maxLife = System.Math.Max(1, mob.maxLife); } catch { }
+                    var statePayload = string.Empty;
+
                     if (clientMobTargets.TryGetValue(mob, out var previousTarget))
                     {
                         if (string.IsNullOrEmpty(mergedAnimPayload))
                             mergedAnimPayload = previousTarget.AnimPayload;
 
-                        clientMobTargets[mob] = new ClientMobState(
-                            move.X,
-                            move.Y,
-                            NormalizeDir(move.Dir),
-                            previousTarget.Life,
-                            previousTarget.MaxLife,
-                            mergedAnimPayload,
-                            previousTarget.StatePayload);
+                        life = previousTarget.Life;
+                        maxLife = previousTarget.MaxLife;
+                        statePayload = previousTarget.StatePayload;
                     }
+
+                    clientMobTargets[mob] = new ClientMobState(
+                        move.X,
+                        move.Y,
+                        NormalizeDir(move.Dir),
+                        life,
+                        maxLife,
+                        mergedAnimPayload,
+                        statePayload);
                 }
             }
 
