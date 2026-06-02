@@ -513,25 +513,11 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return 0;
 
             const uint offset = 2166136261;
-            const uint prime = 16777619;
             var hash = offset;
 
             try
             {
                 AppendStableHash(ref hash, level.map?.id?.ToString());
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                var mapSeed = level.map?.seed ?? 0.0;
-                var seedBits = BitConverter.DoubleToInt64Bits(mapSeed);
-                hash ^= (uint)(seedBits & uint.MaxValue);
-                hash *= prime;
-                hash ^= (uint)((seedBits >> 32) & uint.MaxValue);
-                hash *= prime;
             }
             catch
             {

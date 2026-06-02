@@ -43,19 +43,14 @@ foreach ($root in $InstallGameRoots) {
 }
 
 if ($resolvedInstallRoots.Count -gt 0) {
-    $gameProcesses = Get-Process -Name "DeadCellsModding" -ErrorAction SilentlyContinue | Where-Object {
-        $procPath = $_.Path
-        if ([string]::IsNullOrWhiteSpace($procPath)) { return $false }
-        foreach ($root in $resolvedInstallRoots) {
-            if ($procPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $true }
-        }
-        return $false
-    }
+    $gameProcesses = Get-Process -Name "DeadCellsModding" -ErrorAction SilentlyContinue
 
     foreach ($proc in $gameProcesses) {
         Write-Host "结束进程: $($proc.Id) $($proc.Path)" -ForegroundColor Yellow
         Stop-Process -Id $proc.Id -Force -ErrorAction Stop
     }
+
+    Wait-Process -Name "DeadCellsModding" -Timeout 10 -ErrorAction SilentlyContinue
 }
 
 $MdkBin   = Join-Path $CoreRepo "mdk\bin"
@@ -135,6 +130,19 @@ if ($LASTEXITCODE -eq 0) {
             if ([string]::IsNullOrWhiteSpace($root)) { continue }
 
             $target = Join-Path $root "coremod\mods\DeadCellsMultiplayerMod"
+            $targetDll = Join-Path $target "DeadCellsMultiplayerMod.dll"
+            if (Test-Path -LiteralPath $targetDll) {
+                for ($i = 0; $i -lt 20; $i++) {
+                    try {
+                        $stream = [System.IO.File]::Open($targetDll, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+                        $stream.Dispose()
+                        break
+                    } catch {
+                        if ($i -eq 19) { throw }
+                        Start-Sleep -Milliseconds 250
+                    }
+                }
+            }
             New-Item -ItemType Directory -Force -Path $target | Out-Null
             Copy-Item -Path (Join-Path $outMod "*") -Destination $target -Recurse -Force
             Write-Host "已安装到: $target" -ForegroundColor Cyan
