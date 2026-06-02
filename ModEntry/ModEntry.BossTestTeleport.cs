@@ -21,6 +21,7 @@ namespace DeadCellsMultiplayerMod
         private const double BossTestBossBackstepPx = 240.0;
         private const double BossDebugNpcSpawnOffsetX = 112.0;
         private const double BossDebugNpcUseDistancePx = 78.0;
+        private const string BossDebugNpcSkinId = "Tick4";
         private const int KeyEnter = 13;
         private const int KeyEsc = 27;
         private const int KeySpace = 32;
@@ -201,7 +202,7 @@ namespace DeadCellsMultiplayerMod
 
             try
             {
-                var lib = Assets.Class.getHeroLib(Cdb.Class.getSkinInfo("KingWhite".AsHaxeString()));
+                var lib = Assets.Class.getHeroLib(Cdb.Class.getSkinInfo(BossDebugNpcSkinId.AsHaxeString()));
                 _bossDebugNpcSprite = new HSprite(lib, "idle".AsHaxeString(), Ref<int>.Null, null);
                 _bossDebugNpcSprite.x = _bossDebugNpcX;
                 _bossDebugNpcSprite.y = _bossDebugNpcY;
@@ -210,10 +211,10 @@ namespace DeadCellsMultiplayerMod
                 _bossDebugNpcSprite.alpha = 1;
                 var pivot = _bossDebugNpcSprite.pivot;
                 pivot.centerFactorX = 0.5;
-                pivot.centerFactorY = 1.0;
+                pivot.centerFactorY = 0.5;
                 pivot.usingFactor = true;
                 pivot.isUndefined = false;
-                TryApplyBossDebugNpcShaders(_bossDebugNpcSprite, "KingWhite");
+                TryApplyBossDebugNpcShaders(_bossDebugNpcSprite, BossDebugNpcSkinId);
                 _bossDebugNpcSprite.get_anim().play("idle".AsHaxeString(), null, null).loop(null);
                 level.scroller?.addChildAt(_bossDebugNpcSprite, Const.Class.DP_ROOM_FRONT_HERO);
 
