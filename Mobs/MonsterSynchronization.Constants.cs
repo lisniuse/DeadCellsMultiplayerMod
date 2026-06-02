@@ -52,6 +52,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double MaxCoordinateMatchDistanceSq = MaxCoordinateMatchDistance * MaxCoordinateMatchDistance;
         private const double MobStateTypeRebindSearchRadius = 96.0;
         private const double MobStateTypeRebindSearchRadiusSq = MobStateTypeRebindSearchRadius * MobStateTypeRebindSearchRadius;
+        private const double MobStateTypeOrphanRebindSearchRadius = 1200.0;
+        private const double MobStateTypeOrphanRebindSearchRadiusSq = MobStateTypeOrphanRebindSearchRadius * MobStateTypeOrphanRebindSearchRadius;
         private const string ContactAttackPacketSkillId = "@contact";
         private const string OldSkillPreparePacketPrefix = "@oldprep:";
         private const string OldSkillChargeCompletePacketPrefix = "@oldcc:";

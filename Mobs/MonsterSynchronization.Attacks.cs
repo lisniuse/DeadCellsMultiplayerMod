@@ -642,10 +642,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 }
 
                 var distanceSq = hasGravity ? dx * dx : dx * dx + dy * dy;
-                if (distanceSq > MobStateTypeRebindSearchRadiusSq)
+
+                var isOrphan = !SyncMobIdRegistry.TryGetSyncId(mob, false, out _);
+                var maxDistanceSq = isOrphan ? MobStateTypeOrphanRebindSearchRadiusSq : MobStateTypeRebindSearchRadiusSq;
+                if (distanceSq > maxDistanceSq)
                     continue;
 
                 var score = distanceSq;
+
+                if (isOrphan)
+                    score -= 100.0;
 
                 if (preferredLife != int.MinValue || preferredMaxLife != int.MinValue)
                 {
@@ -735,7 +741,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var bestIndex = -1;
             long bestScore = long.MaxValue;
-            var maxSq = (long)System.Math.Round(MobStateTypeRebindSearchRadiusSq);
+            var normalMaxSq = (long)System.Math.Round(MobStateTypeRebindSearchRadiusSq);
+            var orphanMaxSq = (long)System.Math.Round(MobStateTypeOrphanRebindSearchRadiusSq);
 
             for (var i = 0; i < trackedMobs.Count; i++)
             {
@@ -749,6 +756,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 QuantizeWorldPositionToPixelsInt32(GetWorldX(mob), GetWorldY(mob), out var qMx, out var qMy);
 
                 var distanceSq = QuantizedPixelDistanceSqInt32(qRefX, qRefY, qMx, qMy);
+
+                var isOrphan = !SyncMobIdRegistry.TryGetSyncId(mob, false, out _);
+                var maxSq = isOrphan ? orphanMaxSq : normalMaxSq;
                 if (distanceSq > maxSq)
                     continue;
 
