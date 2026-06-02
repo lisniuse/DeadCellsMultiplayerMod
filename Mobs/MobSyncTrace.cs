@@ -570,6 +570,49 @@ internal static class MobSyncTrace
             detail ?? string.Empty);
     }
 
+    public static void LogAttackSummary(
+        string stage,
+        int count,
+        int accepted,
+        int missingMob,
+        int rejectedGeneration)
+    {
+        if (!ShouldLogMovementDiag("attack-summary:" + (stage ?? string.Empty), 1.0))
+            return;
+
+        Log.Information(
+            "[MobSyncAttackDiag] stage={Stage} count={Count} accepted={Accepted} missingMob={MissingMob} rejectedGeneration={RejectedGeneration}",
+            stage ?? string.Empty,
+            count,
+            accepted,
+            missingMob,
+            rejectedGeneration);
+    }
+
+    public static void LogAttackDiag(
+        string stage,
+        int syncId,
+        string mobType,
+        string skillId,
+        int targetUserId,
+        int dir,
+        string detail = "")
+    {
+        var key = $"attack:{stage}:{syncId}:{skillId}:{targetUserId}";
+        if (!ShouldLogMovementDiag(key, 0.5))
+            return;
+
+        Log.Information(
+            "[MobSyncAttackDiag] stage={Stage} syncId={SyncId} type={MobType} skill={SkillId} targetUserId={TargetUserId} dir={Dir} detail={Detail}",
+            stage ?? string.Empty,
+            syncId,
+            mobType ?? string.Empty,
+            skillId ?? string.Empty,
+            targetUserId,
+            dir,
+            detail ?? string.Empty);
+    }
+
     public static void LogInterpolationSample(
         int syncId,
         string mobType,

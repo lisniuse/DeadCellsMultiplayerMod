@@ -5,9 +5,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const int ParsedAnimPayloadCacheLimit = 1024;
         private const double ClientInterpolationAlpha = 0.70;
         // 持盾冲刺突刺：冲刺执行后持续检测与 GhostKing 碰撞的时间窗口，以及碰撞检测的范围框大小。
-        private const double HostDashLungeWindowSeconds = 1.6;
-        private const double HostDashLungeContactRangeX = 42.0;
-        private const double HostDashLungeContactRangeY = 42.0;
+        private const double HostDashLungeWindowSeconds = 2.2;
+        private const double HostDashLungeContactRangeX = 96.0;
+        private const double HostDashLungeContactRangeY = 72.0;
+        private const double ClientNetworkAttackActiveSeconds = 2.5;
         /// <summary>Coalesce rapid client hit MOBEVENT spam; keep small so multi-hit weapons still report.</summary>
         private const double ClientAnimSpeedEpsilon = 0.05;
         private static readonly bool ClientSyncVerticalPosition = false;

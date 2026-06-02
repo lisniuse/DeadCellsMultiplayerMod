@@ -464,6 +464,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var rejectedGeneration = 0;
             var rejectedCount = 0;
+            var acceptedCount = 0;
+            var missingMobCount = 0;
             for (int i = 0; i < attacks.Count; i++)
             {
                 var attack = attacks[i];
@@ -476,11 +478,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 }
 
                 if (mob == null)
+                {
+                    missingMobCount++;
                     continue;
+                }
 
+                acceptedCount++;
                 TryQueueClientMobAttack(mob, attack.SkillId, attack.RequiresTargetInArea, attack.Data, attack.TargetUserId, attack.Dir);
             }
 
+            MobSyncTrace.LogAttackSummary("client-recv", attacks.Count, acceptedCount, missingMobCount, rejectedCount);
             LogRejectedPacketGeneration("hostAttackOnClient", rejectedCount, rejectedGeneration);
         }
 
@@ -565,6 +572,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var traceRoute = ResolveClientAttackRouteForTrace(skillId);
             _ = TryGetMobSyncId(mob, out var traceSyncId);
             MobSyncTrace.LogClientAttackRoute(traceRoute, traceSyncId, skillId);
+            MobSyncTrace.LogAttackDiag(
+                "client-route",
+                traceSyncId,
+                BuildMobStateTypeSignature(mob),
+                skillId,
+                intent.TargetUserId,
+                intent.AttackDir,
+                traceRoute);
 
             if (string.Equals(skillId, ContactAttackPacketSkillId, StringComparison.Ordinal))
             {
@@ -628,7 +643,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (target == null)
                 target = ResolveClientAttackTargetEntity(mob, 0);
             if (target == null)
+            {
+                MobSyncTrace.LogAttackDiag("client-contact-no-target", -1, BuildMobStateTypeSignature(mob), intent.SkillId, intent.TargetUserId, intent.AttackDir);
                 return;
+            }
 
             RegisterClientNetworkAttackExecuted(mob);
 
@@ -658,7 +676,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 var skillId = normalizedSkillId.AsHaxeString();
                 if (!mob.hasOldSkill(skillId))
+                {
+                    MobSyncTrace.LogAttackDiag("client-oldexec-missing-skill", -1, BuildMobStateTypeSignature(mob), normalizedSkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 var oldSkill = mob.getOldSkill(skillId) as OldMobSkill;
                 if (oldSkill == null)
@@ -677,7 +698,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     TrySetClientMobAttackTarget(mob, 0, intent.AttackDir, forceRetarget: true);
 
                 if (!ClientMobHasUsableTargetForNetworkedOldSkill(mob))
+                {
+                    MobSyncTrace.LogAttackDiag("client-oldexec-no-target", -1, BuildMobStateTypeSignature(mob), normalizedSkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 if (!TryGetChargingOldSkillId(mob, out _))
                 {
@@ -710,7 +734,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             try
             {
                 if (!TryGetMobOldSkill(mob, normalizedSkillId, out var oldSkill))
+                {
+                    MobSyncTrace.LogAttackDiag("client-oldprep-missing-skill", -1, BuildMobStateTypeSignature(mob), normalizedSkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 RegisterClientNetworkAttackExecuted(mob);
                 TrySetClientMobAttackTarget(mob, intent.TargetUserId, intent.AttackDir, forceRetarget: true);
@@ -719,7 +746,10 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     TrySetClientMobAttackTarget(mob, 0, intent.AttackDir, forceRetarget: true);
 
                 if (!ClientMobHasUsableTargetForNetworkedOldSkill(mob))
+                {
+                    MobSyncTrace.LogAttackDiag("client-oldprep-no-target", -1, BuildMobStateTypeSignature(mob), normalizedSkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 if (oldSkill is OldMobSkill oldMobSkill && TryExecuteClientOldSkillNativeLike(oldMobSkill, intent.Data))
                     return;
@@ -765,12 +795,18 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 TryWakeMobForForcedSimulation(mob);
 
                 if (!ClientMobHasUsableTargetForNetworkedOldSkill(mob))
+                {
+                    MobSyncTrace.LogAttackDiag("client-newexec-no-target", -1, BuildMobStateTypeSignature(mob), normalizedSkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 var skillId = normalizedSkillId.AsHaxeString();
                 var skill = mob.getSkill(skillId) as MobSkill;
                 if (skill == null)
+                {
+                    MobSyncTrace.LogAttackDiag("client-newexec-missing-skill", -1, BuildMobStateTypeSignature(mob), normalizedSkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 skill.prepare(intent.Data);
                 skill.execute(null);
@@ -795,11 +831,17 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     TrySetClientMobAttackTarget(mob, 0, intent.AttackDir, forceRetarget: true);
 
                 if (!ClientMobHasUsableTargetForNetworkedOldSkill(mob))
+                {
+                    MobSyncTrace.LogAttackDiag("client-queue-no-target", -1, BuildMobStateTypeSignature(mob), intent.SkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 var haxeSkillId = intent.SkillId.AsHaxeString();
                 if (!mob.hasOldSkill(haxeSkillId))
+                {
+                    MobSyncTrace.LogAttackDiag("client-queue-missing-skill", -1, BuildMobStateTypeSignature(mob), intent.SkillId, intent.TargetUserId, intent.AttackDir);
                     return;
+                }
 
                 var oldSkill = mob.getOldSkill(haxeSkillId) as OldMobSkill;
                 if (oldSkill == null)

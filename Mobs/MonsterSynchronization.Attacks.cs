@@ -61,6 +61,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var dataVal = data ?? 0;
             var attackEvent = $"attack|{encodedSkill}|0|0|{reqTarget}|{dataVal}|{targetUserId}|{dir}";
             var mobType = BuildMobStateTypeSignature(mob);
+            MobSyncTrace.LogAttackDiag(
+                "host-send",
+                mobSyncId,
+                mobType,
+                skillId,
+                targetUserId,
+                dir,
+                $"requiresTarget={reqTarget} data={dataVal}");
             var update = new NetNode.MobEventUpdate(mobSyncId, x, y, dir, SingleEvent(attackEvent), mobType, identityToken);
             MobSyncTrace.LogSendMobEvents(MobSyncNetRoleForTrace(net), SingleUpdate(update));
             net.SendMobEvents(SingleUpdate(update));
@@ -495,7 +503,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             hostLastAppliedClientAffectPayloadBySyncId.Clear();
             clientLastAppliedAnimPayloadByMob.Clear();
             clientLastAnimationApplyFrameByMob.Clear();
-            clientActiveNetworkAttackMobs.Clear();
+            clientActiveNetworkAttackUntilTick.Clear();
             clientAiLockedMobs.Clear();
             clientAuthoritativeStateSeenSyncIds.Clear();
             parsedAnimPayloadCache.Clear();
@@ -587,7 +595,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             clientLastReportedMobLife.Remove(mob);
             clientLastAppliedAnimPayloadByMob.Remove(mob);
             clientLastAnimationApplyFrameByMob.Remove(mob);
-            clientActiveNetworkAttackMobs.Remove(mob);
+            clientActiveNetworkAttackUntilTick.Remove(mob);
             clientAiLockedMobs.Remove(mob);
 
             if (!SyncMobIdRegistry.TryGetExistingSyncId(mob, out var syncId))
@@ -1385,7 +1393,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             lock (Sync)
             {
-                return clientActiveNetworkAttackMobs.Contains(mob);
+                if (!clientActiveNetworkAttackUntilTick.TryGetValue(mob, out var until))
+                    return false;
+
+                if (Stopwatch.GetTimestamp() <= until)
+                    return true;
+
+                clientActiveNetworkAttackUntilTick.Remove(mob);
+                return false;
             }
         }
 
@@ -1396,7 +1411,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             lock (Sync)
             {
-                clientActiveNetworkAttackMobs.Add(mob);
+                clientActiveNetworkAttackUntilTick[mob] =
+                    OffsetTimestampBySeconds(Stopwatch.GetTimestamp(), ClientNetworkAttackActiveSeconds);
             }
 
             TryUnlockClientMobAiAuthority(mob);
@@ -1412,7 +1428,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             lock (Sync)
             {
-                clientActiveNetworkAttackMobs.Remove(mob);
+                if (clientActiveNetworkAttackUntilTick.TryGetValue(mob, out var until) &&
+                    Stopwatch.GetTimestamp() <= until)
+                {
+                    return;
+                }
+
+                clientActiveNetworkAttackUntilTick.Remove(mob);
             }
         }
 

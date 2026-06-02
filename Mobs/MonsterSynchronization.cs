@@ -91,7 +91,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static int forceExactNemesisTargetDepth;
         private static int clientNetworkQueuedAttackDepth;
         private static Mob? clientNetworkQueuedAttackMob;
-        private static readonly HashSet<Mob> clientActiveNetworkAttackMobs = new(ReferenceEqualityComparer.Instance);
+        private static readonly Dictionary<Mob, long> clientActiveNetworkAttackUntilTick = new(ReferenceEqualityComparer.Instance);
         private static readonly HashSet<Mob> clientAiLockedMobs = new(ReferenceEqualityComparer.Instance);
         private static readonly HashSet<Mob> clientPendingSuppressedBossDies = new(ReferenceEqualityComparer.Instance);
         private static readonly HashSet<int> clientAuthoritativeStateSeenSyncIds = new();

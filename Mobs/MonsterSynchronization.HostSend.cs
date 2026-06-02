@@ -541,10 +541,28 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 }
 
                 if (dx > HostDashLungeContactRangeX || dy > HostDashLungeContactRangeY)
+                {
+                    MobSyncTrace.LogAttackDiag(
+                        "host-dash-check",
+                        syncId,
+                        BuildMobStateTypeSignature(mob),
+                        "dash",
+                        ModEntry.clientIds[i],
+                        NormalizeDir(mob.dir),
+                        $"dx={dx:F1} dy={dy:F1} rangeX={HostDashLungeContactRangeX:F1} rangeY={HostDashLungeContactRangeY:F1}");
                     continue;
+                }
 
                 // 每次冲刺只触发一次伤害：突刺命中后立即关闭检测窗口。
                 lock (Sync) { hostDashLungeWindowUntilTick.Remove(syncId); }
+                MobSyncTrace.LogAttackDiag(
+                    "host-dash-hit",
+                    syncId,
+                    BuildMobStateTypeSignature(mob),
+                    "dash",
+                    ModEntry.clientIds[i],
+                    NormalizeDir(mob.dir),
+                    $"dx={dx:F1} dy={dy:F1}");
                 TrySendHostMobAttack(mob, ContactAttackPacketSkillId, false, null, ghost);
                 return;
             }
