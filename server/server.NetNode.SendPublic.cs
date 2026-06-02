@@ -660,6 +660,22 @@ public sealed partial class NetNode
             $"BOSSTESTTP|{ID.ToString(CultureInfo.InvariantCulture)}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{dir.ToString(CultureInfo.InvariantCulture)}");
     }
 
+    public void SendBossTestLevelTeleport(string levelId)
+    {
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+        if (string.IsNullOrWhiteSpace(levelId))
+            return;
+
+        var safe = levelId.Replace("|", "/").Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        if (safe.Length == 0)
+            return;
+
+        SendRaw($"BOSSTESTLEVEL|{ID.ToString(CultureInfo.InvariantCulture)}|{safe}");
+    }
+
     public void SendInterDoor(int userId, double x, double y, string action, bool broken)
     {
         if (!HasAnyConnection())

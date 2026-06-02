@@ -373,8 +373,6 @@ namespace DeadCellsMultiplayerMod
                 DebugModuleId.ConnectionUI,
                 "ConnectionUI",
                 () => ConnectionUI.Initialize(this));
-            _ = new BossTestTeleportUi(this);
-
             GameMenu.Initialize(Logger);
             s_steamOverlayCallbackPending = true;
             s_steamOverlayCallbackRetryCount = 0;
@@ -1131,6 +1129,8 @@ namespace DeadCellsMultiplayerMod
             DetectAndSendBossCine();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossHeroTeleport");
             ApplyReceivedBossHeroTeleport();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossTestLevelTeleport");
+            ApplyReceivedBossTestLevelTeleport();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossTestTeleport");
             ApplyReceivedBossTestTeleport();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossCine");
@@ -1143,6 +1143,7 @@ namespace DeadCellsMultiplayerMod
         {
             if (me == null) return;
             ApplyDebugHeroRuntimeOptions();
+            UpdateBossDebugNpc(dt);
             TryRecoverMissedFakeDeathFromLife();
             if (_netRole == NetRole.None || _net == null)
                 return;

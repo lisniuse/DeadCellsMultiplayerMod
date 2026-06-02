@@ -562,6 +562,7 @@ public sealed partial class NetNode : IDisposable
     private List<string> _pendingBossCineLevelIds = new();
     private List<BossHeroTeleportEvent> _pendingBossHeroTeleports = new();
     private List<BossTestTeleportEvent> _pendingBossTestTeleports = new();
+    private List<BossTestLevelTeleportEvent> _pendingBossTestLevelTeleports = new();
     private List<InterDoorEvent> _pendingInterDoorEvents = new();
     private List<InterElevatorEvent> _pendingInterElevatorEvents = new();
     private List<InterPressurePlateEvent> _pendingInterPressurePlateEvents = new();

@@ -23,6 +23,15 @@ namespace DeadCellsMultiplayerMod
         private static long _lastLevelGraphReloadTick;
         private static string? _lastBossRuneReloadLevelId;
         private static long _lastBossRuneReloadTick;
+
+        internal static bool TryDebugGotoLevel(string levelId)
+        {
+            if (string.IsNullOrWhiteSpace(levelId))
+                return false;
+
+            LevelTransition.Class.@goto(levelId.Trim().AsHaxeString());
+            return true;
+        }
         private static string? _pendingBossRuneReloadLevelId;
         private static int _pendingBossRuneReloadValue;
         private static long _pendingBossRuneReloadTick;

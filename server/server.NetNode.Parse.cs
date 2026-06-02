@@ -936,6 +936,32 @@ public sealed partial class NetNode
         return true;
     }
 
+    private static bool TryParseBossTestLevelTeleportPayload(string payload, int? senderId, bool forceSenderId, out BossTestLevelTeleportEvent ev)
+    {
+        ev = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|', 2);
+        if (parts.Length < 2)
+            return false;
+
+        int userId;
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out userId))
+            userId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            userId = senderId.Value;
+        if (userId <= 0)
+            return false;
+
+        var levelId = parts[1].Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        if (levelId.Length == 0)
+            return false;
+
+        ev = new BossTestLevelTeleportEvent(userId, levelId);
+        return true;
+    }
+
     private static bool TryParseInterBreakableGroundPayload(string payload, out InterBreakableGroundEvent ev)
     {
         ev = default;

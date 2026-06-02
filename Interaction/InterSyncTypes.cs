@@ -110,6 +110,18 @@ public readonly struct BossTestTeleportEvent
     }
 }
 
+public readonly struct BossTestLevelTeleportEvent
+{
+    public readonly int UserId;
+    public readonly string LevelId;
+
+    public BossTestLevelTeleportEvent(int userId, string levelId)
+    {
+        UserId = userId;
+        LevelId = levelId ?? string.Empty;
+    }
+}
+
 public readonly struct InterBreakableGroundEvent
 {
     public readonly double X;
