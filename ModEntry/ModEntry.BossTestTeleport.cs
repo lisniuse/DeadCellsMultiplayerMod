@@ -56,13 +56,13 @@ namespace DeadCellsMultiplayerMod
 
         private readonly struct BossDebugWeaponChoice
         {
-            public readonly string Id;
             public readonly string Label;
+            public readonly string[] CandidateIds;
 
-            public BossDebugWeaponChoice(string id, string label)
+            public BossDebugWeaponChoice(string label, string[] candidateIds)
             {
-                Id = id;
                 Label = label;
+                CandidateIds = candidateIds;
             }
         }
 
@@ -89,13 +89,30 @@ namespace DeadCellsMultiplayerMod
             "BOSS传送",
             "获取武器"
         };
-        private static bool _bossDebugWeaponChoiceDiagnosticsLogged;
+
+        private static readonly BossDebugWeaponChoice[] BossDebugWeaponChoices =
+        {
+            new("随机生成一把剑", new[]
+            {
+                "BloodSword", "Rapier", "TwinDaggers", "BalancedBlade", "SpiteSword",
+                "FranticSword", "Broadsword", "AssassinDagger", "Shovel", "SadismSword"
+            }),
+            new("随机生成一个盾", new[]
+            {
+                "Shield", "BloodShield", "GreedShield", "ParryShield", "Punishment",
+                "AssaultShield", "ForceShield", "Cudgel", "FrontLineShield", "Rampart"
+            }),
+            new("随机生成一个弓", new[]
+            {
+                "BeginnerBow", "MultipleNocksBow", "QuickBow", "InfantryBow", "MarksmanBow",
+                "IceBow", "NervesOfSteel", "Bow", "LongBow", "RepeaterCrossbow"
+            })
+        };
 
         private HSprite? _bossDebugNpcSprite;
         private dc.h2d.Text? _bossDebugNpcLabel;
         private DebugPopUp? _bossDebugPopup;
         private readonly List<dc.ui.we.Text> _bossDebugPopupLines = new();
-        private List<BossDebugWeaponChoice>? _bossDebugWeaponChoices;
         private Level? _bossDebugNpcLevel;
         private double _bossDebugNpcX;
         private double _bossDebugNpcY;
@@ -329,7 +346,7 @@ namespace DeadCellsMultiplayerMod
             {
                 BossDebugMenuPage.Root => BossDebugRootOptions.Length,
                 BossDebugMenuPage.BossTeleport => BossDebugDestinations.Length,
-                BossDebugMenuPage.WeaponSpawn => GetBossDebugWeaponChoices().Count,
+                BossDebugMenuPage.WeaponSpawn => BossDebugWeaponChoices.Length,
                 _ => 0
             };
         }
@@ -365,9 +382,8 @@ namespace DeadCellsMultiplayerMod
 
                 case BossDebugMenuPage.WeaponSpawn:
                     _bossDebugWeaponSelectedIndex = _bossDebugSelectedIndex;
-                    var weapons = GetBossDebugWeaponChoices();
-                    if (_bossDebugSelectedIndex >= 0 && _bossDebugSelectedIndex < weapons.Count)
-                        TrySpawnBossDebugWeapon(weapons[_bossDebugSelectedIndex]);
+                    if (_bossDebugSelectedIndex >= 0 && _bossDebugSelectedIndex < BossDebugWeaponChoices.Length)
+                        TrySpawnRandomBossDebugWeapon(BossDebugWeaponChoices[_bossDebugSelectedIndex]);
                     _bossDebugIgnoreConfirmUntilTick =
                         Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
                     break;
@@ -512,7 +528,7 @@ namespace DeadCellsMultiplayerMod
             {
                 BossDebugMenuPage.Root => "DEBUG TOOLS",
                 BossDebugMenuPage.BossTeleport => $"BOSS传送 ({BossDebugDestinations.Length})",
-                BossDebugMenuPage.WeaponSpawn => $"获取武器 ({GetBossDebugWeaponChoices().Count})",
+                BossDebugMenuPage.WeaponSpawn => $"获取武器 ({BossDebugWeaponChoices.Length})",
                 _ => "DEBUG"
             };
         }
@@ -561,241 +577,71 @@ namespace DeadCellsMultiplayerMod
 
         private string FormatBossDebugWeaponLine(int itemIndex)
         {
-            var weapons = GetBossDebugWeaponChoices();
-            if (itemIndex < 0 || itemIndex >= weapons.Count)
+            if (itemIndex < 0 || itemIndex >= BossDebugWeaponChoices.Length)
                 return string.Empty;
 
-            var choice = weapons[itemIndex];
-            return $"{itemIndex + 1}/{weapons.Count} {choice.Label}";
+            var choice = BossDebugWeaponChoices[itemIndex];
+            return $"{itemIndex + 1}/{BossDebugWeaponChoices.Length} {choice.Label}";
         }
 
-        private List<BossDebugWeaponChoice> GetBossDebugWeaponChoices()
-        {
-            if (_bossDebugWeaponChoices != null)
-                return _bossDebugWeaponChoices;
-
-            var choices = new List<BossDebugWeaponChoice>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            var beforeGameItems = choices.Count;
-            AddBossDebugWeaponChoicesFromGameItems(choices, seen);
-            var afterGameItems = choices.Count;
-
-            var beforeWeaponTable = choices.Count;
-            try
-            {
-                var all = dc.Data.Class.weapon?.all;
-                if (all != null)
-                {
-                    var len = all.get_length();
-                    for (var i = 0; i < len; i++)
-                    {
-                        var rowObj = all.getDyn(i);
-                        string itemId;
-                        if (TryGetBossDebugWeaponItemId(rowObj, out itemId))
-                            AddBossDebugWeaponChoice(choices, seen, itemId);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning(ex, "[BossDebugNpc] Failed to enumerate weapons from CDB");
-            }
-            var afterWeaponTable = choices.Count;
-
-            var beforeItemTable = choices.Count;
-            if (choices.Count == 0)
-                AddBossDebugWeaponChoicesFromItems(choices, seen);
-            var afterItemTable = choices.Count;
-
-            choices.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
-            if (!_bossDebugWeaponChoiceDiagnosticsLogged)
-            {
-                _bossDebugWeaponChoiceDiagnosticsLogged = true;
-                Logger.Information("[BossDebugNpc] weapon choices built total={Total} fromGameItems={GameItems} fromWeaponTable={WeaponTable} fromItemTableFallback={ItemTable}",
-                    choices.Count,
-                    afterGameItems - beforeGameItems,
-                    afterWeaponTable - beforeWeaponTable,
-                    afterItemTable - beforeItemTable);
-            }
-            _bossDebugWeaponChoices = choices;
-            return choices;
-        }
-
-        private static void AddBossDebugWeaponChoicesFromGameItems(List<BossDebugWeaponChoice> choices, HashSet<string> seen)
-        {
-            try
-            {
-                var allItems = Cdb.Class.getAllItemsInGame?.Invoke(false);
-                if (allItems == null)
-                    return;
-
-                var len = GetBossDebugArrayCount(allItems);
-                for (var i = 0; i < len; i++)
-                {
-                    virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item;
-                    if (!TryGetBossDebugItemData(allItems.getDyn(i), out item))
-                        continue;
-
-                    var itemId = item.id?.ToString();
-                    if (string.IsNullOrWhiteSpace(itemId))
-                        continue;
-
-                    AddBossDebugWeaponChoice(choices, seen, itemId.Trim());
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private static bool TryGetBossDebugWeaponItemId(object? rowObj, out string itemId)
-        {
-            itemId = string.Empty;
-
-            virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_? weapon = null;
-            try
-            {
-                weapon = rowObj switch
-                {
-                    virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_ direct => direct,
-                    HaxeDynObj ho => ho.ToVirtual<virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_>(),
-                    _ => null
-                };
-            }
-            catch
-            {
-            }
-
-            var id = weapon?.item?.ToString();
-            if (string.IsNullOrWhiteSpace(id))
-                return false;
-
-            itemId = id.Trim();
-            return true;
-        }
-
-        private static void AddBossDebugWeaponChoicesFromItems(List<BossDebugWeaponChoice> choices, HashSet<string> seen)
-        {
-            try
-            {
-                var byIndex = dc.Data.Class.item?.byIndex;
-                if (byIndex == null)
-                    return;
-
-                var len = byIndex.get_length();
-                for (var i = 0; i < len; i++)
-                {
-                    virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item;
-                    if (!TryGetBossDebugItemData(byIndex.getDyn(i), out item))
-                        continue;
-
-                    var itemId = item.id?.ToString();
-                    if (string.IsNullOrWhiteSpace(itemId))
-                        continue;
-
-                    try
-                    {
-                        var weapon = Cdb.Class.getWeapon?.Invoke(itemId.Trim().AsHaxeString());
-                        if (weapon == null)
-                            continue;
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-
-                    AddBossDebugWeaponChoice(choices, seen, itemId.Trim());
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private static void AddBossDebugWeaponChoice(List<BossDebugWeaponChoice> choices, HashSet<string> seen, string itemId)
-        {
-            if (string.IsNullOrWhiteSpace(itemId) || !seen.Add(itemId))
-                return;
-
-            choices.Add(new BossDebugWeaponChoice(itemId, GetBossDebugItemDisplayName(itemId)));
-        }
-
-        private static string GetBossDebugItemDisplayName(string itemId)
-        {
-            try
-            {
-                var rowObj = dc.Data.Class.item?.resolve(itemId.AsHaxeString(), false);
-                virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item;
-                if (TryGetBossDebugItemData(rowObj, out item))
-                {
-                    var name = item?.name?.ToString();
-                    if (!string.IsNullOrWhiteSpace(name))
-                        return $"{name.Trim()} [{itemId}]";
-                }
-            }
-            catch
-            {
-            }
-
-            return itemId;
-        }
-
-        private static bool TryGetBossDebugItemData(object? rowObj, out virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item)
-        {
-            item = null!;
-            try
-            {
-                item = rowObj switch
-                {
-                    virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ direct => direct,
-                    HaxeDynObj ho => ho.ToVirtual<virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_>(),
-                    _ => null!
-                };
-            }
-            catch
-            {
-                item = null!;
-            }
-
-            return item != null;
-        }
-
-        private static int GetBossDebugArrayCount(ArrayObj values)
-        {
-            try { return values.array?.Count ?? 0; } catch { return 0; }
-        }
-
-        private void TrySpawnBossDebugWeapon(BossDebugWeaponChoice choice)
+        private void TrySpawnRandomBossDebugWeapon(BossDebugWeaponChoice choice)
         {
             var hero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
             var level = hero?._level ?? game?.curLevel;
-            if (hero == null || level == null || string.IsNullOrWhiteSpace(choice.Id))
+            if (hero == null || level == null || choice.CandidateIds.Length == 0)
             {
                 MultiplayerUI.PushSystemMessage("DEBUG weapon: no level", 2.0, 0.5);
                 return;
             }
 
-            try
+            var candidates = BuildShuffledBossDebugWeaponCandidates(choice.CandidateIds);
+            for (int i = 0; i < candidates.Count; i++)
             {
-                var item = new InventItem(new InventItemKind.Weapon(choice.Id.AsHaxeString()));
-                try { item.refillAmmo(); } catch { }
-
-                var cx = hero.cx;
-                var cy = hero.cy;
-                var inChest = false;
-                var drop = new ItemDrop(level, cx, cy, item, true, new Ref<bool>(ref inChest));
-                drop.init();
-                drop.onDropAsLoot();
-                drop.dx = hero.dx;
-
-                MultiplayerUI.PushSystemMessage($"Weapon: {choice.Id}", 2.0, 0.5);
+                var itemId = candidates[i];
+                try
+                {
+                    SpawnBossDebugWeaponDrop(hero, level, itemId);
+                    MultiplayerUI.PushSystemMessage($"Weapon: {itemId}", 2.0, 0.5);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex, "[BossDebugNpc] Failed candidate weapon {WeaponId}", itemId);
+                }
             }
-            catch (Exception ex)
+
+            MultiplayerUI.PushSystemMessage($"Weapon failed: {choice.Label}", 2.0, 0.5);
+        }
+
+        private static List<string> BuildShuffledBossDebugWeaponCandidates(string[] candidateIds)
+        {
+            var result = new List<string>();
+            for (int i = 0; i < candidateIds.Length; i++)
             {
-                Logger.Warning(ex, "[BossDebugNpc] Failed to spawn weapon {WeaponId}", choice.Id);
-                MultiplayerUI.PushSystemMessage($"Weapon failed: {choice.Id}", 2.0, 0.5);
+                var id = candidateIds[i]?.Trim();
+                if (!string.IsNullOrWhiteSpace(id))
+                    result.Add(id);
             }
+
+            for (int i = result.Count - 1; i > 0; i--)
+            {
+                var j = Random.Shared.Next(i + 1);
+                (result[i], result[j]) = (result[j], result[i]);
+            }
+
+            return result;
+        }
+
+        private static void SpawnBossDebugWeaponDrop(Hero hero, Level level, string itemId)
+        {
+            var item = new InventItem(new InventItemKind.Weapon(itemId.AsHaxeString()));
+            try { item.refillAmmo(); } catch { }
+
+            var inChest = false;
+            var drop = new ItemDrop(level, hero.cx, hero.cy, item, true, new Ref<bool>(ref inChest));
+            drop.init();
+            drop.onDropAsLoot();
+            drop.dx = hero.dx;
         }
 
         private void TryGotoBossDebugLevel(string levelId)
