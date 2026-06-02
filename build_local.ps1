@@ -25,7 +25,9 @@ param(
     ),
     [string]$ModSrc   = "$PSScriptRoot",
     [string]$CoreRepo = "$PSScriptRoot\..\core",
-    [string]$Config   = "Debug"
+    [string]$Config   = "Debug",
+    [string]$StartScript = "D:\dgames\Start-DeadCells-P1P2.ps1",
+    [switch]$NoStartAfterBuild
 )
 $ErrorActionPreference = "Stop"
 
@@ -136,6 +138,15 @@ if ($LASTEXITCODE -eq 0) {
             New-Item -ItemType Directory -Force -Path $target | Out-Null
             Copy-Item -Path (Join-Path $outMod "*") -Destination $target -Recurse -Force
             Write-Host "已安装到: $target" -ForegroundColor Cyan
+        }
+    }
+
+    if (-not $NoStartAfterBuild) {
+        if (Test-Path -LiteralPath $StartScript) {
+            Write-Host "`n启动双开游戏: $StartScript" -ForegroundColor Green
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File $StartScript
+        } else {
+            Write-Host "未找到启动脚本，跳过自动启动: $StartScript" -ForegroundColor Yellow
         }
     }
 } else {
