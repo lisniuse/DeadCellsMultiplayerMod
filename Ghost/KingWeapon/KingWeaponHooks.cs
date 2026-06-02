@@ -56,6 +56,7 @@ internal static class KingWeaponHooks
         Hook_Entity.bumpAwayFrom += Hook_Entity_bumpAwayFrom;
         Hook_Entity.cancelVelocities += Hook_Entity_cancelVelocities;
         Hook_Entity.onDamage += Hook_Entity_onDamage;
+        Hook_Entity.applyAttackResult += Hook_Entity_applyAttackResult;
         Hook_Entity.addTimeToAffect += Hook_Entity_addTimeToAffect;
         Hook_Entity.removeAffects += Hook_Entity_removeAffects;
         Hook_Entity.removeAllAffects += Hook_Entity_removeAllAffects;
@@ -274,6 +275,34 @@ internal static class KingWeaponHooks
             return;
 
         orig(self, a);
+    }
+
+    /// <summary>
+    /// 防护原版命中结算崩溃：vanilla applyAttackResult 会读取相关实体的 spr.groupName，
+    /// 若该实体正处于"正在生成/销毁、sprite 尚未就绪"的瞬间被卷入命中结算，会触发 HL 未捕获异常
+    /// （Null access .groupName）直接崩游戏。这里先对受击方做空判跳过，再用 try/catch 兜住原版
+    /// 内部可能因攻击方/其它实体 sprite 为空抛出的 HL 异常，避免整局崩溃。
+    /// </summary>
+    private static void Hook_Entity_applyAttackResult(Hook_Entity.orig_applyAttackResult orig, Entity self, AttackData a)
+    {
+        try
+        {
+            if (self == null || self.spr == null || self.spr.groupName == null)
+                return;
+        }
+        catch
+        {
+            return;
+        }
+
+        try
+        {
+            orig(self, a);
+        }
+        catch (Exception ex)
+        {
+            LogKingWeaponHookEx(ex, "Hook_Entity_applyAttackResult");
+        }
     }
 
     private static void Hook_Hero_setAffectS(
