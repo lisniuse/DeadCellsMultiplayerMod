@@ -113,6 +113,11 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             if (mob == null)
                 return false;
+            lock (Sync)
+            {
+                if (clientMobTargets.ContainsKey(mob))
+                    return true;
+            }
             if (BossSyncHelpers.IsBossMob(mob))
                 return true;
             if (HasValidLivingPlayerCombatTarget(mob))
