@@ -735,9 +735,21 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 if (!TryGetMobSyncId(self, out var mobSyncId))
                 {
-                    if (!preSyncOk || !shouldReport)
+                    if (preSyncOk)
+                    {
+                        mobSyncId = cachedMobSyncId;
+                    }
+                    else if (IsHost(net))
+                    {
+                        // 主机必须有权威 id 才上报。
                         return;
-                    mobSyncId = cachedMobSyncId;
+                    }
+                    else
+                    {
+                        // 客机无主机绑定 id（如客机跑在前面、该怪在主机端离屏未发状态）：用哨兵 -1 上报，
+                        // 并在下方带上怪物类型，让主机用"类型+坐标"在全量怪里解析命中，避免错位且不丢命中。
+                        mobSyncId = -1;
+                    }
                 }
 
                 var life = GetMobLifeOrFallback(self, 0);
@@ -795,7 +807,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     }
 
                     var clientHitEvent = $"hit|{life.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
-                    var clientUpdate = new NetNode.MobEventUpdate(mobSyncId, x, y, 0, SingleEvent(clientHitEvent));
+                    // 带上类型：当 mobSyncId=-1（无主机绑定）时，主机据此按"类型+坐标"解析命中。
+                    var clientMobType = BuildMobStateTypeSignature(self);
+                    var clientUpdate = new NetNode.MobEventUpdate(mobSyncId, x, y, 0, SingleEvent(clientHitEvent), clientMobType);
                     MobSyncTrace.LogSendMobEvents(MobSyncNetRoleForTrace(net), SingleUpdate(clientUpdate));
                     net.SendMobEvents(SingleUpdate(clientUpdate));
                 }

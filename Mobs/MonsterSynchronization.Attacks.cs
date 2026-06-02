@@ -524,7 +524,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!IsSyncMob(mob))
                 return false;
 
-            return SyncMobIdRegistry.TryGetSyncId(mob, out syncId);
+            // 仅主机权威分配 sync id；客机绝不自创，只用从主机数据包绑定的 id，避免编号错位。
+            var allowAssign = IsHost(GameMenu.NetRef);
+            return SyncMobIdRegistry.TryGetSyncId(mob, allowAssign, out syncId);
         }
 
         private static int ResolveLocalIndexBySyncIdLocked(int syncId)

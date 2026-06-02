@@ -57,7 +57,12 @@ internal static class SyncMobIdRegistry
         }
     }
 
-    public static bool TryGetSyncId(Mob? mob, out int syncId)
+    /// <summary>
+    /// 获取怪物的 sync id。<paramref name="allowAssign"/>=true（仅主机）时，未映射的怪会被分配一个新 id；
+    /// =false（客机）时绝不自创 id，只返回已存在的映射——客机的 id 必须来自主机数据包（按类型+位置绑定），
+    /// 否则主客两端会因动态刷怪/到达顺序不同而编号错位，导致客机命中打到错误的怪、被打的怪卡在 0 血不死。
+    /// </summary>
+    public static bool TryGetSyncId(Mob? mob, bool allowAssign, out int syncId)
     {
         syncId = 0;
         if (!IsUsableMob(mob))
@@ -68,7 +73,7 @@ internal static class SyncMobIdRegistry
             if (mob != null && MobToId.TryGetValue(mob, out syncId))
                 return true;
 
-            if (mob == null)
+            if (mob == null || !allowAssign)
                 return false;
 
             var assignedId = nextRuntimeSyncId++;
