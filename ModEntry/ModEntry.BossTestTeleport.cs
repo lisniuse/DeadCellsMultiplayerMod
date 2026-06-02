@@ -585,22 +585,9 @@ namespace DeadCellsMultiplayerMod
                     for (var i = 0; i < len; i++)
                     {
                         var rowObj = all.getDyn(i);
-                        if (rowObj is not HaxeDynObj ho)
-                            continue;
-
-                        string? itemId = null;
-                        try
-                        {
-                            itemId = ho.ToVirtual<virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_>()?.item?.ToString();
-                        }
-                        catch
-                        {
-                        }
-
-                        if (string.IsNullOrWhiteSpace(itemId))
-                            continue;
-
-                        AddBossDebugWeaponChoice(choices, seen, itemId.Trim());
+                        string itemId;
+                        if (TryGetBossDebugWeaponItemId(rowObj, out itemId))
+                            AddBossDebugWeaponChoice(choices, seen, itemId);
                     }
                 }
             }
@@ -610,15 +597,75 @@ namespace DeadCellsMultiplayerMod
             }
 
             if (choices.Count == 0)
-            {
-                AddBossDebugWeaponChoice(choices, seen, "Sword");
-                AddBossDebugWeaponChoice(choices, seen, "Bow");
-                AddBossDebugWeaponChoice(choices, seen, "Shield");
-            }
+                AddBossDebugWeaponChoicesFromItems(choices, seen);
 
             choices.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
             _bossDebugWeaponChoices = choices;
             return choices;
+        }
+
+        private static bool TryGetBossDebugWeaponItemId(object? rowObj, out string itemId)
+        {
+            itemId = string.Empty;
+
+            virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_? weapon = null;
+            try
+            {
+                weapon = rowObj switch
+                {
+                    virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_ direct => direct,
+                    HaxeDynObj ho => ho.ToVirtual<virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_>(),
+                    _ => null
+                };
+            }
+            catch
+            {
+            }
+
+            var id = weapon?.item?.ToString();
+            if (string.IsNullOrWhiteSpace(id))
+                return false;
+
+            itemId = id.Trim();
+            return true;
+        }
+
+        private static void AddBossDebugWeaponChoicesFromItems(List<BossDebugWeaponChoice> choices, HashSet<string> seen)
+        {
+            try
+            {
+                var byIndex = dc.Data.Class.item?.byIndex;
+                if (byIndex == null)
+                    return;
+
+                var len = byIndex.get_length();
+                for (var i = 0; i < len; i++)
+                {
+                    virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item;
+                    if (!TryGetBossDebugItemData(byIndex.getDyn(i), out item))
+                        continue;
+
+                    var itemId = item.id?.ToString();
+                    if (string.IsNullOrWhiteSpace(itemId))
+                        continue;
+
+                    try
+                    {
+                        var weapon = Cdb.Class.getWeapon?.Invoke(itemId.Trim().AsHaxeString());
+                        if (weapon == null)
+                            continue;
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    AddBossDebugWeaponChoice(choices, seen, itemId.Trim());
+                }
+            }
+            catch
+            {
+            }
         }
 
         private static void AddBossDebugWeaponChoice(List<BossDebugWeaponChoice> choices, HashSet<string> seen, string itemId)
@@ -634,9 +681,9 @@ namespace DeadCellsMultiplayerMod
             try
             {
                 var rowObj = dc.Data.Class.item?.resolve(itemId.AsHaxeString(), false);
-                if (rowObj is HaxeDynObj ho)
+                virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item;
+                if (TryGetBossDebugItemData(rowObj, out item))
                 {
-                    var item = ho.ToVirtual<virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_>();
                     var name = item?.name?.ToString();
                     if (!string.IsNullOrWhiteSpace(name))
                         return $"{name.Trim()} [{itemId}]";
@@ -647,6 +694,26 @@ namespace DeadCellsMultiplayerMod
             }
 
             return itemId;
+        }
+
+        private static bool TryGetBossDebugItemData(object? rowObj, out virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item)
+        {
+            item = null!;
+            try
+            {
+                item = rowObj switch
+                {
+                    virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ direct => direct,
+                    HaxeDynObj ho => ho.ToVirtual<virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_>(),
+                    _ => null!
+                };
+            }
+            catch
+            {
+                item = null!;
+            }
+
+            return item != null;
         }
 
         private void TrySpawnBossDebugWeapon(BossDebugWeaponChoice choice)
