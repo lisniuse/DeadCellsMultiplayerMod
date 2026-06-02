@@ -65,7 +65,8 @@ namespace DeadCellsMultiplayerMod
         private HSprite? _bossDebugNpcSprite;
         private dc.h2d.Text? _bossDebugNpcLabel;
         private UIBox? _bossDebugMenuBox;
-        private dc.h2d.Text? _bossDebugMenuText;
+        private dc.h2d.Flow? _bossDebugMenuFlow;
+        private readonly List<dc.h2d.Text> _bossDebugMenuLines = new();
         private Level? _bossDebugNpcLevel;
         private double _bossDebugNpcX;
         private double _bossDebugNpcY;
@@ -218,12 +219,12 @@ namespace DeadCellsMultiplayerMod
                 _bossDebugNpcSprite.get_anim().play("idle".AsHaxeString(), null, null).loop(null);
                 level.scroller?.addChildAt(_bossDebugNpcSprite, Const.Class.DP_ROOM_FRONT_HERO);
 
-                _bossDebugNpcLabel = Assets.Class.makeText("DEBUG".AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, _bossDebugNpcSprite);
+                _bossDebugNpcLabel = Assets.Class.makeText("DEBUG".AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, level.scroller);
                 _bossDebugNpcLabel.textColor = 0x6CFF7A;
                 _bossDebugNpcLabel.scaleX = 0.55;
                 _bossDebugNpcLabel.scaleY = 0.55;
-                _bossDebugNpcLabel.x = -42;
-                _bossDebugNpcLabel.y = -82;
+                _bossDebugNpcLabel.x = _bossDebugNpcX - 78;
+                _bossDebugNpcLabel.y = _bossDebugNpcY - 92;
             }
             catch (Exception ex)
             {
@@ -305,6 +306,11 @@ namespace DeadCellsMultiplayerMod
 
         private string BuildBossDebugMenuText()
         {
+            return string.Join("\n", BuildBossDebugMenuLines());
+        }
+
+        private List<string> BuildBossDebugMenuLines()
+        {
             var parts = new List<string>
             {
                 "DEBUG BOSS SELECT",
@@ -317,7 +323,7 @@ namespace DeadCellsMultiplayerMod
                 parts.Add(prefix + BossDebugDestinations[i].Label);
             }
 
-            return string.Join("\n", parts);
+            return parts;
         }
 
         private void UpdateBossDebugNpcLabel(string text)
@@ -338,15 +344,24 @@ namespace DeadCellsMultiplayerMod
             if (root == null)
                 return;
 
-            if (_bossDebugMenuBox == null || _bossDebugMenuBox.parent == null || !ReferenceEquals(_bossDebugMenuBox.parent, root))
+            if (_bossDebugMenuBox == null ||
+                _bossDebugMenuBox.parent == null ||
+                !ReferenceEquals(_bossDebugMenuBox.parent, root) ||
+                _bossDebugMenuFlow == null ||
+                _bossDebugMenuFlow.parent == null ||
+                !ReferenceEquals(_bossDebugMenuFlow.parent, root))
             {
                 ClearBossDebugMenuPanel();
                 _bossDebugMenuBox = UIBox.Class.drawBoxValidation(470, 330, Ref<int>.Null, Ref<int>.Null, null, false);
                 root.addChild(_bossDebugMenuBox);
-                _bossDebugMenuText = Assets.Class.makeText(string.Empty.AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, null);
-                root.addChild(_bossDebugMenuText);
-                _bossDebugMenuText.textColor = 0xFFFFFF;
-                _bossDebugMenuText.alpha = 1;
+
+                _bossDebugMenuFlow = new dc.h2d.Flow(root);
+                _bossDebugMenuFlow.multiline = true;
+                _bossDebugMenuFlow.isVertical = true;
+                _bossDebugMenuFlow.set_verticalAlign(new dc.h2d.FlowAlign.Top());
+                _bossDebugMenuFlow.set_horizontalAlign(new dc.h2d.FlowAlign.Left());
+
+                _bossDebugMenuLines.Clear();
             }
 
             var box = _bossDebugMenuBox;
@@ -357,23 +372,47 @@ namespace DeadCellsMultiplayerMod
             box.x = 34 * scale;
             box.y = 78 * scale;
             box.visible = true;
-            var text = _bossDebugMenuText;
-            if (text != null)
+            var flow = _bossDebugMenuFlow;
+            if (flow != null)
             {
-                text.x = box.x + 18 * scale;
-                text.y = box.y + 14 * scale;
-                text.scaleX = 0.42 * scale;
-                text.scaleY = 0.42 * scale;
-                text.visible = true;
-                text.text = BuildBossDebugMenuText().AsHaxeString();
+                flow.x = box.x + 18 * scale;
+                flow.y = box.y + 14 * scale;
+                flow.alpha = 1;
+                flow.visible = true;
+                root.addChild(flow);
+            }
+
+            var lines = BuildBossDebugMenuLines();
+            while (_bossDebugMenuLines.Count < lines.Count && flow != null)
+            {
+                var line = Assets.Class.makeText(string.Empty.AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, flow);
+                line.textColor = 0xFFFFFF;
+                line.alpha = 1;
+                line.scaleX = 0.42;
+                line.scaleY = 0.42;
+                _bossDebugMenuLines.Add(line);
+            }
+
+            for (int i = 0; i < _bossDebugMenuLines.Count; i++)
+            {
+                var line = _bossDebugMenuLines[i];
+                line.visible = i < lines.Count;
+                if (i < lines.Count)
+                    line.text = lines[i].AsHaxeString();
             }
         }
 
         private void ClearBossDebugMenuPanel()
         {
-            try { _bossDebugMenuText?.remove(); } catch { }
+            for (int i = 0; i < _bossDebugMenuLines.Count; i++)
+            {
+                try { _bossDebugMenuLines[i].remove(); } catch { }
+            }
+
+            _bossDebugMenuLines.Clear();
+            try { _bossDebugMenuFlow?.remove(); } catch { }
             try { _bossDebugMenuBox?.remove(); } catch { }
-            _bossDebugMenuText = null;
+            _bossDebugMenuFlow = null;
             _bossDebugMenuBox = null;
         }
 
