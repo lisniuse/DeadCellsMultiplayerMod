@@ -358,7 +358,7 @@ public sealed partial class NetNode
         if (!double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
             return false;
 
-        die = new MobDie(parsedUserId, mobIndex, x, y);
+        die = new MobDie(parsedUserId, mobIndex, x, y, parts.Length > 4 ? (parts[4] ?? string.Empty) : string.Empty);
         return true;
     }
 

@@ -196,7 +196,7 @@ internal static class MobWireCodec
     {
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"MOBDIE|{die.UserId}|{die.MobIndex}|{die.X}|{die.Y}\n");
+            $"MOBDIE|{die.UserId}|{die.MobIndex}|{die.X}|{die.Y}|{die.Type}\n");
     }
 
     private static void AppendJoinedStates(StringBuilder sb, IReadOnlyList<NetNode.MobStateSnapshot>? states)

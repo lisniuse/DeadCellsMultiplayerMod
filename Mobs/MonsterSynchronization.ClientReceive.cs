@@ -1753,7 +1753,26 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         {
             lock (Sync)
             {
-                return ResolveMobBySyncIdLocked(die.MobIndex);
+                var mob = ResolveMobBySyncIdLocked(die.MobIndex);
+                if (mob != null)
+                    return mob;
+
+                if (!string.IsNullOrWhiteSpace(die.Type))
+                {
+                    var rebindIndex = FindBestTrackedMobIndexForHitByQuantizedPositionLocked(die.Type, die.X, die.Y);
+                    if (rebindIndex >= 0 && rebindIndex < trackedMobs.Count)
+                    {
+                        var candidate = trackedMobs[rebindIndex];
+                        if (candidate != null)
+                        {
+                            SyncMobIdRegistry.BindSyncId(candidate, die.MobIndex);
+                            MobSyncTrace.LogBindSyncId("die", die.MobIndex, die.Type, die.X, die.Y);
+                            return candidate;
+                        }
+                    }
+                }
+
+                return null;
             }
         }
 

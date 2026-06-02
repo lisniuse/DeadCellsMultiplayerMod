@@ -338,13 +338,15 @@ public sealed partial class NetNode : IDisposable
         public readonly int MobIndex;
         public readonly double X;
         public readonly double Y;
+        public readonly string Type;
 
-        public MobDie(int userId, int mobIndex, double x, double y)
+        public MobDie(int userId, int mobIndex, double x, double y, string type = "")
         {
             UserId = userId;
             MobIndex = mobIndex;
             X = x;
             Y = y;
+            Type = type ?? string.Empty;
         }
     }
 

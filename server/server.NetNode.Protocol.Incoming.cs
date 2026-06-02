@@ -953,7 +953,7 @@ public sealed partial class NetNode
                             }
                             else if (ev == "die")
                             {
-                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y);
+                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y, u.Type ?? string.Empty);
                                 _pendingMobDies.Add(die);
                                 if (_role == NetRole.Host && senderId.HasValue)
                                     hasDieToForward = true;
