@@ -22,8 +22,15 @@ namespace DeadCellsMultiplayerMod
         private const double BossDebugNpcUseDistancePx = 78.0;
         private const string BossDebugNpcAtlas = "atlas/merchantSmall.atlas";
         private const string BossDebugNpcAnim = "MerchantSmallIdle";
+        private const int KeyEsc = 27;
+        private const int KeyUp = 38;
+        private const int KeyDown = 40;
         private const int KeyR = 82;
-        private static readonly Dictionary<WindowElement, Action> BossDebugPopupActions = new(ReferenceEqualityComparer.Instance);
+        private const int KeyW = 87;
+        private const int KeyS = 83;
+        private const int BossDebugMenuNormalColor = 0xFFFFFF;
+        private const int BossDebugMenuSelectedColor = 0xF7FC65;
+        private const double BossDebugConfirmDebounceSeconds = 0.25;
 
         private readonly struct BossDebugDestination
         {
@@ -58,11 +65,13 @@ namespace DeadCellsMultiplayerMod
         private HSprite? _bossDebugNpcSprite;
         private dc.h2d.Text? _bossDebugNpcLabel;
         private DebugPopUp? _bossDebugPopup;
-        private readonly List<WindowElement> _bossDebugPopupElements = new();
+        private readonly List<dc.ui.we.Text> _bossDebugPopupLines = new();
         private Level? _bossDebugNpcLevel;
         private double _bossDebugNpcX;
         private double _bossDebugNpcY;
         private bool _bossDebugMenuOpen;
+        private int _bossDebugSelectedIndex;
+        private long _bossDebugIgnoreConfirmUntilTick;
 
         internal bool TryHostBossTestTeleport()
         {
@@ -169,6 +178,8 @@ namespace DeadCellsMultiplayerMod
             {
                 UpdateBossDebugNpcLabel("DEBUG\nSelecting...");
                 EnsureBossDebugPopup();
+                HandleBossDebugMenuInput();
+                UpdateBossDebugPopupSelection();
                 return;
             }
 
@@ -177,6 +188,8 @@ namespace DeadCellsMultiplayerMod
             if (IsBossDebugConfirmPressed())
             {
                 _bossDebugMenuOpen = true;
+                _bossDebugIgnoreConfirmUntilTick =
+                    Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
                 EnsureBossDebugPopup();
             }
         }
@@ -202,15 +215,13 @@ namespace DeadCellsMultiplayerMod
                 pivot.centerFactorY = 1.0;
                 pivot.usingFactor = true;
                 pivot.isUndefined = false;
-                _bossDebugNpcSprite.get_anim().play(BossDebugNpcAnim.AsHaxeString(), null, null).loop(null);
                 level.scroller?.addChildAt(_bossDebugNpcSprite, Const.Class.DP_ROOM_FRONT_HERO);
 
                 _bossDebugNpcLabel = Assets.Class.makeText("DEBUG".AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, level.scroller);
                 _bossDebugNpcLabel.textColor = 0x6CFF7A;
                 _bossDebugNpcLabel.scaleX = 0.55;
                 _bossDebugNpcLabel.scaleY = 0.55;
-                _bossDebugNpcLabel.x = _bossDebugNpcX - 52;
-                _bossDebugNpcLabel.y = _bossDebugNpcY - 92;
+                PositionBossDebugNpcLabel();
             }
             catch (Exception ex)
             {
@@ -238,12 +249,50 @@ namespace DeadCellsMultiplayerMod
 
         private static bool IsBossDebugConfirmPressed() => Key.Class.isPressed(KeyR);
 
+        private void HandleBossDebugMenuInput()
+        {
+            if (Key.Class.isPressed(KeyEsc))
+            {
+                _bossDebugMenuOpen = false;
+                CloseBossDebugPopup();
+                return;
+            }
+
+            if (Key.Class.isPressed(KeyUp) || Key.Class.isPressed(KeyW))
+                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + BossDebugDestinations.Length - 1) % BossDebugDestinations.Length;
+
+            if (Key.Class.isPressed(KeyDown) || Key.Class.isPressed(KeyS))
+                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + 1) % BossDebugDestinations.Length;
+
+            if (Stopwatch.GetTimestamp() >= _bossDebugIgnoreConfirmUntilTick && IsBossDebugConfirmPressed())
+            {
+                var dest = BossDebugDestinations[_bossDebugSelectedIndex];
+                _bossDebugMenuOpen = false;
+                CloseBossDebugPopup();
+                TryHostBossTestLevelTeleport(dest.LevelId, dest.Label);
+            }
+        }
+
         private void UpdateBossDebugNpcLabel(string text)
         {
             if (_bossDebugNpcLabel == null)
                 return;
 
-            try { _bossDebugNpcLabel.text = text.AsHaxeString(); } catch { }
+            try
+            {
+                PositionBossDebugNpcLabel();
+                _bossDebugNpcLabel.text = text.AsHaxeString();
+            }
+            catch { }
+        }
+
+        private void PositionBossDebugNpcLabel()
+        {
+            if (_bossDebugNpcLabel == null)
+                return;
+
+            _bossDebugNpcLabel.x = _bossDebugNpcX - 34;
+            _bossDebugNpcLabel.y = _bossDebugNpcY - 118;
         }
 
         private void EnsureBossDebugPopup()
@@ -262,7 +311,7 @@ namespace DeadCellsMultiplayerMod
                 popup.cancelable = true;
                 popup.uMaxWid = 430;
                 popup.title("BOSS DEBUG".AsHaxeString());
-                popup.text("Choose a boss room".AsHaxeString(), 0xFFFFFF, false);
+                popup.text("W/S select, R confirm, Esc close".AsHaxeString(), BossDebugMenuNormalColor, false);
                 popup.spacerLine(null);
                 popup.onClose = new HlAction(ClearBossDebugPopupRegistrations);
                 popup.onCancel = new HlAction(() =>
@@ -274,18 +323,12 @@ namespace DeadCellsMultiplayerMod
                 for (int i = 0; i < BossDebugDestinations.Length; i++)
                 {
                     var dest = BossDebugDestinations[i];
-                    var element = popup.activate(dest.Label.AsHaxeString(), 0xFFFFFF, false);
-                    if (element == null)
-                        continue;
-
-                    _bossDebugPopupElements.Add(element);
-                    BossDebugPopupActions[element] = () =>
-                    {
-                        _bossDebugMenuOpen = false;
-                        CloseBossDebugPopup();
-                        TryHostBossTestLevelTeleport(dest.LevelId, dest.Label);
-                    };
+                    var line = popup.text(dest.Label.AsHaxeString(), BossDebugMenuNormalColor, false);
+                    if (line != null)
+                        _bossDebugPopupLines.Add(line);
                 }
+
+                UpdateBossDebugPopupSelection();
             }
             catch (Exception ex)
             {
@@ -309,24 +352,26 @@ namespace DeadCellsMultiplayerMod
 
         private void ClearBossDebugPopupRegistrations()
         {
-            for (int i = 0; i < _bossDebugPopupElements.Count; i++)
-            {
-                BossDebugPopupActions.Remove(_bossDebugPopupElements[i]);
-            }
-
-            _bossDebugPopupElements.Clear();
+            _bossDebugPopupLines.Clear();
             _bossDebugPopup = null;
         }
 
-        private static void Hook_WindowElement_onActivate(Hook_WindowElement.orig_onActivate orig, WindowElement self)
+        private void UpdateBossDebugPopupSelection()
         {
-            if (BossDebugPopupActions.TryGetValue(self, out var action))
+            for (int i = 0; i < _bossDebugPopupLines.Count; i++)
             {
-                action();
-                return;
+                var line = _bossDebugPopupLines[i];
+                var selected = i == _bossDebugSelectedIndex;
+                var label = (selected ? "> " : "  ") + BossDebugDestinations[i].Label;
+                try
+                {
+                    line.tf.text = label.AsHaxeString();
+                    line.tf.textColor = selected ? BossDebugMenuSelectedColor : BossDebugMenuNormalColor;
+                }
+                catch
+                {
+                }
             }
-
-            orig(self);
         }
 
         private void TryGotoBossDebugLevel(string levelId)
