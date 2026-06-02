@@ -7,8 +7,10 @@ using dc.hxd;
 using dc.level;
 using dc.libs.heaps.slib;
 using dc.pr;
+using dc.tool;
 using dc.ui;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
+using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
 using ModCore.Utilities;
 
@@ -31,6 +33,14 @@ namespace DeadCellsMultiplayerMod
         private const int BossDebugMenuNormalColor = 0xFFFFFF;
         private const int BossDebugMenuSelectedColor = 0xF7FC65;
         private const double BossDebugConfirmDebounceSeconds = 0.25;
+        private const int BossDebugVisibleRows = 12;
+
+        private enum BossDebugMenuPage
+        {
+            Root,
+            BossTeleport,
+            WeaponSpawn
+        }
 
         private readonly struct BossDebugDestination
         {
@@ -41,6 +51,18 @@ namespace DeadCellsMultiplayerMod
             {
                 Label = label;
                 LevelId = levelId;
+            }
+        }
+
+        private readonly struct BossDebugWeaponChoice
+        {
+            public readonly string Id;
+            public readonly string Label;
+
+            public BossDebugWeaponChoice(string id, string label)
+            {
+                Id = id;
+                Label = label;
             }
         }
 
@@ -62,15 +84,29 @@ namespace DeadCellsMultiplayerMod
             new("Boss Rush - BossRushZone", "BossRushZone")
         };
 
+        private static readonly string[] BossDebugRootOptions =
+        {
+            "BOSS传送",
+            "获取武器"
+        };
+
         private HSprite? _bossDebugNpcSprite;
         private dc.h2d.Text? _bossDebugNpcLabel;
         private DebugPopUp? _bossDebugPopup;
         private readonly List<dc.ui.we.Text> _bossDebugPopupLines = new();
+        private List<BossDebugWeaponChoice>? _bossDebugWeaponChoices;
         private Level? _bossDebugNpcLevel;
         private double _bossDebugNpcX;
         private double _bossDebugNpcY;
         private bool _bossDebugMenuOpen;
+        private BossDebugMenuPage _bossDebugMenuPage = BossDebugMenuPage.Root;
         private int _bossDebugSelectedIndex;
+        private int _bossDebugRootSelectedIndex;
+        private int _bossDebugBossSelectedIndex;
+        private int _bossDebugWeaponSelectedIndex;
+        private BossDebugMenuPage _bossDebugPopupPage = BossDebugMenuPage.Root;
+        private int _bossDebugPopupFirstIndex = -1;
+        private int _bossDebugPopupLineCount = -1;
         private long _bossDebugIgnoreConfirmUntilTick;
 
         internal bool TryHostBossTestTeleport()
@@ -188,6 +224,8 @@ namespace DeadCellsMultiplayerMod
             if (IsBossDebugConfirmPressed())
             {
                 _bossDebugMenuOpen = true;
+                _bossDebugMenuPage = BossDebugMenuPage.Root;
+                _bossDebugSelectedIndex = _bossDebugRootSelectedIndex;
                 _bossDebugIgnoreConfirmUntilTick =
                     Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
                 EnsureBossDebugPopup();
@@ -253,23 +291,84 @@ namespace DeadCellsMultiplayerMod
         {
             if (Key.Class.isPressed(KeyEsc))
             {
-                _bossDebugMenuOpen = false;
-                CloseBossDebugPopup();
+                if (_bossDebugMenuPage == BossDebugMenuPage.Root)
+                {
+                    _bossDebugMenuOpen = false;
+                    CloseBossDebugPopup();
+                }
+                else
+                {
+                    _bossDebugMenuPage = BossDebugMenuPage.Root;
+                    _bossDebugSelectedIndex = _bossDebugRootSelectedIndex;
+                    CloseBossDebugPopup();
+                }
                 return;
             }
 
+            var itemCount = GetBossDebugCurrentItemCount();
+            if (itemCount <= 0)
+                return;
+
             if (Key.Class.isPressed(KeyUp) || Key.Class.isPressed(KeyW))
-                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + BossDebugDestinations.Length - 1) % BossDebugDestinations.Length;
+                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + itemCount - 1) % itemCount;
 
             if (Key.Class.isPressed(KeyDown) || Key.Class.isPressed(KeyS))
-                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + 1) % BossDebugDestinations.Length;
+                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + 1) % itemCount;
 
             if (Stopwatch.GetTimestamp() >= _bossDebugIgnoreConfirmUntilTick && IsBossDebugConfirmPressed())
             {
-                var dest = BossDebugDestinations[_bossDebugSelectedIndex];
-                _bossDebugMenuOpen = false;
-                CloseBossDebugPopup();
-                TryHostBossTestLevelTeleport(dest.LevelId, dest.Label);
+                HandleBossDebugMenuConfirm();
+            }
+        }
+
+        private int GetBossDebugCurrentItemCount()
+        {
+            return _bossDebugMenuPage switch
+            {
+                BossDebugMenuPage.Root => BossDebugRootOptions.Length,
+                BossDebugMenuPage.BossTeleport => BossDebugDestinations.Length,
+                BossDebugMenuPage.WeaponSpawn => GetBossDebugWeaponChoices().Count,
+                _ => 0
+            };
+        }
+
+        private void HandleBossDebugMenuConfirm()
+        {
+            switch (_bossDebugMenuPage)
+            {
+                case BossDebugMenuPage.Root:
+                    _bossDebugRootSelectedIndex = _bossDebugSelectedIndex;
+                    if (_bossDebugSelectedIndex == 0)
+                    {
+                        _bossDebugMenuPage = BossDebugMenuPage.BossTeleport;
+                        _bossDebugSelectedIndex = _bossDebugBossSelectedIndex;
+                    }
+                    else
+                    {
+                        _bossDebugMenuPage = BossDebugMenuPage.WeaponSpawn;
+                        _bossDebugSelectedIndex = _bossDebugWeaponSelectedIndex;
+                    }
+                    CloseBossDebugPopup();
+                    _bossDebugIgnoreConfirmUntilTick =
+                        Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
+                    break;
+
+                case BossDebugMenuPage.BossTeleport:
+                    _bossDebugBossSelectedIndex = _bossDebugSelectedIndex;
+                    var dest = BossDebugDestinations[_bossDebugSelectedIndex];
+                    _bossDebugMenuOpen = false;
+                    CloseBossDebugPopup();
+                    TryHostBossTestLevelTeleport(dest.LevelId, dest.Label);
+                    break;
+
+                case BossDebugMenuPage.WeaponSpawn:
+                    _bossDebugWeaponSelectedIndex = _bossDebugSelectedIndex;
+                    var weapons = GetBossDebugWeaponChoices();
+                    if (_bossDebugSelectedIndex >= 0 && _bossDebugSelectedIndex < weapons.Count)
+                        TrySpawnBossDebugWeapon(weapons[_bossDebugSelectedIndex]);
+                    _bossDebugIgnoreConfirmUntilTick =
+                        Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
+                    break;
             }
         }
 
@@ -310,20 +409,28 @@ namespace DeadCellsMultiplayerMod
                 _bossDebugPopup = popup;
                 popup.cancelable = true;
                 popup.uMaxWid = 430;
-                popup.title("BOSS DEBUG".AsHaxeString());
-                popup.text("W/S select, R confirm, Esc close".AsHaxeString(), BossDebugMenuNormalColor, false);
+                popup.title(GetBossDebugPopupTitle().AsHaxeString());
+                popup.text(GetBossDebugHelpText().AsHaxeString(), BossDebugMenuNormalColor, false);
                 popup.spacerLine(null);
                 popup.onClose = new HlAction(ClearBossDebugPopupRegistrations);
                 popup.onCancel = new HlAction(() =>
                 {
-                    _bossDebugMenuOpen = false;
+                    if (_bossDebugMenuPage == BossDebugMenuPage.Root)
+                        _bossDebugMenuOpen = false;
+                    else
+                    {
+                        _bossDebugMenuPage = BossDebugMenuPage.Root;
+                        _bossDebugSelectedIndex = _bossDebugRootSelectedIndex;
+                    }
                     CloseBossDebugPopup();
                 });
 
-                for (int i = 0; i < BossDebugDestinations.Length; i++)
+                _bossDebugPopupPage = _bossDebugMenuPage;
+                _bossDebugPopupFirstIndex = GetBossDebugFirstVisibleIndex();
+                _bossDebugPopupLineCount = GetBossDebugVisibleLineCount(_bossDebugPopupFirstIndex);
+                for (int i = 0; i < _bossDebugPopupLineCount; i++)
                 {
-                    var dest = BossDebugDestinations[i];
-                    var line = popup.text(dest.Label.AsHaxeString(), BossDebugMenuNormalColor, false);
+                    var line = popup.text(string.Empty.AsHaxeString(), BossDebugMenuNormalColor, false);
                     if (line != null)
                         _bossDebugPopupLines.Add(line);
                 }
@@ -354,15 +461,30 @@ namespace DeadCellsMultiplayerMod
         {
             _bossDebugPopupLines.Clear();
             _bossDebugPopup = null;
+            _bossDebugPopupFirstIndex = -1;
+            _bossDebugPopupLineCount = -1;
         }
 
         private void UpdateBossDebugPopupSelection()
         {
+            var firstIndex = GetBossDebugFirstVisibleIndex();
+            var lineCount = GetBossDebugVisibleLineCount(firstIndex);
+            if (_bossDebugPopup != null &&
+                (_bossDebugPopupPage != _bossDebugMenuPage ||
+                 _bossDebugPopupFirstIndex != firstIndex ||
+                 _bossDebugPopupLineCount != lineCount))
+            {
+                CloseBossDebugPopup();
+                EnsureBossDebugPopup();
+                return;
+            }
+
             for (int i = 0; i < _bossDebugPopupLines.Count; i++)
             {
                 var line = _bossDebugPopupLines[i];
-                var selected = i == _bossDebugSelectedIndex;
-                var label = (selected ? "> " : "  ") + BossDebugDestinations[i].Label;
+                var itemIndex = _bossDebugPopupFirstIndex + i;
+                var selected = itemIndex == _bossDebugSelectedIndex;
+                var label = (selected ? "> " : "  ") + GetBossDebugLineLabel(itemIndex);
                 try
                 {
                     line.tf.text = label.AsHaxeString();
@@ -371,6 +493,182 @@ namespace DeadCellsMultiplayerMod
                 catch
                 {
                 }
+            }
+        }
+
+        private string GetBossDebugPopupTitle()
+        {
+            return _bossDebugMenuPage switch
+            {
+                BossDebugMenuPage.Root => "DEBUG TOOLS",
+                BossDebugMenuPage.BossTeleport => $"BOSS传送 ({BossDebugDestinations.Length})",
+                BossDebugMenuPage.WeaponSpawn => $"获取武器 ({GetBossDebugWeaponChoices().Count})",
+                _ => "DEBUG"
+            };
+        }
+
+        private string GetBossDebugHelpText()
+        {
+            return _bossDebugMenuPage == BossDebugMenuPage.Root
+                ? "W/S select, R enter, Esc close"
+                : "W/S select, R confirm, Esc back";
+        }
+
+        private int GetBossDebugFirstVisibleIndex()
+        {
+            var count = GetBossDebugCurrentItemCount();
+            if (count <= BossDebugVisibleRows)
+                return 0;
+
+            var half = BossDebugVisibleRows / 2;
+            var first = _bossDebugSelectedIndex - half;
+            if (first < 0)
+                first = 0;
+            var maxFirst = count - BossDebugVisibleRows;
+            if (first > maxFirst)
+                first = maxFirst;
+            return first;
+        }
+
+        private int GetBossDebugVisibleLineCount(int firstIndex)
+        {
+            var count = GetBossDebugCurrentItemCount();
+            if (count <= 0 || firstIndex < 0)
+                return 0;
+            return System.Math.Min(BossDebugVisibleRows, count - firstIndex);
+        }
+
+        private string GetBossDebugLineLabel(int itemIndex)
+        {
+            return _bossDebugMenuPage switch
+            {
+                BossDebugMenuPage.Root => BossDebugRootOptions[itemIndex],
+                BossDebugMenuPage.BossTeleport => BossDebugDestinations[itemIndex].Label,
+                BossDebugMenuPage.WeaponSpawn => FormatBossDebugWeaponLine(itemIndex),
+                _ => string.Empty
+            };
+        }
+
+        private string FormatBossDebugWeaponLine(int itemIndex)
+        {
+            var weapons = GetBossDebugWeaponChoices();
+            if (itemIndex < 0 || itemIndex >= weapons.Count)
+                return string.Empty;
+
+            var choice = weapons[itemIndex];
+            return $"{itemIndex + 1}/{weapons.Count} {choice.Label}";
+        }
+
+        private List<BossDebugWeaponChoice> GetBossDebugWeaponChoices()
+        {
+            if (_bossDebugWeaponChoices != null)
+                return _bossDebugWeaponChoices;
+
+            var choices = new List<BossDebugWeaponChoice>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var all = dc.Data.Class.weapon?.all;
+                if (all != null)
+                {
+                    var len = all.get_length();
+                    for (var i = 0; i < len; i++)
+                    {
+                        var rowObj = all.getDyn(i);
+                        if (rowObj is not HaxeDynObj ho)
+                            continue;
+
+                        string? itemId = null;
+                        try
+                        {
+                            itemId = ho.ToVirtual<virtual_airControlAlways_allowCrouch_cannotBeCanceledByWeapon_isACancel_item_strikeChain_>()?.item?.ToString();
+                        }
+                        catch
+                        {
+                        }
+
+                        if (string.IsNullOrWhiteSpace(itemId))
+                            continue;
+
+                        AddBossDebugWeaponChoice(choices, seen, itemId.Trim());
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "[BossDebugNpc] Failed to enumerate weapons from CDB");
+            }
+
+            if (choices.Count == 0)
+            {
+                AddBossDebugWeaponChoice(choices, seen, "Sword");
+                AddBossDebugWeaponChoice(choices, seen, "Bow");
+                AddBossDebugWeaponChoice(choices, seen, "Shield");
+            }
+
+            choices.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
+            _bossDebugWeaponChoices = choices;
+            return choices;
+        }
+
+        private static void AddBossDebugWeaponChoice(List<BossDebugWeaponChoice> choices, HashSet<string> seen, string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || !seen.Add(itemId))
+                return;
+
+            choices.Add(new BossDebugWeaponChoice(itemId, GetBossDebugItemDisplayName(itemId)));
+        }
+
+        private static string GetBossDebugItemDisplayName(string itemId)
+        {
+            try
+            {
+                var rowObj = dc.Data.Class.item?.resolve(itemId.AsHaxeString(), false);
+                if (rowObj is HaxeDynObj ho)
+                {
+                    var item = ho.ToVirtual<virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_>();
+                    var name = item?.name?.ToString();
+                    if (!string.IsNullOrWhiteSpace(name))
+                        return $"{name.Trim()} [{itemId}]";
+                }
+            }
+            catch
+            {
+            }
+
+            return itemId;
+        }
+
+        private void TrySpawnBossDebugWeapon(BossDebugWeaponChoice choice)
+        {
+            var hero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            var level = hero?._level ?? game?.curLevel;
+            if (hero == null || level == null || string.IsNullOrWhiteSpace(choice.Id))
+            {
+                MultiplayerUI.PushSystemMessage("DEBUG weapon: no level", 2.0, 0.5);
+                return;
+            }
+
+            try
+            {
+                var item = new InventItem(new InventItemKind.Weapon(choice.Id.AsHaxeString()));
+                try { item.refillAmmo(); } catch { }
+
+                var cx = hero.cx;
+                var cy = hero.cy;
+                var inChest = false;
+                var drop = new ItemDrop(level, cx, cy, item, false, Ref<bool>.From(ref inChest));
+                try { drop.setPosPixel(GetEntityWorldX(hero), GetEntityWorldY(hero)); } catch { }
+                try { drop.onDropAsLoot(); } catch { }
+                try { drop.floatForS(0.2, null, null); } catch { }
+
+                MultiplayerUI.PushSystemMessage($"Weapon: {choice.Id}", 2.0, 0.5);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "[BossDebugNpc] Failed to spawn weapon {WeaponId}", choice.Id);
+                MultiplayerUI.PushSystemMessage($"Weapon failed: {choice.Id}", 2.0, 0.5);
             }
         }
 
