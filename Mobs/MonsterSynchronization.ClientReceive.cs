@@ -195,6 +195,11 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var rejectedGeneration = 0;
             var rejectedCount = 0;
+            var acceptedCount = 0;
+            var missingMobCount = 0;
+            var targetWriteCount = 0;
+            var minSyncId = int.MaxValue;
+            var maxSyncId = int.MinValue;
             lock (Sync)
             {
                 PruneInvalidTrackedMobsLocked();
@@ -202,12 +207,21 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 for (int i = 0; i < moves.Count; i++)
                 {
                     var move = moves[i];
+                    if (move.Index < minSyncId)
+                        minSyncId = move.Index;
+                    if (move.Index > maxSyncId)
+                        maxSyncId = move.Index;
+
                     if (!ShouldAcceptPacketGenerationLocked(move.Generation, ref rejectedCount, ref rejectedGeneration))
                         continue;
 
+                    acceptedCount++;
                     var mob = ResolveTrackedMobBySyncIdLocked(move.Index);
                     if (mob == null)
+                    {
+                        missingMobCount++;
                         continue;
+                    }
 
                     var mergedAnimPayload = move.AnimPayload ?? string.Empty;
                     var life = GetMobLifeOrFallback(mob, 1);
@@ -233,8 +247,28 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         maxLife,
                         mergedAnimPayload,
                         statePayload);
+                    targetWriteCount++;
                 }
             }
+
+            if (minSyncId == int.MaxValue)
+            {
+                minSyncId = -1;
+                maxSyncId = -1;
+            }
+
+            MobSyncTrace.LogMovementSummary(
+                "client-recv-move",
+                moves.Count,
+                acceptedCount,
+                missingMobCount,
+                targetWriteCount,
+                rejectedCount,
+                minSyncId,
+                maxSyncId,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"lastRejectedGeneration={rejectedGeneration}"));
 
             LogRejectedPacketGeneration("hostMoveOnClient", rejectedCount, rejectedGeneration);
         }

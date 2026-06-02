@@ -4,6 +4,7 @@ using dc;
 using dc.en;
 using dc.libs.heaps.slib._AnimManager;
 using DeadCellsMultiplayerMod.Mobs.Bosses;
+using DeadCellsMultiplayerMod.Mobs.Levelinit;
 using ModCore.Utilities;
 
 namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
@@ -13,17 +14,30 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static void ApplyInterpolatedState(Mob self)
         {
             ClientMobState target;
+            var traceSyncId = -1;
+            var traceMobType = string.Empty;
             lock (Sync)
             {
                 if (!clientMobTargets.TryGetValue(self, out target))
+                {
+                    if (SyncMobIdRegistry.TryGetExistingSyncId(self, out traceSyncId))
+                        traceMobType = BuildMobStateTypeSignature(self);
+                    MobSyncTrace.LogInterpolationSkipped("no-target", traceSyncId, traceMobType);
                     return;
+                }
+
+                if (SyncMobIdRegistry.TryGetExistingSyncId(self, out traceSyncId))
+                    traceMobType = BuildMobStateTypeSignature(self);
             }
 
             // Life/death must sync even when the mob is far/off-screen (visual interpolation stays gated below).
             ApplyAuthoritativeLifeState(self, target.Life, target.MaxLife);
 
             if (!ShouldProcessClientVisualState(self))
+            {
+                MobSyncTrace.LogInterpolationSkipped("visual-gate", traceSyncId, traceMobType);
                 return;
+            }
 
             var preserveLocalMotion = HasLocalQueuedOrChargingSkill(self) || IsClientNetworkAttackActive(self);
 
@@ -48,6 +62,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     ? currentY + (target.Y - currentY) * interpolationAlpha
                     : currentY;
 
+                var appliedX = lerpedX;
+                var appliedY = lerpedY;
                 try
                 {
                     if (syncY)
@@ -67,6 +83,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 try
                 {
+                    appliedX = GetWorldX(self);
+                    appliedY = GetWorldY(self);
+                }
+                catch
+                {
+                }
+
+                try
+                {
                     self.dx = 0;
                     self.bdx = 0;
                     if (syncY)
@@ -79,6 +104,22 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 catch
                 {
                 }
+
+                MobSyncTrace.LogInterpolationSample(
+                    traceSyncId,
+                    traceMobType,
+                    currentX,
+                    currentY,
+                    target.X,
+                    target.Y,
+                    appliedX,
+                    appliedY,
+                    preserveLocalMotion,
+                    syncY);
+            }
+            else
+            {
+                MobSyncTrace.LogInterpolationSkipped("preserve-local-motion", traceSyncId, traceMobType);
             }
 
             var responsiveDir = ComputeResponsiveFacingDir(self, target);

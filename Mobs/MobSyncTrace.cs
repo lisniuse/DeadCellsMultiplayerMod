@@ -19,6 +19,8 @@ internal static class MobSyncTrace
 
     public static bool Enabled => EnvTraceEnabled || MultiplayerSettingsStorage.DebugMobsSyncTrace;
     public static bool AssertEnabled => EnvAssertEnabled || MultiplayerSettingsStorage.DebugMobsSyncTrace;
+    private static readonly object MovementDiagSync = new();
+    private static readonly Dictionary<string, DateTime> MovementDiagLastLogUtcByKey = new(StringComparer.Ordinal);
 
     public static void LogSendStatesBatch(string role, IReadOnlyList<NetNode.MobStateSnapshot> states)
     {
@@ -539,6 +541,99 @@ internal static class MobSyncTrace
             route,
             syncId,
             skillId ?? string.Empty);
+    }
+
+    public static void LogMovementSummary(
+        string stage,
+        int count,
+        int accepted,
+        int missingMob,
+        int targetWrites,
+        int rejectedGeneration,
+        int minSyncId,
+        int maxSyncId,
+        string detail = "")
+    {
+        if (!ShouldLogMovementDiag(stage, 1.0))
+            return;
+
+        Log.Information(
+            "[MobSyncMoveDiag] stage={Stage} count={Count} accepted={Accepted} missingMob={MissingMob} targetWrites={TargetWrites} rejectedGeneration={RejectedGeneration} syncIdMin={SyncIdMin} syncIdMax={SyncIdMax} detail={Detail}",
+            stage ?? string.Empty,
+            count,
+            accepted,
+            missingMob,
+            targetWrites,
+            rejectedGeneration,
+            minSyncId,
+            maxSyncId,
+            detail ?? string.Empty);
+    }
+
+    public static void LogInterpolationSample(
+        int syncId,
+        string mobType,
+        double currentX,
+        double currentY,
+        double targetX,
+        double targetY,
+        double appliedX,
+        double appliedY,
+        bool preserveLocalMotion,
+        bool syncY,
+        string detail = "")
+    {
+        var key = syncId >= 0 ? $"client-apply-interp:{syncId}" : "client-apply-interp:unknown";
+        if (!ShouldLogMovementDiag(key, 1.0))
+            return;
+
+        Log.Information(
+            "[MobSyncMoveDiag] stage=client-apply-interp syncId={SyncId} type={MobType} current=({CurrentX},{CurrentY}) target=({TargetX},{TargetY}) applied=({AppliedX},{AppliedY}) delta=({DeltaX},{DeltaY}) preserveLocalMotion={PreserveLocalMotion} syncY={SyncY} detail={Detail}",
+            syncId,
+            mobType ?? string.Empty,
+            currentX,
+            currentY,
+            targetX,
+            targetY,
+            appliedX,
+            appliedY,
+            targetX - currentX,
+            targetY - currentY,
+            preserveLocalMotion,
+            syncY,
+            detail ?? string.Empty);
+    }
+
+    public static void LogInterpolationSkipped(string reason, int syncId, string mobType)
+    {
+        var key = syncId >= 0 ? $"client-apply-skip:{reason}:{syncId}" : $"client-apply-skip:{reason}:unknown";
+        if (!ShouldLogMovementDiag(key, 1.0))
+            return;
+
+        Log.Information(
+            "[MobSyncMoveDiag] stage=client-apply-skip reason={Reason} syncId={SyncId} type={MobType}",
+            reason ?? string.Empty,
+            syncId,
+            mobType ?? string.Empty);
+    }
+
+    private static bool ShouldLogMovementDiag(string key, double intervalSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            key = "unknown";
+
+        var now = DateTime.UtcNow;
+        lock (MovementDiagSync)
+        {
+            if (MovementDiagLastLogUtcByKey.TryGetValue(key, out var last) &&
+                (now - last).TotalSeconds < intervalSeconds)
+            {
+                return false;
+            }
+
+            MovementDiagLastLogUtcByKey[key] = now;
+            return true;
+        }
     }
 
     private static void MinMaxSyncId<T>(IReadOnlyList<T> items, Func<T, int> getIndex, out int minId, out int maxId)

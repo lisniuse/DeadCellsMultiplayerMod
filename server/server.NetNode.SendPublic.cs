@@ -480,6 +480,33 @@ public sealed partial class NetNode
         if (moves == null || moves.Count == 0)
             return;
 
+        var minSyncId = int.MaxValue;
+        var maxSyncId = int.MinValue;
+        for (int i = 0; i < moves.Count; i++)
+        {
+            var syncId = moves[i].Index;
+            if (syncId < minSyncId)
+                minSyncId = syncId;
+            if (syncId > maxSyncId)
+                maxSyncId = syncId;
+        }
+
+        if (minSyncId == int.MaxValue)
+        {
+            minSyncId = -1;
+            maxSyncId = -1;
+        }
+
+        DeadCellsMultiplayerMod.Mobs.MobsSynchronization.MobSyncTrace.LogMovementSummary(
+            "host-send-move",
+            moves.Count,
+            moves.Count,
+            0,
+            moves.Count,
+            0,
+            minSyncId,
+            maxSyncId);
+
         var line = MobWireCodec.BuildMobMovesLine(moves);
         _ = SendLineSafe(line);
     }
