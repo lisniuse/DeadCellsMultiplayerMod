@@ -268,6 +268,7 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
             ["CastleAlchemy"] = () => new CastleAlchemy(self, self.map, id),
             ["CastleTorture"] = () => new CastleTorture(self, self.map, id),
             ["GardenerStage"] = () => new GardenerStage(self, self.map, id, "Gardener_outside".AsHaxeString()),
+            ["Lighthouse"] = () => new Lighthouse(self, self.map, id, "LighthouseTop".AsHaxeString()),
             ["LighthouseTop"] = () => new Lighthouse(self, self.map, id, "LighthouseTop".AsHaxeString()),
             ["PrisonCorrupt"] = () => new Prison(self, self.map, id),
             ["RichterCastle"] = () => new RichterCastle(self, self.map),

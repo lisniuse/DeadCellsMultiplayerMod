@@ -68,19 +68,21 @@ namespace DeadCellsMultiplayerMod
 
         private static readonly BossDebugDestination[] BossDebugDestinations =
         {
+            // Stable boss test destinations, derived from CDB bossRush.bosses[level],
+            // achievement boss ids, and the level display constructors in GameProxy.
             new("Concierge - Bridge", "Bridge"),
             new("Conjunctivius - BeholderPit", "BeholderPit"),
             new("Mama Tick - SwampHeart", "SwampHeart"),
+            new("Death - DeathArena", "DeathArena"),
             new("Time Keeper - TopClockTower", "TopClockTower"),
             new("Giant - Giant", "Giant"),
+            new("Scarecrow - GardenerStage", "GardenerStage"),
+            new("Dracula - DookuArena", "DookuArena"),
             new("Hand of the King - Throne", "Throne"),
-            new("Collector - Observatory", "Observatory"),
-            new("Scarecrow - CastleAlchemy", "CastleAlchemy"),
-            new("Servants - LighthouseBottom", "LighthouseBottom"),
+            new("Servants - Lighthouse", "Lighthouse"),
             new("Queen - QueenArena", "QueenArena"),
-            new("Death - DeathArena", "DeathArena"),
-            new("Dooku - DookuArena", "DookuArena"),
-            new("Richter - RichterCastle", "RichterCastle"),
+            new("Collector - Observatory", "Observatory"),
+            new("Richter Mode - RichterCastle", "RichterCastle"),
             new("Boss Rush - BossRushZone", "BossRushZone")
         };
 

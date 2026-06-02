@@ -186,9 +186,13 @@ namespace DeadCellsMultiplayerMod
 
         private static readonly HashSet<string> BossLevelIds = new(StringComparer.OrdinalIgnoreCase)
         {
+            // Canonical boss level ids are derived from CDB bossRush.bosses[level],
+            // boss-related achievements, and GameProxy level display constructors.
             "BeholderPit", "Throne", "DeathArena", "DookuArena", "QueenArena", "Observatory",
-            "SwampHeart", "CastleAlchemy", "LighthouseTop", "LighthouseBottom", "Giant",
-            "DookuCastle", "RichterCastle", "BossRushZone", "Bridge", "TopClockTower"
+            "SwampHeart", "GardenerStage", "Lighthouse", "Giant",
+            "DookuCastle", "RichterCastle", "BossRushZone", "Bridge", "TopClockTower",
+            // Compatibility aliases seen in earlier multiplayer boss handling.
+            "CastleAlchemy", "LighthouseTop", "LighthouseBottom"
         };
 
         internal static bool IsBossLevel(string? levelId)
