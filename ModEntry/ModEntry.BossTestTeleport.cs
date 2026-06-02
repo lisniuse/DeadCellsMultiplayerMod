@@ -477,8 +477,6 @@ namespace DeadCellsMultiplayerMod
             var lineCount = GetBossDebugVisibleLineCount(firstIndex);
             if (_bossDebugPopup != null &&
                 (_bossDebugPopupPage != _bossDebugMenuPage ||
-                 _bossDebugPopupSelectedIndex != _bossDebugSelectedIndex ||
-                 _bossDebugPopupFirstIndex != firstIndex ||
                  _bossDebugPopupLineCount != lineCount))
             {
                 CloseBossDebugPopup();
@@ -498,11 +496,35 @@ namespace DeadCellsMultiplayerMod
                 {
                     line.tf.text = label.AsHaxeString();
                     line.tf.textColor = selected ? BossDebugMenuSelectedColor : BossDebugMenuNormalColor;
+                    ForceBossDebugTextRefresh(line);
                 }
                 catch
                 {
                 }
             }
+
+            ForceBossDebugPopupRefresh();
+        }
+
+        private void ForceBossDebugTextRefresh(dc.ui.we.Text line)
+        {
+            try { line.tf.refresh(); } catch { }
+            try { line.tf.rebuild(); } catch { }
+            try { line.beforeReflow(); } catch { }
+            try { line.reflow(); } catch { }
+            try { line.contentWrapper?.reflow(); } catch { }
+        }
+
+        private void ForceBossDebugPopupRefresh()
+        {
+            var popup = _bossDebugPopup;
+            if (popup == null)
+                return;
+
+            try { popup.invalidated = true; } catch { }
+            try { popup.flow.needReflow = true; } catch { }
+            try { popup.flow.reflow(); } catch { }
+            try { popup.render(); } catch { }
         }
 
         private string GetBossDebugPopupTitle()
