@@ -89,6 +89,7 @@ namespace DeadCellsMultiplayerMod
             "BOSS传送",
             "获取武器"
         };
+        private static bool _bossDebugWeaponChoiceDiagnosticsLogged;
 
         private HSprite? _bossDebugNpcSprite;
         private dc.h2d.Text? _bossDebugNpcLabel;
@@ -576,8 +577,11 @@ namespace DeadCellsMultiplayerMod
             var choices = new List<BossDebugWeaponChoice>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            var beforeGameItems = choices.Count;
             AddBossDebugWeaponChoicesFromGameItems(choices, seen);
+            var afterGameItems = choices.Count;
 
+            var beforeWeaponTable = choices.Count;
             try
             {
                 var all = dc.Data.Class.weapon?.all;
@@ -597,11 +601,23 @@ namespace DeadCellsMultiplayerMod
             {
                 Logger.Warning(ex, "[BossDebugNpc] Failed to enumerate weapons from CDB");
             }
+            var afterWeaponTable = choices.Count;
 
+            var beforeItemTable = choices.Count;
             if (choices.Count == 0)
                 AddBossDebugWeaponChoicesFromItems(choices, seen);
+            var afterItemTable = choices.Count;
 
             choices.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
+            if (!_bossDebugWeaponChoiceDiagnosticsLogged)
+            {
+                _bossDebugWeaponChoiceDiagnosticsLogged = true;
+                Logger.Information("[BossDebugNpc] weapon choices built total={Total} fromGameItems={GameItems} fromWeaponTable={WeaponTable} fromItemTableFallback={ItemTable}",
+                    choices.Count,
+                    afterGameItems - beforeGameItems,
+                    afterWeaponTable - beforeWeaponTable,
+                    afterItemTable - beforeItemTable);
+            }
             _bossDebugWeaponChoices = choices;
             return choices;
         }
@@ -701,23 +717,8 @@ namespace DeadCellsMultiplayerMod
         {
             if (string.IsNullOrWhiteSpace(itemId) || !seen.Add(itemId))
                 return;
-            if (!IsBossDebugSpawnableWeapon(itemId))
-                return;
 
             choices.Add(new BossDebugWeaponChoice(itemId, GetBossDebugItemDisplayName(itemId)));
-        }
-
-        private static bool IsBossDebugSpawnableWeapon(string itemId)
-        {
-            try
-            {
-                var item = new InventItem(new InventItemKind.Weapon(itemId.AsHaxeString()));
-                return item.getWeaponData() != null;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private static string GetBossDebugItemDisplayName(string itemId)
