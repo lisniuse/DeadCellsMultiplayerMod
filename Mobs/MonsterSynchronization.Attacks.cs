@@ -352,6 +352,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var candidateLevelId = GetLevelTraceIdSafe(level);
             var currentLevelId = GetLevelTraceIdSafe(currentLevel);
+            if (trackedMobs.Count > 0 && candidateTrackedCount <= 0)
+            {
+                baselineTrackedCount = trackedMobs.Count;
+                baselineSource = "live_cross_identity";
+                reason = "live_nonempty_candidate_empty";
+                return false;
+            }
+
             var sameIdentity = currentLevel != null &&
                                s_levelIdentityReady &&
                                s_levelIdentityToken > 0 &&
