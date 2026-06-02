@@ -535,6 +535,7 @@ namespace DeadCellsMultiplayerMod
             Hook_Hero.updateInteraction += Hook_Hero_updateInteraction;
             Hook_Hero.canUseInteractive += Hook_Hero_canUseInteractive;
             Hook_Hero.onUseInteractive += Hook_Hero_onUseInteractive;
+            dc.ui.Hook_WindowElement.onActivate += Hook_WindowElement_onActivate;
             Hook_User.newGame += GameDataSync.user_hook_new_game;
             Hook_User.unserialize += Hook_User_unserialize;
             Hook_Game.onDispose += Hook_Game_onDispose;

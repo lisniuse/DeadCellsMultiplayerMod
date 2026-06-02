@@ -7,7 +7,6 @@ using dc.hxd;
 using dc.level;
 using dc.libs.heaps.slib;
 using dc.pr;
-using dc.shader;
 using dc.ui;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
 using HaxeProxy.Runtime;
@@ -21,16 +20,10 @@ namespace DeadCellsMultiplayerMod
         private const double BossTestBossBackstepPx = 240.0;
         private const double BossDebugNpcSpawnOffsetX = 112.0;
         private const double BossDebugNpcUseDistancePx = 78.0;
-        private const string BossDebugNpcSkinId = "Tick4";
-        private const int KeyEnter = 13;
-        private const int KeyEsc = 27;
-        private const int KeySpace = 32;
-        private const int KeyUp = 38;
-        private const int KeyDown = 40;
+        private const string BossDebugNpcAtlas = "atlas/merchantSmall.atlas";
+        private const string BossDebugNpcAnim = "MerchantSmallIdle";
         private const int KeyR = 82;
-        private const int KeyW = 87;
-        private const int KeyS = 83;
-        private const double BossDebugConfirmDebounceSeconds = 0.25;
+        private static readonly Dictionary<WindowElement, Action> BossDebugPopupActions = new(ReferenceEqualityComparer.Instance);
 
         private readonly struct BossDebugDestination
         {
@@ -64,15 +57,12 @@ namespace DeadCellsMultiplayerMod
 
         private HSprite? _bossDebugNpcSprite;
         private dc.h2d.Text? _bossDebugNpcLabel;
-        private UIBox? _bossDebugMenuBox;
-        private dc.h2d.Flow? _bossDebugMenuFlow;
-        private readonly List<dc.h2d.Text> _bossDebugMenuLines = new();
+        private DebugPopUp? _bossDebugPopup;
+        private readonly List<WindowElement> _bossDebugPopupElements = new();
         private Level? _bossDebugNpcLevel;
         private double _bossDebugNpcX;
         private double _bossDebugNpcY;
         private bool _bossDebugMenuOpen;
-        private int _bossDebugSelectedIndex;
-        private long _bossDebugIgnoreConfirmUntilTick;
 
         internal bool TryHostBossTestTeleport()
         {
@@ -158,7 +148,7 @@ namespace DeadCellsMultiplayerMod
             if (_netRole != NetRole.Host || net == null || !net.IsAlive || hero == null || hero._level == null)
             {
                 ClearBossDebugNpc();
-                ClearBossDebugMenuPanel();
+                CloseBossDebugPopup();
                 _bossDebugMenuOpen = false;
                 return;
             }
@@ -170,27 +160,24 @@ namespace DeadCellsMultiplayerMod
             var near = IsBossDebugNpcNearby(hero);
             if (!near && !_bossDebugMenuOpen)
             {
-                ClearBossDebugMenuPanel();
+                CloseBossDebugPopup();
                 UpdateBossDebugNpcLabel("DEBUG\nCome closer");
                 return;
             }
 
             if (_bossDebugMenuOpen)
             {
-                HandleBossDebugMenuInput();
-                UpdateBossDebugNpcLabel(BuildBossDebugMenuText());
-                UpdateBossDebugMenuPanel();
+                UpdateBossDebugNpcLabel("DEBUG\nSelecting...");
+                EnsureBossDebugPopup();
                 return;
             }
 
-            ClearBossDebugMenuPanel();
+            CloseBossDebugPopup();
             UpdateBossDebugNpcLabel("DEBUG\nPress R");
             if (IsBossDebugConfirmPressed())
             {
                 _bossDebugMenuOpen = true;
-                _bossDebugIgnoreConfirmUntilTick =
-                    Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
-                UpdateBossDebugMenuPanel();
+                EnsureBossDebugPopup();
             }
         }
 
@@ -203,27 +190,26 @@ namespace DeadCellsMultiplayerMod
 
             try
             {
-                var lib = Assets.Class.getHeroLib(Cdb.Class.getSkinInfo(BossDebugNpcSkinId.AsHaxeString()));
-                _bossDebugNpcSprite = new HSprite(lib, "idle".AsHaxeString(), Ref<int>.Null, null);
+                var lib = Assets.Class.lib.get(BossDebugNpcAtlas.AsHaxeString());
+                _bossDebugNpcSprite = new HSprite(lib, BossDebugNpcAnim.AsHaxeString(), Ref<int>.Null, null);
                 _bossDebugNpcSprite.x = _bossDebugNpcX;
                 _bossDebugNpcSprite.y = _bossDebugNpcY;
-                _bossDebugNpcSprite.scaleX = 0.92;
-                _bossDebugNpcSprite.scaleY = 0.92;
+                _bossDebugNpcSprite.scaleX = 1.0;
+                _bossDebugNpcSprite.scaleY = 1.0;
                 _bossDebugNpcSprite.alpha = 1;
                 var pivot = _bossDebugNpcSprite.pivot;
                 pivot.centerFactorX = 0.5;
-                pivot.centerFactorY = 0.5;
+                pivot.centerFactorY = 1.0;
                 pivot.usingFactor = true;
                 pivot.isUndefined = false;
-                TryApplyBossDebugNpcShaders(_bossDebugNpcSprite, BossDebugNpcSkinId);
-                _bossDebugNpcSprite.get_anim().play("idle".AsHaxeString(), null, null).loop(null);
+                _bossDebugNpcSprite.get_anim().play(BossDebugNpcAnim.AsHaxeString(), null, null).loop(null);
                 level.scroller?.addChildAt(_bossDebugNpcSprite, Const.Class.DP_ROOM_FRONT_HERO);
 
                 _bossDebugNpcLabel = Assets.Class.makeText("DEBUG".AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, level.scroller);
                 _bossDebugNpcLabel.textColor = 0x6CFF7A;
                 _bossDebugNpcLabel.scaleX = 0.55;
                 _bossDebugNpcLabel.scaleY = 0.55;
-                _bossDebugNpcLabel.x = _bossDebugNpcX - 78;
+                _bossDebugNpcLabel.x = _bossDebugNpcX - 52;
                 _bossDebugNpcLabel.y = _bossDebugNpcY - 92;
             }
             catch (Exception ex)
@@ -237,36 +223,10 @@ namespace DeadCellsMultiplayerMod
         {
             try { _bossDebugNpcLabel?.remove(); } catch { }
             try { _bossDebugNpcSprite?.remove(); } catch { }
-            ClearBossDebugMenuPanel();
+            CloseBossDebugPopup();
             _bossDebugNpcLabel = null;
             _bossDebugNpcSprite = null;
             _bossDebugNpcLevel = null;
-        }
-
-        private static void TryApplyBossDebugNpcShaders(HSprite sprite, string skinId)
-        {
-            try
-            {
-                var skinInfo = Cdb.Class.getSkinInfo(skinId.AsHaxeString());
-                var heroColorMap = Assets.Class.getHeroColorMap(skinInfo);
-                if (heroColorMap != null)
-                    sprite.addShader(new ColorMap(heroColorMap));
-            }
-            catch
-            {
-            }
-
-            try { sprite.addShader(new DirLighted()); } catch { }
-
-            try
-            {
-                var normalMap = sprite.lib?.getNormalMapFromSprite(sprite);
-                if (normalMap != null)
-                    sprite.addShader(new NormalMap(normalMap));
-            }
-            catch
-            {
-            }
         }
 
         private bool IsBossDebugNpcNearby(Hero hero)
@@ -276,55 +236,7 @@ namespace DeadCellsMultiplayerMod
             return dx * dx + dy * dy <= BossDebugNpcUseDistancePx * BossDebugNpcUseDistancePx;
         }
 
-        private void HandleBossDebugMenuInput()
-        {
-            if (Key.Class.isPressed(KeyEsc))
-            {
-                _bossDebugMenuOpen = false;
-                ClearBossDebugMenuPanel();
-                return;
-            }
-
-            if (Key.Class.isPressed(KeyUp) || Key.Class.isPressed(KeyW))
-                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + BossDebugDestinations.Length - 1) % BossDebugDestinations.Length;
-            if (Key.Class.isPressed(KeyDown) || Key.Class.isPressed(KeyS))
-                _bossDebugSelectedIndex = (_bossDebugSelectedIndex + 1) % BossDebugDestinations.Length;
-
-            if (Stopwatch.GetTimestamp() >= _bossDebugIgnoreConfirmUntilTick && IsBossDebugConfirmPressed())
-            {
-                var dest = BossDebugDestinations[_bossDebugSelectedIndex];
-                _bossDebugMenuOpen = false;
-                ClearBossDebugMenuPanel();
-                TryHostBossTestLevelTeleport(dest.LevelId, dest.Label);
-            }
-        }
-
-        private static bool IsBossDebugConfirmPressed() =>
-            Key.Class.isPressed(KeyR) ||
-            Key.Class.isPressed(KeyEnter) ||
-            Key.Class.isPressed(KeySpace);
-
-        private string BuildBossDebugMenuText()
-        {
-            return string.Join("\n", BuildBossDebugMenuLines());
-        }
-
-        private List<string> BuildBossDebugMenuLines()
-        {
-            var parts = new List<string>
-            {
-                "DEBUG BOSS SELECT",
-                "W/S or Up/Down, R to confirm, Esc to close"
-            };
-
-            for (int i = 0; i < BossDebugDestinations.Length; i++)
-            {
-                var prefix = i == _bossDebugSelectedIndex ? "> " : "  ";
-                parts.Add(prefix + BossDebugDestinations[i].Label);
-            }
-
-            return parts;
-        }
+        private static bool IsBossDebugConfirmPressed() => Key.Class.isPressed(KeyR);
 
         private void UpdateBossDebugNpcLabel(string text)
         {
@@ -334,86 +246,87 @@ namespace DeadCellsMultiplayerMod
             try { _bossDebugNpcLabel.text = text.AsHaxeString(); } catch { }
         }
 
-        private void UpdateBossDebugMenuPanel()
+        private void EnsureBossDebugPopup()
         {
+            if (_bossDebugPopup != null)
+                return;
+
             var hud = HUD.Class.ME;
             if (hud == null)
                 return;
 
-            var root = hud.root;
-            if (root == null)
-                return;
-
-            if (_bossDebugMenuBox == null ||
-                _bossDebugMenuBox.parent == null ||
-                !ReferenceEquals(_bossDebugMenuBox.parent, root) ||
-                _bossDebugMenuFlow == null ||
-                _bossDebugMenuFlow.parent == null ||
-                !ReferenceEquals(_bossDebugMenuFlow.parent, root))
+            try
             {
-                ClearBossDebugMenuPanel();
-                _bossDebugMenuBox = UIBox.Class.drawBoxValidation(470, 330, Ref<int>.Null, Ref<int>.Null, null, false);
-                root.addChild(_bossDebugMenuBox);
+                var popup = new DebugPopUp(hud);
+                _bossDebugPopup = popup;
+                popup.cancelable = true;
+                popup.uMaxWid = 430;
+                popup.title("BOSS DEBUG".AsHaxeString());
+                popup.text("Choose a boss room".AsHaxeString(), 0xFFFFFF, false);
+                popup.spacerLine(null);
+                popup.onClose = new HlAction(ClearBossDebugPopupRegistrations);
+                popup.onCancel = new HlAction(() =>
+                {
+                    _bossDebugMenuOpen = false;
+                    CloseBossDebugPopup();
+                });
 
-                _bossDebugMenuFlow = new dc.h2d.Flow(root);
-                _bossDebugMenuFlow.multiline = true;
-                _bossDebugMenuFlow.isVertical = true;
-                _bossDebugMenuFlow.set_verticalAlign(new dc.h2d.FlowAlign.Top());
-                _bossDebugMenuFlow.set_horizontalAlign(new dc.h2d.FlowAlign.Left());
+                for (int i = 0; i < BossDebugDestinations.Length; i++)
+                {
+                    var dest = BossDebugDestinations[i];
+                    var element = popup.activate(dest.Label.AsHaxeString(), 0xFFFFFF, false);
+                    if (element == null)
+                        continue;
 
-                _bossDebugMenuLines.Clear();
+                    _bossDebugPopupElements.Add(element);
+                    BossDebugPopupActions[element] = () =>
+                    {
+                        _bossDebugMenuOpen = false;
+                        CloseBossDebugPopup();
+                        TryHostBossTestLevelTeleport(dest.LevelId, dest.Label);
+                    };
+                }
             }
-
-            var box = _bossDebugMenuBox;
-            if (box == null)
-                return;
-
-            var scale = hud.get_pixelScale.Invoke();
-            box.x = 34 * scale;
-            box.y = 78 * scale;
-            box.visible = true;
-            var flow = _bossDebugMenuFlow;
-            if (flow != null)
+            catch (Exception ex)
             {
-                flow.x = box.x + 18 * scale;
-                flow.y = box.y + 14 * scale;
-                flow.alpha = 1;
-                flow.visible = true;
-                root.addChild(flow);
-            }
-
-            var lines = BuildBossDebugMenuLines();
-            while (_bossDebugMenuLines.Count < lines.Count && flow != null)
-            {
-                var line = Assets.Class.makeText(string.Empty.AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, flow);
-                line.textColor = 0xFFFFFF;
-                line.alpha = 1;
-                line.scaleX = 0.42;
-                line.scaleY = 0.42;
-                _bossDebugMenuLines.Add(line);
-            }
-
-            for (int i = 0; i < _bossDebugMenuLines.Count; i++)
-            {
-                var line = _bossDebugMenuLines[i];
-                line.visible = i < lines.Count;
-                if (i < lines.Count)
-                    line.text = lines[i].AsHaxeString();
+                Logger.Warning(ex, "[BossDebugNpc] Failed to open native boss debug popup");
+                _bossDebugMenuOpen = false;
+                CloseBossDebugPopup();
+                MultiplayerUI.PushSystemMessage("BOSS DEBUG menu failed", 2.0, 0.5);
             }
         }
 
-        private void ClearBossDebugMenuPanel()
+        private void CloseBossDebugPopup()
         {
-            for (int i = 0; i < _bossDebugMenuLines.Count; i++)
+            var popup = _bossDebugPopup;
+            if (popup != null)
             {
-                try { _bossDebugMenuLines[i].remove(); } catch { }
+                try { popup.close(); } catch { }
             }
 
-            _bossDebugMenuLines.Clear();
-            try { _bossDebugMenuFlow?.remove(); } catch { }
-            try { _bossDebugMenuBox?.remove(); } catch { }
-            _bossDebugMenuFlow = null;
-            _bossDebugMenuBox = null;
+            ClearBossDebugPopupRegistrations();
+        }
+
+        private void ClearBossDebugPopupRegistrations()
+        {
+            for (int i = 0; i < _bossDebugPopupElements.Count; i++)
+            {
+                BossDebugPopupActions.Remove(_bossDebugPopupElements[i]);
+            }
+
+            _bossDebugPopupElements.Clear();
+            _bossDebugPopup = null;
+        }
+
+        private static void Hook_WindowElement_onActivate(Hook_WindowElement.orig_onActivate orig, WindowElement self)
+        {
+            if (BossDebugPopupActions.TryGetValue(self, out var action))
+            {
+                action();
+                return;
+            }
+
+            orig(self);
         }
 
         private void TryGotoBossDebugLevel(string levelId)
@@ -425,7 +338,7 @@ namespace DeadCellsMultiplayerMod
             {
                 _bossDebugMenuOpen = false;
                 ClearBossDebugNpc();
-                ClearBossDebugMenuPanel();
+                CloseBossDebugPopup();
                 GameDataSync.TryDebugGotoLevel(levelId);
             }
             catch (Exception ex)
