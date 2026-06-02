@@ -1,6 +1,5 @@
 using System.Globalization;
 using DeadCellsMultiplayerMod.Interaction;
-using DeadCellsMultiplayerMod.Mobs.MobsSynchronization;
 
 public sealed partial class NetNode
 {
@@ -538,6 +537,533 @@ public sealed partial class NetNode
         }
 
         return draws.Count > 0;
+    }
+
+    private static bool TryParseMobProjectionPayload(string payload, int? senderId, bool forceSenderId, out int userId, out string levelId, out List<MobProjectionSnapshot> projections)
+    {
+        userId = 0;
+        levelId = string.Empty;
+        projections = new List<MobProjectionSnapshot>();
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split(new[] { '|' }, 3);
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out userId))
+            userId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            userId = senderId.Value;
+        if (userId <= 0)
+            return false;
+
+        try
+        {
+            levelId = Uri.UnescapeDataString(parts[1] ?? string.Empty);
+        }
+        catch
+        {
+            levelId = parts[1] ?? string.Empty;
+        }
+
+        levelId = levelId.Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+
+        var entries = parts[2].Split(';', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < entries.Length; i++)
+        {
+            var entryParts = entries[i].Split(',');
+            if (entryParts.Length < 7)
+                continue;
+
+            if (!int.TryParse(entryParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mobIndex))
+                continue;
+            if (!double.TryParse(entryParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+                continue;
+            if (!double.TryParse(entryParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                continue;
+            if (!int.TryParse(entryParts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dir))
+                dir = 0;
+            if (!int.TryParse(entryParts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
+                life = 0;
+            if (!int.TryParse(entryParts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxLife))
+                maxLife = 0;
+
+            var type = DecodeProjectionToken(entryParts[6] ?? string.Empty);
+            var animGroup = entryParts.Length > 7 ? DecodeProjectionToken(entryParts[7] ?? string.Empty) : string.Empty;
+
+            projections.Add(new MobProjectionSnapshot(userId, levelId, mobIndex, x, y, dir, life, maxLife, type, animGroup));
+        }
+
+        return true;
+    }
+
+    private static bool TryParseMobV1StatePayload(string payload, int? senderId, bool forceSenderId, out int hostUserId, out string levelId, out List<MobV1StateSnapshot> states)
+    {
+        hostUserId = 0;
+        levelId = string.Empty;
+        states = new List<MobV1StateSnapshot>();
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split(new[] { '|' }, 3);
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out hostUserId))
+            hostUserId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            hostUserId = senderId.Value;
+        if (hostUserId <= 0)
+            return false;
+
+        try
+        {
+            levelId = Uri.UnescapeDataString(parts[1] ?? string.Empty);
+        }
+        catch
+        {
+            levelId = parts[1] ?? string.Empty;
+        }
+
+        levelId = levelId.Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+
+        var entries = parts[2].Split(';', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < entries.Length; i++)
+        {
+            var entryParts = entries[i].Split(',');
+            if (entryParts.Length < 7)
+                continue;
+
+            if (!int.TryParse(entryParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var netMobId))
+                continue;
+            if (!double.TryParse(entryParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+                continue;
+            if (!double.TryParse(entryParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                continue;
+            if (!int.TryParse(entryParts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dir))
+                dir = 0;
+            if (!int.TryParse(entryParts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
+                life = 0;
+            if (!int.TryParse(entryParts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxLife))
+                maxLife = 0;
+
+            var type = DecodeProjectionToken(entryParts[6] ?? string.Empty);
+            var animGroup = entryParts.Length > 7 ? DecodeProjectionToken(entryParts[7] ?? string.Empty) : string.Empty;
+
+            states.Add(new MobV1StateSnapshot(hostUserId, levelId, netMobId, x, y, dir, life, maxLife, type, animGroup));
+        }
+
+        return true;
+    }
+
+    private static bool TryParseMobV1SpawnPayload(string payload, int? senderId, bool forceSenderId, out int hostUserId, out string levelId, out List<MobV1SpawnSnapshot> spawns)
+    {
+        hostUserId = 0;
+        levelId = string.Empty;
+        spawns = new List<MobV1SpawnSnapshot>();
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split(new[] { '|' }, 3);
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out hostUserId))
+            hostUserId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            hostUserId = senderId.Value;
+        if (hostUserId <= 0)
+            return false;
+
+        levelId = DecodeProjectionToken(parts[1] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+
+        var entries = parts[2].Split(';', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < entries.Length; i++)
+        {
+            var entryParts = entries[i].Split(',');
+            if (entryParts.Length < 7)
+                continue;
+
+            if (!int.TryParse(entryParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var netMobId))
+                continue;
+            if (!double.TryParse(entryParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+                continue;
+            if (!double.TryParse(entryParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                continue;
+            if (!int.TryParse(entryParts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dir))
+                dir = 0;
+            if (!int.TryParse(entryParts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
+                life = 0;
+            if (!int.TryParse(entryParts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxLife))
+                maxLife = 0;
+
+            var type = DecodeProjectionToken(entryParts[6] ?? string.Empty);
+            var animGroup = entryParts.Length > 7 ? DecodeProjectionToken(entryParts[7] ?? string.Empty) : string.Empty;
+            spawns.Add(new MobV1SpawnSnapshot(hostUserId, levelId, netMobId, x, y, dir, life, maxLife, type, animGroup));
+        }
+
+        return true;
+    }
+
+    private static bool TryParseMobV1DespawnPayload(string payload, int? senderId, bool forceSenderId, out int hostUserId, out string levelId, out List<MobV1DespawnSnapshot> despawns)
+    {
+        hostUserId = 0;
+        levelId = string.Empty;
+        despawns = new List<MobV1DespawnSnapshot>();
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split(new[] { '|' }, 3);
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out hostUserId))
+            hostUserId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            hostUserId = senderId.Value;
+        if (hostUserId <= 0)
+            return false;
+
+        levelId = DecodeProjectionToken(parts[1] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+
+        var entries = parts[2].Split(';', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < entries.Length; i++)
+        {
+            var entryParts = entries[i].Split(',');
+            if (entryParts.Length == 0)
+                continue;
+            if (!int.TryParse(entryParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var netMobId))
+                continue;
+
+            var reason = entryParts.Length > 1 ? DecodeProjectionToken(entryParts[1] ?? string.Empty) : string.Empty;
+            despawns.Add(new MobV1DespawnSnapshot(hostUserId, levelId, netMobId, reason));
+        }
+
+        return true;
+    }
+
+    private static bool TryParseMobV1HitRequestPayload(string payload, int? senderId, bool forceSenderId, out MobV1HitRequest request)
+    {
+        request = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|');
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var attackerUserId))
+            attackerUserId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            attackerUserId = senderId.Value;
+        if (attackerUserId <= 0)
+            return false;
+
+        var levelId = DecodeProjectionToken(parts[1] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        var entryParts = parts[2].Split(',');
+        if (entryParts.Length < 4)
+            return false;
+
+        if (!int.TryParse(entryParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var netMobId))
+            return false;
+        if (!double.TryParse(entryParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            return false;
+        if (!double.TryParse(entryParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            return false;
+        if (!int.TryParse(entryParts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var damageHint))
+            damageHint = 0;
+
+        var attackKind = entryParts.Length > 4 ? DecodeProjectionToken(entryParts[4] ?? string.Empty) : string.Empty;
+        double heroX = 0.0;
+        double heroY = 0.0;
+        var heroDir = 0;
+        long attackId = 0;
+        double sentAtSeconds = 0.0;
+        double hitRadius = 0.0;
+
+        if (entryParts.Length > 5)
+            double.TryParse(entryParts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out heroX);
+        if (entryParts.Length > 6)
+            double.TryParse(entryParts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out heroY);
+        if (entryParts.Length > 7)
+            int.TryParse(entryParts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out heroDir);
+        if (entryParts.Length > 8)
+            long.TryParse(entryParts[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out attackId);
+        if (entryParts.Length > 9)
+            double.TryParse(entryParts[9], NumberStyles.Float, CultureInfo.InvariantCulture, out sentAtSeconds);
+        if (entryParts.Length > 10)
+            double.TryParse(entryParts[10], NumberStyles.Float, CultureInfo.InvariantCulture, out hitRadius);
+
+        request = new MobV1HitRequest(
+            attackerUserId,
+            levelId,
+            netMobId,
+            x,
+            y,
+            damageHint,
+            attackKind,
+            heroX,
+            heroY,
+            heroDir,
+            attackId,
+            sentAtSeconds,
+            hitRadius);
+        return true;
+    }
+
+    private static bool TryParseMobV1HitResultPayload(string payload, int? senderId, bool forceSenderId, out MobV1HitResult result)
+    {
+        result = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|');
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var hostUserId))
+            hostUserId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            hostUserId = senderId.Value;
+        if (hostUserId <= 0)
+            return false;
+
+        var levelId = DecodeProjectionToken(parts[1] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        var entryParts = parts[2].Split(',');
+        if (entryParts.Length < 5)
+            return false;
+
+        if (!int.TryParse(entryParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var attackerUserId))
+            return false;
+        if (!int.TryParse(entryParts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var netMobId))
+            return false;
+        var accepted = string.Equals(entryParts[2], "1", StringComparison.Ordinal) ||
+                       string.Equals(entryParts[2], "true", StringComparison.OrdinalIgnoreCase);
+        if (!int.TryParse(entryParts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
+            life = 0;
+        if (!int.TryParse(entryParts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxLife))
+            maxLife = 0;
+
+        var reason = entryParts.Length > 5 ? DecodeProjectionToken(entryParts[5] ?? string.Empty) : string.Empty;
+        var damage = 0;
+        var death = false;
+        if (entryParts.Length > 6)
+            int.TryParse(entryParts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out damage);
+        if (entryParts.Length > 7)
+            death = string.Equals(entryParts[7], "1", StringComparison.Ordinal) ||
+                    string.Equals(entryParts[7], "true", StringComparison.OrdinalIgnoreCase);
+
+        result = new MobV1HitResult(hostUserId, attackerUserId, levelId, netMobId, accepted, life, maxLife, reason, damage, death);
+        return true;
+    }
+
+    private static bool TryParseMobV1PlayerHitPayload(string payload, int? senderId, bool forceSenderId, out MobV1PlayerHit hit)
+    {
+        hit = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|');
+        if (parts.Length < 3)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var hostUserId))
+            hostUserId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            hostUserId = senderId.Value;
+        if (hostUserId <= 0)
+            return false;
+
+        var levelId = DecodeProjectionToken(parts[1] ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        var entryParts = parts[2].Split(',');
+        if (entryParts.Length < 5)
+            return false;
+
+        if (!int.TryParse(entryParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var targetUserId))
+            return false;
+        if (!int.TryParse(entryParts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var netMobId))
+            return false;
+        if (!int.TryParse(entryParts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var damage))
+            damage = 0;
+        if (!double.TryParse(entryParts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            x = 0.0;
+        if (!double.TryParse(entryParts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            y = 0.0;
+
+        hit = new MobV1PlayerHit(hostUserId, targetUserId, levelId, netMobId, damage, x, y);
+        return true;
+    }
+
+    private static string DecodeProjectionToken(string value)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(value ?? string.Empty);
+        }
+        catch
+        {
+            return value ?? string.Empty;
+        }
+    }
+
+    private static string BuildMobProjectionLine(int userId, string levelId, IReadOnlyList<MobProjectionSnapshot> projections)
+    {
+        var safeLevel = Uri.EscapeDataString((levelId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        var sb = new System.Text.StringBuilder();
+        sb.Append("MOBPROJ|");
+        sb.Append(userId.ToString(CultureInfo.InvariantCulture));
+        sb.Append('|');
+        sb.Append(safeLevel);
+        sb.Append('|');
+
+        for (int i = 0; i < projections.Count; i++)
+        {
+            var p = projections[i];
+            if (i > 0)
+                sb.Append(';');
+
+            sb.Append(p.MobIndex.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(p.X.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(p.Y.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(p.Dir.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(p.Life.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(p.MaxLife.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(Uri.EscapeDataString((p.Type ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty)));
+            sb.Append(',');
+            sb.Append(Uri.EscapeDataString((p.AnimGroup ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty)));
+        }
+
+        sb.Append('\n');
+        return sb.ToString();
+    }
+
+    private static string BuildMobV1StateLine(int hostUserId, string levelId, IReadOnlyList<MobV1StateSnapshot> states)
+    {
+        var safeLevel = Uri.EscapeDataString((levelId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        var sb = new System.Text.StringBuilder();
+        sb.Append("MOBV1STATE|");
+        sb.Append(hostUserId.ToString(CultureInfo.InvariantCulture));
+        sb.Append('|');
+        sb.Append(safeLevel);
+        sb.Append('|');
+
+        for (int i = 0; i < states.Count; i++)
+        {
+            var state = states[i];
+            if (i > 0)
+                sb.Append(';');
+
+            sb.Append(state.NetMobId.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(state.X.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(state.Y.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(state.Dir.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(state.Life.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(state.MaxLife.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(Uri.EscapeDataString((state.Type ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty)));
+            sb.Append(',');
+            sb.Append(Uri.EscapeDataString((state.AnimGroup ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty)));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string BuildMobV1SpawnLine(int hostUserId, string levelId, IReadOnlyList<MobV1SpawnSnapshot> spawns)
+    {
+        var safeLevel = Uri.EscapeDataString((levelId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        var sb = new System.Text.StringBuilder();
+        sb.Append("MOBV1SPAWN|");
+        sb.Append(hostUserId.ToString(CultureInfo.InvariantCulture));
+        sb.Append('|');
+        sb.Append(safeLevel);
+        sb.Append('|');
+
+        for (int i = 0; i < spawns.Count; i++)
+        {
+            var spawn = spawns[i];
+            if (i > 0)
+                sb.Append(';');
+
+            sb.Append(spawn.NetMobId.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(spawn.X.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(spawn.Y.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(spawn.Dir.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(spawn.Life.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(spawn.MaxLife.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(Uri.EscapeDataString((spawn.Type ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty)));
+            sb.Append(',');
+            sb.Append(Uri.EscapeDataString((spawn.AnimGroup ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty)));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string BuildMobV1DespawnLine(int hostUserId, string levelId, IReadOnlyList<MobV1DespawnSnapshot> despawns)
+    {
+        var safeLevel = Uri.EscapeDataString((levelId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        var sb = new System.Text.StringBuilder();
+        sb.Append("MOBV1DESPAWN|");
+        sb.Append(hostUserId.ToString(CultureInfo.InvariantCulture));
+        sb.Append('|');
+        sb.Append(safeLevel);
+        sb.Append('|');
+
+        for (int i = 0; i < despawns.Count; i++)
+        {
+            var despawn = despawns[i];
+            if (i > 0)
+                sb.Append(';');
+
+            sb.Append(despawn.NetMobId.ToString(CultureInfo.InvariantCulture));
+            sb.Append(',');
+            sb.Append(Uri.EscapeDataString((despawn.Reason ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty)));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string BuildMobV1HitRequestLine(MobV1HitRequest request)
+    {
+        var safeLevel = Uri.EscapeDataString((request.LevelId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"MOBV1HITREQ|{request.AttackerUserId}|{safeLevel}|{request.NetMobId},{request.X:R},{request.Y:R},{request.DamageHint},{Uri.EscapeDataString((request.AttackKind ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty))},{request.HeroX:R},{request.HeroY:R},{request.HeroDir},{request.AttackId},{request.SentAtSeconds:R},{request.HitRadius:R}");
+    }
+
+    private static string BuildMobV1HitResultLine(MobV1HitResult result)
+    {
+        var safeLevel = Uri.EscapeDataString((result.LevelId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        var accepted = result.Accepted ? "1" : "0";
+        var death = result.Death ? "1" : "0";
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"MOBV1HITRES|{result.HostUserId}|{safeLevel}|{result.AttackerUserId},{result.NetMobId},{accepted},{result.Life},{result.MaxLife},{Uri.EscapeDataString((result.Reason ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty))},{result.Damage},{death}");
+    }
+
+    private static string BuildMobV1PlayerHitLine(MobV1PlayerHit hit)
+    {
+        var safeLevel = Uri.EscapeDataString((hit.LevelId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"MOBV1PLAYERHIT|{hit.HostUserId}|{safeLevel}|{hit.TargetUserId},{hit.NetMobId},{hit.Damage},{hit.X:R},{hit.Y:R}");
     }
 
     private static bool TryParseSingleMobDrawPayload(string payload, int? senderId, bool forceSenderId, out MobDraw draw)

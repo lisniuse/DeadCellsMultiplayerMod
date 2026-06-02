@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using DeadCellsMultiplayerMod;
 using DeadCellsMultiplayerMod.Interaction;
+using DeadCellsMultiplayerMod.Mobs.Authority;
 
 public sealed partial class NetNode
 {
@@ -671,6 +672,134 @@ public sealed partial class NetNode
                 {
                     _pendingMobDraws.AddRange(draws);
                     _hasRemote = true;
+                }
+            }
+            return true;
+        }
+
+        if (line.StartsWith("MOBPROJ|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["MOBPROJ|".Length..];
+            if (TryParseMobProjectionPayload(payload, senderId, forceSenderId, out var projectionUserId, out var projectionLevelId, out var projections))
+            {
+                lock (_sync)
+                {
+                    _pendingMobProjections.RemoveAll(p => p.UserId == projectionUserId);
+                    if (projections.Count == 0)
+                        _pendingMobProjections.Add(new MobProjectionSnapshot(projectionUserId, projectionLevelId, -1, 0.0, 0.0, 0, 0, 0, string.Empty, string.Empty));
+                    else
+                        _pendingMobProjections.AddRange(projections);
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildMobProjectionLine(projectionUserId, projectionLevelId, projections);
+            }
+            return true;
+        }
+
+        if (line.StartsWith("MOBV1STATE|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["MOBV1STATE|".Length..];
+            if (TryParseMobV1StatePayload(payload, senderId, forceSenderId, out var hostUserId, out var stateLevelId, out var states))
+            {
+                lock (_sync)
+                {
+                    _pendingMobV1States.RemoveAll(s => s.HostUserId == hostUserId);
+                    if (states.Count == 0)
+                        _pendingMobV1States.Add(new MobV1StateSnapshot(hostUserId, stateLevelId, -1, 0.0, 0.0, 0, 0, 0, string.Empty, string.Empty));
+                    else
+                        _pendingMobV1States.AddRange(states);
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildMobV1StateLine(hostUserId, stateLevelId, states);
+            }
+            return true;
+        }
+
+        if (line.StartsWith("MOBV1SPAWN|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["MOBV1SPAWN|".Length..];
+            if (TryParseMobV1SpawnPayload(payload, senderId, forceSenderId, out var hostUserId, out var spawnLevelId, out var spawns))
+            {
+                lock (_sync)
+                {
+                    _pendingMobV1Spawns.AddRange(spawns);
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildMobV1SpawnLine(hostUserId, spawnLevelId, spawns);
+            }
+            return true;
+        }
+
+        if (line.StartsWith("MOBV1DESPAWN|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["MOBV1DESPAWN|".Length..];
+            if (TryParseMobV1DespawnPayload(payload, senderId, forceSenderId, out var hostUserId, out var despawnLevelId, out var despawns))
+            {
+                lock (_sync)
+                {
+                    _pendingMobV1Despawns.AddRange(despawns);
+                    _pendingMobV1States.RemoveAll(s => s.HostUserId == hostUserId && despawns.Exists(d => d.NetMobId == s.NetMobId));
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = BuildMobV1DespawnLine(hostUserId, despawnLevelId, despawns);
+            }
+            return true;
+        }
+
+        if (line.StartsWith("MOBV1HITREQ|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["MOBV1HITREQ|".Length..];
+            if (TryParseMobV1HitRequestPayload(payload, senderId, forceSenderId, out var request))
+            {
+                if (_role == NetRole.Host && MobAuthorityV1Runtime.IsAuthorityModeEnabled())
+                {
+                    lock (_sync)
+                    {
+                        _pendingMobV1HitRequests.Add(request);
+                        _hasRemote = true;
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (line.StartsWith("MOBV1HITRES|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["MOBV1HITRES|".Length..];
+            if (TryParseMobV1HitResultPayload(payload, senderId, forceSenderId, out var result))
+            {
+                if (_role == NetRole.Client)
+                {
+                    lock (_sync)
+                    {
+                        _pendingMobV1HitResults.Add(result);
+                        _hasRemote = true;
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (line.StartsWith("MOBV1PLAYERHIT|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["MOBV1PLAYERHIT|".Length..];
+            if (TryParseMobV1PlayerHitPayload(payload, senderId, forceSenderId, out var hit))
+            {
+                if (_role == NetRole.Client)
+                {
+                    lock (_sync)
+                    {
+                        _pendingMobV1PlayerHits.Add(hit);
+                        _hasRemote = true;
+                    }
                 }
             }
             return true;

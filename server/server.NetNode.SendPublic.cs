@@ -1,5 +1,6 @@
 using System.Globalization;
 using DeadCellsMultiplayerMod;
+using DeadCellsMultiplayerMod.Mobs.Authority;
 
 public sealed partial class NetNode
 {
@@ -360,6 +361,132 @@ public sealed partial class NetNode
             SendRaw($"ATK|{idPart}{safe}|{slot}|{permanentId}|{ammo.Value}|{actionToken}");
         else
             SendRaw($"ATK|{idPart}{safe}|{slot}|{permanentId}|{actionToken}");
+
+        TrySendMobV1HitRequestForLocalAttack(safe, slot, permanentId, ammo, action, actionToken);
+    }
+
+    private void TrySendMobV1HitRequestForLocalAttack(
+        string attackKind,
+        int slot,
+        int permanentId,
+        int? ammo,
+        RemoteAttackAction action,
+        string actionToken)
+    {
+        if (_role != NetRole.Client)
+            return;
+        if (!MobAuthorityV1Runtime.IsAuthorityModeEnabled())
+            return;
+
+        var hero = ModEntry.me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+        if (hero == null)
+            return;
+
+        string levelId;
+        double x;
+        double y;
+        int dir;
+        try
+        {
+            levelId = hero._level?.map?.id?.ToString() ?? string.Empty;
+            x = hero.spr?.x ?? (hero.cx + hero.xr) * 24.0;
+            y = hero.spr?.y ?? (hero.cy + hero.yr) * 24.0;
+            dir = hero.dir;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (!MobAuthorityV1ProxyRegistry.TryFindAttackTarget(levelId, x, y, dir, out var netMobId, out var targetX, out var targetY))
+            return;
+
+        var attackKey = $"{slot}:{permanentId}:{attackKind}:{actionToken}";
+        if (ShouldThrottleMobV1HitRequest(netMobId, attackKey))
+            return;
+
+        var damageHint = MobAuthorityV1AttackCapture.TryGetRecentDamageHint(out var capturedDamage)
+            ? capturedDamage
+            : EstimateMobV1DamageHint(attackKind, slot, permanentId, ammo, action);
+        var hitRadius = EstimateMobV1HitRadius(attackKind, ammo, action);
+        var attackId = System.Threading.Interlocked.Increment(ref _nextMobV1AttackId);
+        var sentAtSeconds = (double)System.Diagnostics.Stopwatch.GetTimestamp() / System.Diagnostics.Stopwatch.Frequency;
+        SendMobV1HitRequest(levelId, netMobId, targetX, targetY, damageHint, attackKey, x, y, dir, attackId, sentAtSeconds, hitRadius);
+    }
+
+    private bool ShouldThrottleMobV1HitRequest(int netMobId, string attackKey)
+    {
+        const double minIntervalSeconds = 0.18;
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var elapsedSeconds = _lastMobV1HitRequestTicks > 0
+            ? (double)(now - _lastMobV1HitRequestTicks) / System.Diagnostics.Stopwatch.Frequency
+            : double.MaxValue;
+
+        if (_lastMobV1HitRequestNetMobId == netMobId &&
+            string.Equals(_lastMobV1HitRequestAttackKey, attackKey, StringComparison.Ordinal) &&
+            elapsedSeconds < minIntervalSeconds)
+        {
+            return true;
+        }
+
+        _lastMobV1HitRequestTicks = now;
+        _lastMobV1HitRequestNetMobId = netMobId;
+        _lastMobV1HitRequestAttackKey = attackKey;
+        return false;
+    }
+
+    private static int EstimateMobV1DamageHint(string attackKind, int slot, int permanentId, int? ammo, RemoteAttackAction action)
+    {
+        var kind = attackKind ?? string.Empty;
+
+        if (kind.Equals("__DIVE_ATTACK__", StringComparison.Ordinal))
+            return action == RemoteAttackAction.Interrupt ? 45 : 22;
+
+        if (action == RemoteAttackAction.Interrupt)
+            return 32;
+
+        if (ContainsOrdinalIgnoreCase(kind, "shield") ||
+            ContainsOrdinalIgnoreCase(kind, "parry") ||
+            ContainsOrdinalIgnoreCase(kind, "block"))
+        {
+            return 18;
+        }
+
+        if (ContainsOrdinalIgnoreCase(kind, "bow") ||
+            ContainsOrdinalIgnoreCase(kind, "crossbow") ||
+            ContainsOrdinalIgnoreCase(kind, "xbow") ||
+            ammo.HasValue)
+        {
+            return 30;
+        }
+
+        return slot >= 0 || permanentId > 0 ? 25 : 20;
+    }
+
+    private static double EstimateMobV1HitRadius(string attackKind, int? ammo, RemoteAttackAction action)
+    {
+        var kind = attackKind ?? string.Empty;
+        if (kind.Equals("__DIVE_ATTACK__", StringComparison.Ordinal))
+            return action == RemoteAttackAction.Interrupt ? 120.0 : 80.0;
+        if (ContainsOrdinalIgnoreCase(kind, "bow") ||
+            ContainsOrdinalIgnoreCase(kind, "crossbow") ||
+            ContainsOrdinalIgnoreCase(kind, "xbow") ||
+            ammo.HasValue)
+        {
+            return 180.0;
+        }
+        if (ContainsOrdinalIgnoreCase(kind, "shield") ||
+            ContainsOrdinalIgnoreCase(kind, "parry") ||
+            ContainsOrdinalIgnoreCase(kind, "block"))
+        {
+            return 90.0;
+        }
+        return 135.0;
+    }
+
+    private static bool ContainsOrdinalIgnoreCase(string value, string needle)
+    {
+        return value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     public void SendHeroSkin(string skin)
@@ -582,6 +709,109 @@ public sealed partial class NetNode
 
         var line = MobWireCodec.BuildMobDrawLine(draws);
         _ = SendLineSafe(line);
+    }
+
+    public void SendMobProjections(string levelId, IReadOnlyList<MobProjectionSnapshot> projections)
+    {
+        if (_role != NetRole.Host && _role != NetRole.Client)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+        if (projections == null)
+            return;
+
+        var line = BuildMobProjectionLine(ID, levelId, projections);
+        _ = SendLineSafe(line);
+    }
+
+    public void SendMobV1States(string levelId, IReadOnlyList<MobV1StateSnapshot> states)
+    {
+        if (_role != NetRole.Host && _role != NetRole.Client)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0 || states == null)
+            return;
+
+        var line = BuildMobV1StateLine(ID, levelId, states);
+        _ = SendLineSafe(line);
+    }
+
+    public void SendMobV1Spawns(string levelId, IReadOnlyList<MobV1SpawnSnapshot> spawns)
+    {
+        if (_role != NetRole.Host && _role != NetRole.Client)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0 || spawns == null || spawns.Count == 0)
+            return;
+
+        var line = BuildMobV1SpawnLine(ID, levelId, spawns);
+        _ = SendLineSafe(line);
+    }
+
+    public void SendMobV1Despawns(string levelId, IReadOnlyList<MobV1DespawnSnapshot> despawns)
+    {
+        if (_role != NetRole.Host && _role != NetRole.Client)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0 || despawns == null || despawns.Count == 0)
+            return;
+
+        var line = BuildMobV1DespawnLine(ID, levelId, despawns);
+        _ = SendLineSafe(line);
+    }
+
+    public void SendMobV1HitRequest(
+        string levelId,
+        int netMobId,
+        double x,
+        double y,
+        int damageHint,
+        string attackKind = "",
+        double heroX = 0.0,
+        double heroY = 0.0,
+        int heroDir = 0,
+        long attackId = 0,
+        double sentAtSeconds = 0.0,
+        double hitRadius = 0.0)
+    {
+        if (_role != NetRole.Client)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0 || netMobId <= 0)
+            return;
+
+        var request = new MobV1HitRequest(ID, levelId, netMobId, x, y, damageHint, attackKind, heroX, heroY, heroDir, attackId, sentAtSeconds, hitRadius);
+        _ = SendLineSafe(BuildMobV1HitRequestLine(request));
+    }
+
+    public void SendMobV1HitResult(MobV1HitResult result)
+    {
+        if (_role != NetRole.Host)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+
+        _ = SendLineSafe(BuildMobV1HitResultLine(result));
+    }
+
+    public void SendMobV1PlayerHit(MobV1PlayerHit hit)
+    {
+        if (_role != NetRole.Host)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0 || hit.TargetUserId <= 0)
+            return;
+
+        _ = SendLineSafe(BuildMobV1PlayerHitLine(hit));
     }
 
     public void SendExitReady(int doorCx, int doorCy, bool pressed, bool insideCircle, bool isOutOfGame, bool isOnScreen)

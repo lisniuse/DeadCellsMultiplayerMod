@@ -1,4 +1,5 @@
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
+using DeadCellsMultiplayerMod.Mobs.Authority;
 using ModCore.Events;
 using dc;
 using dc.h2d;
@@ -49,11 +50,12 @@ public class Levelinit : ModBase, IEventReceiver, IOnAdvancedModuleInitializing
     private void Levelinit_EntitiesPostCreate(Hook_Level.orig_entitiesPostCreate orig, Level self)
     {
         orig(self);
+        MobAuthorityV1ClientSuppression.SuppressLevel(self);
     }
 
     private void Levelinit_OnDispose(Hook_Level.orig_onDispose orig, Level self)
     {
-        SyncMobIdRegistry.ClearForLevel(self);
+        MobAuthorityV1Ids.Clear();
         orig(self);
     }
 

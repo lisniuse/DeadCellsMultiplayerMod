@@ -19,11 +19,54 @@
 #>
 param(
     [string]$GameRoot = "D:\dgames\Dead.Cells.v20240827",
+    [string[]]$InstallGameRoots = @("D:\dgames\Dead.Cells.v20240827", "D:\dgames\Dead.Cells.v20240827-P2"),
     [string]$ModSrc   = "$PSScriptRoot",
     [string]$CoreRepo = "$PSScriptRoot\..\core",
-    [string]$Config   = "Debug"
+    [string]$Config   = "Debug",
+    [bool]$KillRunningGameProcesses = $true
 )
 $ErrorActionPreference = "Stop"
+
+function Stop-RunningGameProcesses {
+    param([string[]]$Roots)
+
+    $normalizedRoots = @(
+        foreach ($root in $Roots) {
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            try { [System.IO.Path]::GetFullPath($root).TrimEnd('\') }
+            catch { $root.TrimEnd('\') }
+        }
+    ) | Select-Object -Unique
+
+    if ($normalizedRoots.Count -eq 0) { return }
+
+    $processes = Get-CimInstance Win32_Process | Where-Object {
+        $exe = $_.ExecutablePath
+        if ([string]::IsNullOrWhiteSpace($exe)) { return $false }
+
+        foreach ($root in $normalizedRoots) {
+            if ($exe.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+
+        return $false
+    }
+
+    foreach ($proc in $processes) {
+        Write-Host "结束运行中的游戏进程: PID=$($proc.ProcessId) $($proc.ExecutablePath)" -ForegroundColor Yellow
+        try {
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+        }
+        catch {
+            Write-Host "警告: 无法结束 PID=$($proc.ProcessId): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
+if ($KillRunningGameProcesses) {
+    Stop-RunningGameProcesses -Roots $InstallGameRoots
+}
 
 $MdkBin   = Join-Path $CoreRepo "mdk\bin"
 $gameHost = Join-Path $GameRoot "coremod\core\host"
@@ -96,6 +139,18 @@ Write-Host "构建中 ($Config) ..." -ForegroundColor Green
 if ($LASTEXITCODE -eq 0) {
     $outMod = Join-Path $ModSrc "bin\$Config\net10.0\output\DeadCellsMultiplayerMod"
     Write-Host "`n构建成功。打包好的 mod 在:`n  $outMod" -ForegroundColor Green
+
+    foreach ($installRoot in $InstallGameRoots) {
+        if (-not (Test-Path $installRoot)) {
+            Write-Host "跳过安装: 游戏目录不存在 $installRoot" -ForegroundColor Yellow
+            continue
+        }
+
+        $targetMod = Join-Path $installRoot "coremod\mods\DeadCellsMultiplayerMod"
+        New-Item -ItemType Directory -Force $targetMod | Out-Null
+        Copy-Item (Join-Path $outMod "*") $targetMod -Recurse -Force
+        Write-Host "已安装到: $targetMod" -ForegroundColor Green
+    }
 } else {
     Write-Host "`n构建失败(见上方错误)。" -ForegroundColor Red
 }

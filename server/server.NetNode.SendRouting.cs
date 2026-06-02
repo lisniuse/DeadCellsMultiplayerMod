@@ -33,7 +33,14 @@ public sealed partial class NetNode
                trimmed.StartsWith("MOBSTATE2|", StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith("MOBMOVE|", StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith("MOBCHARGE|", StringComparison.OrdinalIgnoreCase) ||
-               trimmed.StartsWith("MOBDRAW|", StringComparison.OrdinalIgnoreCase);
+               trimmed.StartsWith("MOBDRAW|", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MOBPROJ|", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MOBV1STATE|", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MOBV1SPAWN|", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MOBV1DESPAWN|", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MOBV1HITREQ|", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MOBV1HITRES|", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("MOBV1PLAYERHIT|", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsPositionLine(string line)

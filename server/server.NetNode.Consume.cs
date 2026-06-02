@@ -141,6 +141,13 @@ public sealed partial class NetNode
             _pendingMobDies.Clear();
             _pendingMobAttacks.Clear();
             _pendingMobDraws.Clear();
+            _pendingMobProjections.Clear();
+            _pendingMobV1States.Clear();
+            _pendingMobV1Spawns.Clear();
+            _pendingMobV1Despawns.Clear();
+            _pendingMobV1HitRequests.Clear();
+            _pendingMobV1HitResults.Clear();
+            _pendingMobV1PlayerHits.Clear();
         }
     }
 
@@ -197,6 +204,62 @@ public sealed partial class NetNode
         lock (_sync)
         {
             return TryConsumePendingListLocked(ref _pendingMobDraws, out draws);
+        }
+    }
+
+    public bool TryConsumeMobProjections(out List<MobProjectionSnapshot> projections)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobProjections, out projections);
+        }
+    }
+
+    public bool TryConsumeMobV1States(out List<MobV1StateSnapshot> states)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobV1States, out states);
+        }
+    }
+
+    public bool TryConsumeMobV1Spawns(out List<MobV1SpawnSnapshot> spawns)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobV1Spawns, out spawns);
+        }
+    }
+
+    public bool TryConsumeMobV1Despawns(out List<MobV1DespawnSnapshot> despawns)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobV1Despawns, out despawns);
+        }
+    }
+
+    public bool TryConsumeMobV1HitRequests(out List<MobV1HitRequest> requests)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobV1HitRequests, out requests);
+        }
+    }
+
+    public bool TryConsumeMobV1HitResults(out List<MobV1HitResult> results)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobV1HitResults, out results);
+        }
+    }
+
+    public bool TryConsumeMobV1PlayerHits(out List<MobV1PlayerHit> hits)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobV1PlayerHits, out hits);
         }
     }
 

@@ -358,6 +358,13 @@ public sealed partial class NetNode
             _pendingChatMessages.RemoveAll(m => m.Id == sender.AssignedId);
             _pendingMobHits.RemoveAll(h => h.UserId == sender.AssignedId);
             _pendingMobDies.RemoveAll(d => d.UserId == sender.AssignedId);
+            _pendingMobProjections.RemoveAll(p => p.UserId == sender.AssignedId);
+            _pendingMobV1States.RemoveAll(s => s.HostUserId == sender.AssignedId);
+            _pendingMobV1Spawns.RemoveAll(s => s.HostUserId == sender.AssignedId);
+            _pendingMobV1Despawns.RemoveAll(s => s.HostUserId == sender.AssignedId);
+            _pendingMobV1HitRequests.RemoveAll(r => r.AttackerUserId == sender.AssignedId);
+            _pendingMobV1HitResults.RemoveAll(r => r.AttackerUserId == sender.AssignedId || r.HostUserId == sender.AssignedId);
+            _pendingMobV1PlayerHits.RemoveAll(h => h.TargetUserId == sender.AssignedId || h.HostUserId == sender.AssignedId);
             _pendingExitReadyStates.RemoveAll(s => s.UserId == sender.AssignedId);
             _pendingPlayerDownStates.RemoveAll(s => s.UserId == sender.AssignedId);
             _pendingPlayerReviveRequests.RemoveAll(s => s.ReviverId == sender.AssignedId || s.TargetId == sender.AssignedId);

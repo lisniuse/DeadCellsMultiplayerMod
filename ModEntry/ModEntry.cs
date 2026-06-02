@@ -26,7 +26,6 @@ using dc.cine.queen;
 using CineHookInitialize;
 using DeadCellsMultiplayerMod.Ghost.GhostBase;
 using ModCore.Events;
-using DeadCellsMultiplayerMod.Mobs.MobsSynchronization;
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
 using DeadCellsMultiplayerMod.MultiplayerModUI.Minimap;
 using DeadCellsMultiplayerMod.MultiplayerModUI.lifeUI;
@@ -348,15 +347,16 @@ namespace DeadCellsMultiplayerMod
                 () => _ = new MultiplayerUI(this, 0));
 
             _ = new SettingsUI(this);
+            _ = new DeadCellsMultiplayerMod.Mobs.Authority.MobAuthorityV1Runtime(this);
+            _ = new DeadCellsMultiplayerMod.Mobs.Authority.MobAuthorityV1ClientSuppression();
+            _ = new DeadCellsMultiplayerMod.Mobs.Authority.MobAuthorityV1RealProxyLayer();
+            DeadCellsMultiplayerMod.Mobs.Authority.MobAuthorityV1AttackCapture.Install();
+            _ = new DeadCellsMultiplayerMod.Mobs.MobProjectionLayer(this);
 
             InitializeOptionalModule(
                 DebugModuleId.LevelInit,
                 "Levelinit",
                 () => _ = new Levelinit(info));
-            InitializeOptionalModule(
-                DebugModuleId.MobsSynchronization,
-                "MobsSynchronization",
-                () => _ = new MobsSynchronization(this));
             InitializeOptionalModule(
                 DebugModuleId.MinimapReveal,
                 "Minimapreveal",
@@ -956,7 +956,6 @@ namespace DeadCellsMultiplayerMod
         public void hook_level_changed(Hook_Hero.orig_onLevelChanged orig, Hero self, Level oldLevel)
         {
             kingInitialized = false;
-            DeadCellsMultiplayerMod.Mobs.MobsSynchronization.MobsSynchronization.ClearTrackingForLevelChange();
             _net?.ClearMobSyncQueues();
             _pendingBossCineApplyByLevel.Clear();
             _suppressBossCineEchoByLevel.Clear();

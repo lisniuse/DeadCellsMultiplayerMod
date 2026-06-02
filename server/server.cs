@@ -419,6 +419,213 @@ public sealed partial class NetNode : IDisposable
         }
     }
 
+    public readonly struct MobProjectionSnapshot
+    {
+        public readonly int UserId;
+        public readonly string LevelId;
+        public readonly int MobIndex;
+        public readonly double X;
+        public readonly double Y;
+        public readonly int Dir;
+        public readonly int Life;
+        public readonly int MaxLife;
+        public readonly string Type;
+        public readonly string AnimGroup;
+
+        public MobProjectionSnapshot(int userId, string levelId, int mobIndex, double x, double y, int dir, int life, int maxLife, string type, string animGroup = "")
+        {
+            UserId = userId;
+            LevelId = levelId ?? string.Empty;
+            MobIndex = mobIndex;
+            X = x;
+            Y = y;
+            Dir = dir;
+            Life = life;
+            MaxLife = maxLife;
+            Type = type ?? string.Empty;
+            AnimGroup = animGroup ?? string.Empty;
+        }
+    }
+
+    public readonly struct MobV1StateSnapshot
+    {
+        public readonly int HostUserId;
+        public readonly string LevelId;
+        public readonly int NetMobId;
+        public readonly double X;
+        public readonly double Y;
+        public readonly int Dir;
+        public readonly int Life;
+        public readonly int MaxLife;
+        public readonly string Type;
+        public readonly string AnimGroup;
+
+        public MobV1StateSnapshot(int hostUserId, string levelId, int netMobId, double x, double y, int dir, int life, int maxLife, string type, string animGroup = "")
+        {
+            HostUserId = hostUserId;
+            LevelId = levelId ?? string.Empty;
+            NetMobId = netMobId;
+            X = x;
+            Y = y;
+            Dir = dir;
+            Life = life;
+            MaxLife = maxLife;
+            Type = type ?? string.Empty;
+            AnimGroup = animGroup ?? string.Empty;
+        }
+    }
+
+    public readonly struct MobV1SpawnSnapshot
+    {
+        public readonly int HostUserId;
+        public readonly string LevelId;
+        public readonly int NetMobId;
+        public readonly double X;
+        public readonly double Y;
+        public readonly int Dir;
+        public readonly int Life;
+        public readonly int MaxLife;
+        public readonly string Type;
+        public readonly string AnimGroup;
+
+        public MobV1SpawnSnapshot(int hostUserId, string levelId, int netMobId, double x, double y, int dir, int life, int maxLife, string type, string animGroup = "")
+        {
+            HostUserId = hostUserId;
+            LevelId = levelId ?? string.Empty;
+            NetMobId = netMobId;
+            X = x;
+            Y = y;
+            Dir = dir;
+            Life = life;
+            MaxLife = maxLife;
+            Type = type ?? string.Empty;
+            AnimGroup = animGroup ?? string.Empty;
+        }
+    }
+
+    public readonly struct MobV1DespawnSnapshot
+    {
+        public readonly int HostUserId;
+        public readonly string LevelId;
+        public readonly int NetMobId;
+        public readonly string Reason;
+
+        public MobV1DespawnSnapshot(int hostUserId, string levelId, int netMobId, string reason = "")
+        {
+            HostUserId = hostUserId;
+            LevelId = levelId ?? string.Empty;
+            NetMobId = netMobId;
+            Reason = reason ?? string.Empty;
+        }
+    }
+
+    public readonly struct MobV1HitRequest
+    {
+        public readonly int AttackerUserId;
+        public readonly string LevelId;
+        public readonly int NetMobId;
+        public readonly double X;
+        public readonly double Y;
+        public readonly double HeroX;
+        public readonly double HeroY;
+        public readonly int HeroDir;
+        public readonly long AttackId;
+        public readonly double SentAtSeconds;
+        public readonly double HitRadius;
+        public readonly int DamageHint;
+        public readonly string AttackKind;
+
+        public MobV1HitRequest(
+            int attackerUserId,
+            string levelId,
+            int netMobId,
+            double x,
+            double y,
+            int damageHint,
+            string attackKind = "",
+            double heroX = 0.0,
+            double heroY = 0.0,
+            int heroDir = 0,
+            long attackId = 0,
+            double sentAtSeconds = 0.0,
+            double hitRadius = 0.0)
+        {
+            AttackerUserId = attackerUserId;
+            LevelId = levelId ?? string.Empty;
+            NetMobId = netMobId;
+            X = x;
+            Y = y;
+            HeroX = heroX;
+            HeroY = heroY;
+            HeroDir = heroDir;
+            AttackId = attackId;
+            SentAtSeconds = sentAtSeconds;
+            HitRadius = hitRadius;
+            DamageHint = damageHint;
+            AttackKind = attackKind ?? string.Empty;
+        }
+    }
+
+    public readonly struct MobV1HitResult
+    {
+        public readonly int HostUserId;
+        public readonly int AttackerUserId;
+        public readonly string LevelId;
+        public readonly int NetMobId;
+        public readonly bool Accepted;
+        public readonly int Life;
+        public readonly int MaxLife;
+        public readonly int Damage;
+        public readonly bool Death;
+        public readonly string Reason;
+
+        public MobV1HitResult(
+            int hostUserId,
+            int attackerUserId,
+            string levelId,
+            int netMobId,
+            bool accepted,
+            int life,
+            int maxLife,
+            string reason = "",
+            int damage = 0,
+            bool death = false)
+        {
+            HostUserId = hostUserId;
+            AttackerUserId = attackerUserId;
+            LevelId = levelId ?? string.Empty;
+            NetMobId = netMobId;
+            Accepted = accepted;
+            Life = life;
+            MaxLife = maxLife;
+            Damage = damage;
+            Death = death;
+            Reason = reason ?? string.Empty;
+        }
+    }
+
+    public readonly struct MobV1PlayerHit
+    {
+        public readonly int HostUserId;
+        public readonly int TargetUserId;
+        public readonly string LevelId;
+        public readonly int NetMobId;
+        public readonly int Damage;
+        public readonly double X;
+        public readonly double Y;
+
+        public MobV1PlayerHit(int hostUserId, int targetUserId, string levelId, int netMobId, int damage, double x, double y)
+        {
+            HostUserId = hostUserId;
+            TargetUserId = targetUserId;
+            LevelId = levelId ?? string.Empty;
+            NetMobId = netMobId;
+            Damage = damage;
+            X = x;
+            Y = y;
+        }
+    }
+
     public readonly struct ExitReadyState
     {
         public readonly int UserId;
@@ -538,6 +745,17 @@ public sealed partial class NetNode : IDisposable
     private List<MobDie> _pendingMobDies = new();
     private List<MobAttack> _pendingMobAttacks = new();
     private List<MobDraw> _pendingMobDraws = new();
+    private List<MobProjectionSnapshot> _pendingMobProjections = new();
+    private List<MobV1StateSnapshot> _pendingMobV1States = new();
+    private List<MobV1SpawnSnapshot> _pendingMobV1Spawns = new();
+    private List<MobV1DespawnSnapshot> _pendingMobV1Despawns = new();
+    private List<MobV1HitRequest> _pendingMobV1HitRequests = new();
+    private List<MobV1HitResult> _pendingMobV1HitResults = new();
+    private List<MobV1PlayerHit> _pendingMobV1PlayerHits = new();
+    private long _lastMobV1HitRequestTicks;
+    private int _lastMobV1HitRequestNetMobId;
+    private string _lastMobV1HitRequestAttackKey = string.Empty;
+    private long _nextMobV1AttackId;
     private readonly List<ExitReadyState> _pendingExitReadyStates = new();
     private readonly List<PlayerDownState> _pendingPlayerDownStates = new();
     private readonly List<PlayerReviveRequest> _pendingPlayerReviveRequests = new();

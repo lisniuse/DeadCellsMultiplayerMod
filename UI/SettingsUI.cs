@@ -1,5 +1,4 @@
 using DeadCellsMultiplayerMod.Interface.ModuleInitializing;
-using DeadCellsMultiplayerMod.Mobs.MobsSynchronization;
 using dc.ui;
 using Hashlink.Virtuals;
 using HaxeProxy.Runtime;
@@ -496,7 +495,6 @@ public class SettingsUI :
 
         if (!enabled)
         {
-            MobsSynchronization.ClearTrackingForLevelChange();
             try { GameMenu.NetRef?.ClearMobSyncQueues(); } catch { }
         }
 

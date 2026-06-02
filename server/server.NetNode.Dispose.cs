@@ -84,6 +84,13 @@ public sealed partial class NetNode
             _pendingMobDies.Clear();
             _pendingMobAttacks.Clear();
             _pendingMobDraws.Clear();
+            _pendingMobProjections.Clear();
+            _pendingMobV1States.Clear();
+            _pendingMobV1Spawns.Clear();
+            _pendingMobV1Despawns.Clear();
+            _pendingMobV1HitRequests.Clear();
+            _pendingMobV1HitResults.Clear();
+            _pendingMobV1PlayerHits.Clear();
             _pendingExitReadyStates.Clear();
             _pendingBossCineLevelIds.Clear();
             _pendingBossHeroTeleports.Clear();
