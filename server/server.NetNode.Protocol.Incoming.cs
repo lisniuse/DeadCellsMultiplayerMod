@@ -897,6 +897,25 @@ public sealed partial class NetNode
             return true;
         }
 
+        if (line.StartsWith("INTERBRIDGE|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["INTERBRIDGE|".Length..];
+            if (TryParseInterBridgePayload(payload, out var ev))
+            {
+                lock (_sync)
+                {
+                    _pendingInterBridgeLeverEvents.Add(ev);
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                    forwardLine = string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"INTERBRIDGE|{ev.Action}|{ev.X}|{ev.Y}|{Uri.EscapeDataString(ev.CooldownKey ?? string.Empty)}|{ev.CooldownIdx}\n");
+            }
+            return true;
+        }
+
         if (line.StartsWith("MOBEVENT|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["MOBEVENT|".Length..];

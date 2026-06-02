@@ -554,20 +554,21 @@ public sealed partial class NetNode : IDisposable
     private List<MobDie> _pendingMobDies = new();
     private List<MobAttack> _pendingMobAttacks = new();
     private List<MobDraw> _pendingMobDraws = new();
-    private List<ExitReadyState> _pendingExitReadyStates = new();
-    private List<PlayerDownState> _pendingPlayerDownStates = new();
-    private List<PlayerReviveRequest> _pendingPlayerReviveRequests = new();
-    private List<string> _pendingBossCineLevelIds = new();
-    private List<BossHeroTeleportEvent> _pendingBossHeroTeleports = new();
-    private List<InterDoorEvent> _pendingInterDoorEvents = new();
-    private List<InterElevatorEvent> _pendingInterElevatorEvents = new();
-    private List<InterPressurePlateEvent> _pendingInterPressurePlateEvents = new();
-    private List<InterTreasureChestEvent> _pendingInterTreasureChestEvents = new();
-    private List<InterVineLadderEvent> _pendingInterVineLadderEvents = new();
-    private List<InterTeleportEvent> _pendingInterTeleportEvents = new();
-    private List<InterBreakableGroundEvent> _pendingInterBreakableGroundEvents = new();
-    private List<InterBossRuneUpdateCellsEvent> _pendingBossRuneUpdateCells = new();
-    private List<InterPortalEvent> _pendingInterPortalEvents = new();
+    private readonly List<ExitReadyState> _pendingExitReadyStates = new();
+    private readonly List<PlayerDownState> _pendingPlayerDownStates = new();
+    private readonly List<PlayerReviveRequest> _pendingPlayerReviveRequests = new();
+    private readonly List<string> _pendingBossCineLevelIds = new();
+    private readonly List<BossHeroTeleportEvent> _pendingBossHeroTeleports = new();
+    private readonly List<InterDoorEvent> _pendingInterDoorEvents = new();
+    private readonly List<InterElevatorEvent> _pendingInterElevatorEvents = new();
+    private readonly List<InterPressurePlateEvent> _pendingInterPressurePlateEvents = new();
+    private readonly List<InterTreasureChestEvent> _pendingInterTreasureChestEvents = new();
+    private readonly List<InterVineLadderEvent> _pendingInterVineLadderEvents = new();
+    private readonly List<InterTeleportEvent> _pendingInterTeleportEvents = new();
+    private readonly List<InterBreakableGroundEvent> _pendingInterBreakableGroundEvents = new();
+    private readonly List<InterBossRuneUpdateCellsEvent> _pendingBossRuneUpdateCells = new();
+    private readonly List<InterPortalEvent> _pendingInterPortalEvents = new();
+    private readonly List<InterBridgeLeverEvent> _pendingInterBridgeLeverEvents = new();
     private int _primaryRemoteId;
 
     private readonly IPEndPoint _bindEp;   // host bind

@@ -699,6 +699,19 @@ public sealed partial class NetNode
         SendRaw($"INTERPORTAL|{action}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
     }
 
+    public void SendInterBridgeLever(double x, double y, string action, string cooldownKey = "", int cooldownIdx = 0)
+    {
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+        if (string.IsNullOrWhiteSpace(action))
+            action = "extend";
+
+        SendRaw(
+            $"INTERBRIDGE|{action}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{Uri.EscapeDataString(cooldownKey ?? string.Empty)}|{cooldownIdx}");
+    }
+
     private void SendRaw(string payload)
     {
         var line = payload.EndsWith('\n') ? payload : payload + "\n";

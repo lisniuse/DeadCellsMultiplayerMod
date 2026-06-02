@@ -943,6 +943,48 @@ public sealed partial class NetNode
         return true;
     }
 
+    private static bool TryParseInterBridgePayload(string payload, out InterBridgeLeverEvent ev)
+    {
+        ev = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|');
+        if (parts.Length < 2)
+            return false;
+
+        var action = "extend";
+        var xIndex = 0;
+        var yIndex = 1;
+        if (parts.Length >= 3 &&
+            (parts[0].Equals("extend", StringComparison.OrdinalIgnoreCase) ||
+             parts[0].Equals("retract", StringComparison.OrdinalIgnoreCase)))
+        {
+            action = parts[0].Trim().ToLowerInvariant();
+            xIndex = 1;
+            yIndex = 2;
+        }
+
+        if (parts.Length <= yIndex)
+            return false;
+
+        if (!double.TryParse(parts[xIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            return false;
+        if (!double.TryParse(parts[yIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            return false;
+
+        var cooldownKey = string.Empty;
+        var cooldownIdx = 0;
+        var cooldownKeyIndex = yIndex + 1;
+        if (parts.Length > cooldownKeyIndex)
+            cooldownKey = Uri.UnescapeDataString(parts[cooldownKeyIndex] ?? string.Empty);
+        if (parts.Length > cooldownKeyIndex + 1)
+            int.TryParse(parts[cooldownKeyIndex + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out cooldownIdx);
+
+        ev = new InterBridgeLeverEvent(x, y, action, cooldownKey, cooldownIdx);
+        return true;
+    }
+
     private static bool TryParsePositionLine(string line, int? senderId, out int remoteId, out double rx, out double ry, out int dir, out bool hasDir)
     {
         remoteId = 0;
