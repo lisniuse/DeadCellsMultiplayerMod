@@ -576,6 +576,8 @@ namespace DeadCellsMultiplayerMod
             var choices = new List<BossDebugWeaponChoice>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            AddBossDebugWeaponChoicesFromGameItems(choices, seen);
+
             try
             {
                 var all = dc.Data.Class.weapon?.all;
@@ -602,6 +604,33 @@ namespace DeadCellsMultiplayerMod
             choices.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
             _bossDebugWeaponChoices = choices;
             return choices;
+        }
+
+        private static void AddBossDebugWeaponChoicesFromGameItems(List<BossDebugWeaponChoice> choices, HashSet<string> seen)
+        {
+            try
+            {
+                var allItems = Cdb.Class.getAllItemsInGame?.Invoke(false);
+                if (allItems == null)
+                    return;
+
+                var len = GetBossDebugArrayCount(allItems);
+                for (var i = 0; i < len; i++)
+                {
+                    virtual_ambiantDesc_castCD_cellCost_commonProps_dlc_droppable_gameplayDesc_group_icon_id_legendAffixes_moneyCost_name_props_synergy_tags_tier1_tier2_ item;
+                    if (!TryGetBossDebugItemData(allItems.getDyn(i), out item))
+                        continue;
+
+                    var itemId = item.id?.ToString();
+                    if (string.IsNullOrWhiteSpace(itemId))
+                        continue;
+
+                    AddBossDebugWeaponChoice(choices, seen, itemId.Trim());
+                }
+            }
+            catch
+            {
+            }
         }
 
         private static bool TryGetBossDebugWeaponItemId(object? rowObj, out string itemId)
@@ -672,8 +701,23 @@ namespace DeadCellsMultiplayerMod
         {
             if (string.IsNullOrWhiteSpace(itemId) || !seen.Add(itemId))
                 return;
+            if (!IsBossDebugSpawnableWeapon(itemId))
+                return;
 
             choices.Add(new BossDebugWeaponChoice(itemId, GetBossDebugItemDisplayName(itemId)));
+        }
+
+        private static bool IsBossDebugSpawnableWeapon(string itemId)
+        {
+            try
+            {
+                var item = new InventItem(new InventItemKind.Weapon(itemId.AsHaxeString()));
+                return item.getWeaponData() != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string GetBossDebugItemDisplayName(string itemId)
@@ -714,6 +758,11 @@ namespace DeadCellsMultiplayerMod
             }
 
             return item != null;
+        }
+
+        private static int GetBossDebugArrayCount(ArrayObj values)
+        {
+            try { return values.array?.Count ?? 0; } catch { return 0; }
         }
 
         private void TrySpawnBossDebugWeapon(BossDebugWeaponChoice choice)
