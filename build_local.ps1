@@ -19,11 +19,42 @@
 #>
 param(
     [string]$GameRoot = "D:\dgames\Dead.Cells.v20240827",
+    [string[]]$InstallGameRoots = @(
+        "D:\dgames\Dead.Cells.v20240827",
+        "D:\dgames\Dead.Cells.v20240827-P2"
+    ),
     [string]$ModSrc   = "$PSScriptRoot",
     [string]$CoreRepo = "$PSScriptRoot\..\core",
     [string]$Config   = "Debug"
 )
 $ErrorActionPreference = "Stop"
+
+Write-Host "扫描并结束正在运行的游戏进程..." -ForegroundColor Yellow
+$resolvedInstallRoots = @()
+foreach ($root in $InstallGameRoots) {
+    if ([string]::IsNullOrWhiteSpace($root)) { continue }
+    try {
+        $resolvedInstallRoots += (Resolve-Path -LiteralPath $root -ErrorAction Stop).Path.TrimEnd('\')
+    } catch {
+        Write-Host "安装目录不存在，跳过进程匹配: $root" -ForegroundColor DarkYellow
+    }
+}
+
+if ($resolvedInstallRoots.Count -gt 0) {
+    $gameProcesses = Get-Process -Name "DeadCellsModding" -ErrorAction SilentlyContinue | Where-Object {
+        $procPath = $_.Path
+        if ([string]::IsNullOrWhiteSpace($procPath)) { return $false }
+        foreach ($root in $resolvedInstallRoots) {
+            if ($procPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        return $false
+    }
+
+    foreach ($proc in $gameProcesses) {
+        Write-Host "结束进程: $($proc.Id) $($proc.Path)" -ForegroundColor Yellow
+        Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+    }
+}
 
 $MdkBin   = Join-Path $CoreRepo "mdk\bin"
 $gameHost = Join-Path $GameRoot "coremod\core\host"
@@ -96,6 +127,17 @@ Write-Host "构建中 ($Config) ..." -ForegroundColor Green
 if ($LASTEXITCODE -eq 0) {
     $outMod = Join-Path $ModSrc "bin\$Config\net10.0\output\DeadCellsMultiplayerMod"
     Write-Host "`n构建成功。打包好的 mod 在:`n  $outMod" -ForegroundColor Green
+
+    if (Test-Path -LiteralPath $outMod) {
+        foreach ($root in $InstallGameRoots) {
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+
+            $target = Join-Path $root "coremod\mods\DeadCellsMultiplayerMod"
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+            Copy-Item -Path (Join-Path $outMod "*") -Destination $target -Recurse -Force
+            Write-Host "已安装到: $target" -ForegroundColor Cyan
+        }
+    }
 } else {
     Write-Host "`n构建失败(见上方错误)。" -ForegroundColor Red
 }
