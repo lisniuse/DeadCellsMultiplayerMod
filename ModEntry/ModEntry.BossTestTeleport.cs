@@ -341,14 +341,12 @@ namespace DeadCellsMultiplayerMod
             if (_bossDebugMenuBox == null || _bossDebugMenuBox.parent == null || !ReferenceEquals(_bossDebugMenuBox.parent, root))
             {
                 ClearBossDebugMenuPanel();
-                _bossDebugMenuBox = UIBox.Class.drawBoxValidation(420, 250, Ref<int>.Null, Ref<int>.Null, null, false);
+                _bossDebugMenuBox = UIBox.Class.drawBoxValidation(470, 330, Ref<int>.Null, Ref<int>.Null, null, false);
                 root.addChild(_bossDebugMenuBox);
-                _bossDebugMenuText = Assets.Class.makeText(string.Empty.AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, _bossDebugMenuBox);
+                _bossDebugMenuText = Assets.Class.makeText(string.Empty.AsHaxeString(), Text.Class.COLORS.get("WO".AsHaxeString()), false, null);
+                root.addChild(_bossDebugMenuText);
                 _bossDebugMenuText.textColor = 0xFFFFFF;
-                _bossDebugMenuText.scaleX = 0.48;
-                _bossDebugMenuText.scaleY = 0.48;
-                _bossDebugMenuText.x = 18;
-                _bossDebugMenuText.y = 14;
+                _bossDebugMenuText.alpha = 1;
             }
 
             var box = _bossDebugMenuBox;
@@ -359,8 +357,16 @@ namespace DeadCellsMultiplayerMod
             box.x = 34 * scale;
             box.y = 78 * scale;
             box.visible = true;
-            if (_bossDebugMenuText != null)
-                _bossDebugMenuText.text = BuildBossDebugMenuText().AsHaxeString();
+            var text = _bossDebugMenuText;
+            if (text != null)
+            {
+                text.x = box.x + 18 * scale;
+                text.y = box.y + 14 * scale;
+                text.scaleX = 0.42 * scale;
+                text.scaleY = 0.42 * scale;
+                text.visible = true;
+                text.text = BuildBossDebugMenuText().AsHaxeString();
+            }
         }
 
         private void ClearBossDebugMenuPanel()
