@@ -1588,6 +1588,35 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
+        // 清除指向"已倒地玩家"（含倒地的主机自身）的攻击/宿敌目标，避免怪物持续攻击倒地者的尸体。
+        // 与 TryClearHostMobLivingPlayerTargets 互补：后者清的是存活玩家目标（全员倒地时用），
+        // 这里专清已倒地目标（IsPlayerCombatTargetEntity 对倒地者返回 false，故那边清不到）。
+        private static void ClearDownedCombatTargets(Mob mob)
+        {
+            if (mob == null)
+                return;
+
+            try
+            {
+                var at = mob.aTarget;
+                if (at != null && ModEntry.IsEntityDownedForCombat(at))
+                    mob.setAttackTarget(null);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var nt = mob.nemesisTarget;
+                if (nt != null && ModEntry.IsEntityDownedForCombat(nt))
+                    mob.setNemesisTarget(null);
+            }
+            catch
+            {
+            }
+        }
+
         private static void TryCollectDetectedTarget(Mob mob, Entity? candidate)
         {
             if (candidate == null)
