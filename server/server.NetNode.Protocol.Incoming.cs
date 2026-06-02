@@ -144,13 +144,6 @@ public sealed partial class NetNode
             return true;
         }
 
-        if (line.StartsWith("PERMRUNES|", StringComparison.OrdinalIgnoreCase))
-        {
-            var payload = line["PERMRUNES|".Length..];
-            GameDataSync.ReceivePermanentItems(payload);
-            return true;
-        }
-
         if (line.StartsWith("BOSSRUNE_UPDATE_CELLS|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["BOSSRUNE_UPDATE_CELLS|".Length..].Trim();
@@ -274,7 +267,7 @@ public sealed partial class NetNode
 
                 var skinId = effectiveId.Value;
                 var skinValue = skin;
-                GameMenu.EnqueueMainThread(() =>
+                GameMenu.EnqueueMainThreadCoalesced(string.Create(CultureInfo.InvariantCulture, $"net:skin:{skinId}"), () =>
                 {
                     try
                     {
@@ -317,7 +310,7 @@ public sealed partial class NetNode
 
                 var headId = effectiveId.Value;
                 var headSkinValue = skinHead;
-                GameMenu.EnqueueMainThread(() =>
+                GameMenu.EnqueueMainThreadCoalesced(string.Create(CultureInfo.InvariantCulture, $"net:head:{headId}"), () =>
                 {
                     try
                     {
@@ -904,23 +897,6 @@ public sealed partial class NetNode
             return true;
         }
 
-        if (line.StartsWith("INTERBRIDGE|", StringComparison.OrdinalIgnoreCase))
-        {
-            var payload = line["INTERBRIDGE|".Length..];
-            if (TryParseInterBridgePayload(payload, out var ev))
-            {
-                lock (_sync)
-                {
-                    _pendingInterBridgeLeverEvents.Add(ev);
-                    _hasRemote = true;
-                }
-
-                if (_role == NetRole.Host && senderId.HasValue)
-                    forwardLine = $"INTERBRIDGE|{ev.Action}|{ev.X.ToString(CultureInfo.InvariantCulture)}|{ev.Y.ToString(CultureInfo.InvariantCulture)}|{ev.CooldownKey}|{ev.CooldownIdx}\n";
-            }
-            return true;
-        }
-
         if (line.StartsWith("MOBEVENT|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["MOBEVENT|".Length..];
@@ -941,19 +917,19 @@ public sealed partial class NetNode
                                 continue;
                             if (ev.StartsWith("attack|", StringComparison.Ordinal) && _role != NetRole.Host)
                             {
-                                if (TryParseMobAttackEvent(ev, u.Index, u.X, u.Y, u.Dir, u.Type, out var attack))
+                                if (TryParseMobAttackEvent(ev, u.Index, u.X, u.Y, u.Dir, u.Type, u.Generation, out var attack))
                                     _pendingMobAttacks.Add(attack);
                             }
                             else if (ev.StartsWith("hit|", StringComparison.Ordinal))
                             {
-                                if (TryParseMobHitEvent(ev, u.Index, u.X, u.Y, effectiveUserId, u.Type, out var hit))
+                                if (TryParseMobHitEvent(ev, u.Index, u.X, u.Y, effectiveUserId, u.Type, u.Generation, out var hit))
                                 {
                                     _pendingMobHits.Add(hit);
                                 }
                             }
                             else if (ev == "die")
                             {
-                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y, u.Type ?? string.Empty);
+                                var die = new MobDie(effectiveUserId, u.Index, u.X, u.Y, u.Generation);
                                 _pendingMobDies.Add(die);
                                 if (_role == NetRole.Host && senderId.HasValue)
                                     hasDieToForward = true;

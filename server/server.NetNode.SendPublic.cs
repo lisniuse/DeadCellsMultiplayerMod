@@ -103,22 +103,6 @@ public sealed partial class NetNode
         // _log.Information("[NetNode] Sent boss rune {BossRune}", bossRune);
     }
 
-    public void SendPermanentItems(string itemsList)
-    {
-        if (_role == NetRole.Host)
-        {
-            lock (_hostCacheSync)
-            {
-                _cachedHostPermanentItems = itemsList;
-            }
-        }
-
-        if (!HasAnyConnection())
-            return;
-
-        SendRaw("PERMRUNES|" + itemsList);
-    }
-
     public void SendLevelDesc(string json)
     {
         var safeJson = (json ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
@@ -496,7 +480,7 @@ public sealed partial class NetNode
         _ = SendLineSafe(line);
     }
 
-    public void SendMobAttack(int mobIndex, string skillId, bool requiresTargetInArea, int? data, double x, double y, int targetUserId, int dir = 0)
+    public void SendMobAttack(int mobIndex, string skillId, bool requiresTargetInArea, int? data, double x, double y, int targetUserId, int dir = 0, int generation = 0)
     {
         if (_role != NetRole.Host)
             return;
@@ -505,7 +489,7 @@ public sealed partial class NetNode
         if (mobIndex < 0 || string.IsNullOrWhiteSpace(skillId))
             return;
 
-        var attack = new MobAttack(mobIndex, skillId, requiresTargetInArea, data, x, y, targetUserId, dir);
+        var attack = new MobAttack(mobIndex, skillId, requiresTargetInArea, data, x, y, targetUserId, dir, generation: generation);
         var line = MobWireCodec.BuildMobAttackLine(attack);
         _ = SendLineSafe(line);
     }
@@ -524,7 +508,7 @@ public sealed partial class NetNode
         _ = SendLineSafe(line);
     }
 
-    public void SendMobHit(int mobIndex, int hp, double x, double y)
+    public void SendMobHit(int mobIndex, int hp, double x, double y, int generation = 0)
     {
         if (_role != NetRole.Client)
             return;
@@ -535,11 +519,11 @@ public sealed partial class NetNode
 
         var payload = string.Create(
             CultureInfo.InvariantCulture,
-            $"MOBHIT|{ID}|{mobIndex}|{hp}|{x}|{y}");
+            $"MOBHIT|{ID}|{mobIndex}|{hp}|{x}|{y}|{generation}");
         SendRaw(payload);
     }
 
-    public void SendMobDie(int mobIndex, double x, double y)
+    public void SendMobDie(int mobIndex, double x, double y, int generation = 0)
     {
         if (_role != NetRole.Client && _role != NetRole.Host)
             return;
@@ -550,11 +534,11 @@ public sealed partial class NetNode
 
         var payload = string.Create(
             CultureInfo.InvariantCulture,
-            $"MOBDIE|{ID}|{mobIndex}|{x}|{y}");
+            $"MOBDIE|{ID}|{mobIndex}|{x}|{y}|{generation}");
         SendRaw(payload);
     }
 
-    public void SendMobDraw(int mobIndex, bool isOutOfGame, bool isOnScreen)
+    public void SendMobDraw(int mobIndex, bool isOutOfGame, bool isOnScreen, int generation = 0)
     {
         if (_role != NetRole.Client)
             return;
@@ -565,7 +549,7 @@ public sealed partial class NetNode
         if (mobIndex < 0)
             return;
 
-        var line = MobWireCodec.BuildMobDrawLine(ID, mobIndex, isOutOfGame, isOnScreen);
+        var line = MobWireCodec.BuildMobDrawLine(ID, mobIndex, isOutOfGame, isOnScreen, generation);
         _ = SendLineSafe(line);
     }
 
@@ -713,16 +697,6 @@ public sealed partial class NetNode
             return;
 
         SendRaw($"INTERPORTAL|{action}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}");
-    }
-
-    public void SendInterBridgeLever(double x, double y, string action = "extend", string cooldownKey = "", int cooldownIdx = 0)
-    {
-        if (!HasAnyConnection())
-            return;
-        if (ID <= 0)
-            return;
-
-        SendRaw($"INTERBRIDGE|{action}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{cooldownKey}|{cooldownIdx}");
     }
 
     private void SendRaw(string payload)

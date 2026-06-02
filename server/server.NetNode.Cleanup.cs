@@ -34,7 +34,6 @@ public sealed partial class NetNode
             _pendingInterBreakableGroundEvents.Clear();
             _pendingBossRuneUpdateCells.Clear();
             _pendingInterPortalEvents.Clear();
-            _pendingInterBridgeLeverEvents.Clear();
         }
         if (_useSteamTransport)
         {
@@ -45,7 +44,7 @@ public sealed partial class NetNode
         {
             CloseClientConnection();
         }
-        GameMenu.EnqueueMainThread(() => GameMenu.NotifyRemoteDisconnected(_role));
+        GameMenu.EnqueueMainThreadCoalesced("net:remote-disconnected", () => GameMenu.NotifyRemoteDisconnected(_role));
     }
 
     private RemoteState GetOrCreateRemoteLocked(int id)

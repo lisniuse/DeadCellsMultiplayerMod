@@ -8,6 +8,34 @@ namespace DeadCellsMultiplayerMod.Mobs.Levelinit;
 
 internal static class SyncMobIdRegistry
 {
+    internal readonly struct DebugMapping
+    {
+        public readonly int SyncId;
+        public readonly Mob Mob;
+
+        public DebugMapping(int syncId, Mob mob)
+        {
+            SyncId = syncId;
+            Mob = mob;
+        }
+    }
+
+    internal readonly struct Stats
+    {
+        public readonly int Count;
+        public readonly int MinSyncId;
+        public readonly int MaxSyncId;
+        public readonly int NextRuntimeSyncId;
+
+        public Stats(int count, int minSyncId, int maxSyncId, int nextRuntimeSyncId)
+        {
+            Count = count;
+            MinSyncId = minSyncId;
+            MaxSyncId = maxSyncId;
+            NextRuntimeSyncId = nextRuntimeSyncId;
+        }
+    }
+
     private static readonly object Sync = new();
     private static readonly Dictionary<int, Mob> IdToMob = new();
     private static readonly Dictionary<Mob, int> MobToId = new(ReferenceEqualityComparer.Instance);
@@ -57,12 +85,7 @@ internal static class SyncMobIdRegistry
         }
     }
 
-    /// <summary>
-    /// 获取怪物的 sync id。<paramref name="allowAssign"/>=true（仅主机）时，未映射的怪会被分配一个新 id；
-    /// =false（客机）时绝不自创 id，只返回已存在的映射——客机的 id 必须来自主机数据包（按类型+位置绑定），
-    /// 否则主客两端会因动态刷怪/到达顺序不同而编号错位，导致客机命中打到错误的怪、被打的怪卡在 0 血不死。
-    /// </summary>
-    public static bool TryGetSyncId(Mob? mob, bool allowAssign, out int syncId)
+    public static bool TryGetSyncId(Mob? mob, out int syncId)
     {
         syncId = 0;
         if (!IsUsableMob(mob))
@@ -73,7 +96,7 @@ internal static class SyncMobIdRegistry
             if (mob != null && MobToId.TryGetValue(mob, out syncId))
                 return true;
 
-            if (mob == null || !allowAssign)
+            if (mob == null)
                 return false;
 
             var assignedId = nextRuntimeSyncId++;
@@ -156,6 +179,50 @@ internal static class SyncMobIdRegistry
                 MobToId.Remove(mob);
                 IdToMob.Remove(syncId);
             }
+        }
+    }
+
+    public static Stats GetStats()
+    {
+        lock (Sync)
+        {
+            if (IdToMob.Count <= 0)
+                return new Stats(0, -1, -1, nextRuntimeSyncId);
+
+            var minSyncId = int.MaxValue;
+            var maxSyncId = int.MinValue;
+            foreach (var syncId in IdToMob.Keys)
+            {
+                if (syncId < minSyncId)
+                    minSyncId = syncId;
+                if (syncId > maxSyncId)
+                    maxSyncId = syncId;
+            }
+
+            if (minSyncId == int.MaxValue)
+            {
+                minSyncId = -1;
+                maxSyncId = -1;
+            }
+
+            return new Stats(IdToMob.Count, minSyncId, maxSyncId, nextRuntimeSyncId);
+        }
+    }
+
+    public static List<DebugMapping> GetDebugMappings()
+    {
+        lock (Sync)
+        {
+            var snapshot = new List<DebugMapping>(IdToMob.Count);
+            foreach (var pair in IdToMob)
+            {
+                if (pair.Value == null)
+                    continue;
+
+                snapshot.Add(new DebugMapping(pair.Key, pair.Value));
+            }
+
+            return snapshot;
         }
     }
 
