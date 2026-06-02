@@ -105,6 +105,7 @@ namespace DeadCellsMultiplayerMod
         private int _bossDebugBossSelectedIndex;
         private int _bossDebugWeaponSelectedIndex;
         private BossDebugMenuPage _bossDebugPopupPage = BossDebugMenuPage.Root;
+        private int _bossDebugPopupSelectedIndex = -1;
         private int _bossDebugPopupFirstIndex = -1;
         private int _bossDebugPopupLineCount = -1;
         private long _bossDebugIgnoreConfirmUntilTick;
@@ -426,6 +427,7 @@ namespace DeadCellsMultiplayerMod
                 });
 
                 _bossDebugPopupPage = _bossDebugMenuPage;
+                _bossDebugPopupSelectedIndex = _bossDebugSelectedIndex;
                 _bossDebugPopupFirstIndex = GetBossDebugFirstVisibleIndex();
                 _bossDebugPopupLineCount = GetBossDebugVisibleLineCount(_bossDebugPopupFirstIndex);
                 for (int i = 0; i < _bossDebugPopupLineCount; i++)
@@ -464,6 +466,7 @@ namespace DeadCellsMultiplayerMod
         {
             _bossDebugPopupLines.Clear();
             _bossDebugPopup = null;
+            _bossDebugPopupSelectedIndex = -1;
             _bossDebugPopupFirstIndex = -1;
             _bossDebugPopupLineCount = -1;
         }
@@ -474,6 +477,8 @@ namespace DeadCellsMultiplayerMod
             var lineCount = GetBossDebugVisibleLineCount(firstIndex);
             if (_bossDebugPopup != null &&
                 (_bossDebugPopupPage != _bossDebugMenuPage ||
+                 _bossDebugPopupSelectedIndex != _bossDebugSelectedIndex ||
+                 _bossDebugPopupFirstIndex != firstIndex ||
                  _bossDebugPopupLineCount != lineCount))
             {
                 CloseBossDebugPopup();
@@ -481,6 +486,7 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
+            _bossDebugPopupSelectedIndex = _bossDebugSelectedIndex;
             _bossDebugPopupFirstIndex = firstIndex;
             for (int i = 0; i < _bossDebugPopupLines.Count; i++)
             {
