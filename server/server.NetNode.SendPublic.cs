@@ -693,6 +693,17 @@ public sealed partial class NetNode
             $"BOSSDEBUGWEAPON|{ID.ToString(CultureInfo.InvariantCulture)}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{safe}");
     }
 
+    public void SendBossDebugStatAdjust(int targetUserId, int lifeDelta)
+    {
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0 || targetUserId <= 0 || lifeDelta == 0)
+            return;
+
+        SendRaw(
+            $"BOSSDEBUGSTAT|{ID.ToString(CultureInfo.InvariantCulture)}|{targetUserId.ToString(CultureInfo.InvariantCulture)}|{lifeDelta.ToString(CultureInfo.InvariantCulture)}");
+    }
+
     public void SendInterDoor(int userId, double x, double y, string action, bool broken)
     {
         if (!HasAnyConnection())

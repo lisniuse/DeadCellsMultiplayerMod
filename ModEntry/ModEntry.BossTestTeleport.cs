@@ -39,7 +39,8 @@ namespace DeadCellsMultiplayerMod
         {
             Root,
             BossTeleport,
-            WeaponSpawn
+            WeaponSpawn,
+            AttributeEdit
         }
 
         private readonly struct BossDebugDestination
@@ -66,6 +67,20 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        private readonly struct BossDebugStatChoice
+        {
+            public readonly string Label;
+            public readonly bool TargetClient;
+            public readonly int LifeDelta;
+
+            public BossDebugStatChoice(string label, bool targetClient, int lifeDelta)
+            {
+                Label = label;
+                TargetClient = targetClient;
+                LifeDelta = lifeDelta;
+            }
+        }
+
         private static readonly BossDebugDestination[] BossDebugDestinations =
         {
             // Stable boss test destinations, derived from CDB bossRush.bosses[level],
@@ -89,7 +104,8 @@ namespace DeadCellsMultiplayerMod
         private static readonly string[] BossDebugRootOptions =
         {
             "BOSS传送",
-            "获取武器"
+            "获取武器",
+            "修改属性"
         };
 
         private static readonly BossDebugWeaponChoice[] BossDebugWeaponChoices =
@@ -111,6 +127,14 @@ namespace DeadCellsMultiplayerMod
             })
         };
 
+        private static readonly BossDebugStatChoice[] BossDebugStatChoices =
+        {
+            new("增加客机1000血量", targetClient: true, lifeDelta: 1000),
+            new("增加主机1000血量", targetClient: false, lifeDelta: 1000),
+            new("减少客机1000血量", targetClient: true, lifeDelta: -1000),
+            new("减少主机1000血量", targetClient: false, lifeDelta: -1000)
+        };
+
         private HSprite? _bossDebugNpcSprite;
         private dc.h2d.Text? _bossDebugNpcLabel;
         private DebugPopUp? _bossDebugPopup;
@@ -124,6 +148,7 @@ namespace DeadCellsMultiplayerMod
         private int _bossDebugRootSelectedIndex;
         private int _bossDebugBossSelectedIndex;
         private int _bossDebugWeaponSelectedIndex;
+        private int _bossDebugStatSelectedIndex;
         private BossDebugMenuPage _bossDebugPopupPage = BossDebugMenuPage.Root;
         private int _bossDebugPopupSelectedIndex = -1;
         private int _bossDebugPopupFirstIndex = -1;
@@ -349,6 +374,7 @@ namespace DeadCellsMultiplayerMod
                 BossDebugMenuPage.Root => BossDebugRootOptions.Length,
                 BossDebugMenuPage.BossTeleport => BossDebugDestinations.Length,
                 BossDebugMenuPage.WeaponSpawn => BossDebugWeaponChoices.Length,
+                BossDebugMenuPage.AttributeEdit => BossDebugStatChoices.Length,
                 _ => 0
             };
         }
@@ -364,10 +390,15 @@ namespace DeadCellsMultiplayerMod
                         _bossDebugMenuPage = BossDebugMenuPage.BossTeleport;
                         _bossDebugSelectedIndex = _bossDebugBossSelectedIndex;
                     }
-                    else
+                    else if (_bossDebugSelectedIndex == 1)
                     {
                         _bossDebugMenuPage = BossDebugMenuPage.WeaponSpawn;
                         _bossDebugSelectedIndex = _bossDebugWeaponSelectedIndex;
+                    }
+                    else
+                    {
+                        _bossDebugMenuPage = BossDebugMenuPage.AttributeEdit;
+                        _bossDebugSelectedIndex = _bossDebugStatSelectedIndex;
                     }
                     CloseBossDebugPopup();
                     _bossDebugIgnoreConfirmUntilTick =
@@ -386,6 +417,14 @@ namespace DeadCellsMultiplayerMod
                     _bossDebugWeaponSelectedIndex = _bossDebugSelectedIndex;
                     if (_bossDebugSelectedIndex >= 0 && _bossDebugSelectedIndex < BossDebugWeaponChoices.Length)
                         TrySpawnRandomBossDebugWeapon(BossDebugWeaponChoices[_bossDebugSelectedIndex]);
+                    _bossDebugIgnoreConfirmUntilTick =
+                        Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
+                    break;
+
+                case BossDebugMenuPage.AttributeEdit:
+                    _bossDebugStatSelectedIndex = _bossDebugSelectedIndex;
+                    if (_bossDebugSelectedIndex >= 0 && _bossDebugSelectedIndex < BossDebugStatChoices.Length)
+                        TryApplyBossDebugStatChoice(BossDebugStatChoices[_bossDebugSelectedIndex]);
                     _bossDebugIgnoreConfirmUntilTick =
                         Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * BossDebugConfirmDebounceSeconds);
                     break;
@@ -531,6 +570,7 @@ namespace DeadCellsMultiplayerMod
                 BossDebugMenuPage.Root => "DEBUG TOOLS",
                 BossDebugMenuPage.BossTeleport => $"BOSS传送 ({BossDebugDestinations.Length})",
                 BossDebugMenuPage.WeaponSpawn => $"获取武器 ({BossDebugWeaponChoices.Length})",
+                BossDebugMenuPage.AttributeEdit => $"修改属性 ({BossDebugStatChoices.Length})",
                 _ => "DEBUG"
             };
         }
@@ -573,6 +613,7 @@ namespace DeadCellsMultiplayerMod
                 BossDebugMenuPage.Root => BossDebugRootOptions[itemIndex],
                 BossDebugMenuPage.BossTeleport => BossDebugDestinations[itemIndex].Label,
                 BossDebugMenuPage.WeaponSpawn => FormatBossDebugWeaponLine(itemIndex),
+                BossDebugMenuPage.AttributeEdit => FormatBossDebugStatLine(itemIndex),
                 _ => string.Empty
             };
         }
@@ -584,6 +625,120 @@ namespace DeadCellsMultiplayerMod
 
             var choice = BossDebugWeaponChoices[itemIndex];
             return $"{itemIndex + 1}/{BossDebugWeaponChoices.Length} {choice.Label}";
+        }
+
+        private string FormatBossDebugStatLine(int itemIndex)
+        {
+            if (itemIndex < 0 || itemIndex >= BossDebugStatChoices.Length)
+                return string.Empty;
+
+            var choice = BossDebugStatChoices[itemIndex];
+            return $"{itemIndex + 1}/{BossDebugStatChoices.Length} {choice.Label}";
+        }
+
+        private void TryApplyBossDebugStatChoice(BossDebugStatChoice choice)
+        {
+            var net = _net;
+            if (_netRole != NetRole.Host || net == null || !net.IsAlive)
+            {
+                MultiplayerUI.PushSystemMessage("DEBUG stat: host only", 2.0, 0.5);
+                return;
+            }
+
+            if (choice.TargetClient)
+            {
+                if (!TryGetPrimaryBossDebugClientUserId(out var clientUserId))
+                {
+                    MultiplayerUI.PushSystemMessage("DEBUG stat: no client", 2.0, 0.5);
+                    return;
+                }
+
+                try { net.SendBossDebugStatAdjust(clientUserId, choice.LifeDelta); } catch { }
+                MultiplayerUI.PushSystemMessage($"{choice.Label}", 2.0, 0.5);
+                return;
+            }
+
+            var hero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            if (hero == null)
+            {
+                MultiplayerUI.PushSystemMessage("DEBUG stat: no hero", 2.0, 0.5);
+                return;
+            }
+
+            ApplyBossDebugHeroLifeDelta(hero, choice.LifeDelta);
+            MultiplayerUI.PushSystemMessage($"{choice.Label}", 2.0, 0.5);
+        }
+
+        private static bool TryGetPrimaryBossDebugClientUserId(out int userId)
+        {
+            userId = 0;
+            try
+            {
+                if (clientIds != null)
+                {
+                    for (int i = 0; i < clientIds.Length; i++)
+                    {
+                        var id = clientIds[i];
+                        if (id > 0 && id != MultiplayerHostAssignedId)
+                        {
+                            userId = id;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private void ApplyReceivedBossDebugStatAdjustments()
+        {
+            var net = _net;
+            if (net == null || !net.IsAlive)
+                return;
+
+            var hero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            if (hero == null)
+                return;
+
+            if (!net.TryConsumeBossDebugStatAdjustEvents(out var adjusts) || adjusts.Count == 0)
+                return;
+
+            var localId = net.id;
+            for (int i = 0; i < adjusts.Count; i++)
+            {
+                var adjust = adjusts[i];
+                if (adjust.TargetUserId != localId)
+                    continue;
+
+                ApplyBossDebugHeroLifeDelta(hero, adjust.LifeDelta);
+                MultiplayerUI.PushSystemMessage($"HP {(adjust.LifeDelta > 0 ? "+" : string.Empty)}{adjust.LifeDelta}", 2.0, 0.5);
+            }
+        }
+
+        private static void ApplyBossDebugHeroLifeDelta(Hero hero, int lifeDelta)
+        {
+            if (hero == null || lifeDelta == 0)
+                return;
+
+            try
+            {
+                var currentMax = System.Math.Max(1, hero.maxLife);
+                var currentLife = System.Math.Max(1, hero.life);
+                var nextMax = System.Math.Max(1, currentMax + lifeDelta);
+                var nextLife = System.Math.Max(1, currentLife + lifeDelta);
+                if (nextLife > nextMax)
+                    nextLife = nextMax;
+
+                hero.maxLife = nextMax;
+                hero.life = nextLife;
+            }
+            catch
+            {
+            }
         }
 
         private void TrySpawnRandomBossDebugWeapon(BossDebugWeaponChoice choice)

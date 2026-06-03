@@ -138,6 +138,20 @@ public readonly struct BossDebugWeaponSpawnEvent
     }
 }
 
+public readonly struct BossDebugStatAdjustEvent
+{
+    public readonly int UserId;
+    public readonly int TargetUserId;
+    public readonly int LifeDelta;
+
+    public BossDebugStatAdjustEvent(int userId, int targetUserId, int lifeDelta)
+    {
+        UserId = userId;
+        TargetUserId = targetUserId;
+        LifeDelta = lifeDelta;
+    }
+}
+
 public readonly struct InterBreakableGroundEvent
 {
     public readonly double X;

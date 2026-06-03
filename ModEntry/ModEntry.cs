@@ -1139,6 +1139,8 @@ namespace DeadCellsMultiplayerMod
             ApplyReceivedBossTestTeleport();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossDebugWeaponSpawns");
             ApplyReceivedBossDebugWeaponSpawns();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossDebugStatAdjustments");
+            ApplyReceivedBossDebugStatAdjustments();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ApplyReceivedBossCine");
             ApplyReceivedBossCine();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("SuppressRemoteBossDeathCineIfNeeded");

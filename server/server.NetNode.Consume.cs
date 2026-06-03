@@ -250,6 +250,14 @@ public sealed partial class NetNode
         }
     }
 
+    public bool TryConsumeBossDebugStatAdjustEvents(out List<BossDebugStatAdjustEvent> events)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingBossDebugStatAdjusts, out events);
+        }
+    }
+
     public bool TryConsumePlayerDownStates(out List<PlayerDownState> states)
     {
         lock (_sync)

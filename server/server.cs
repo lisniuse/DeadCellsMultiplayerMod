@@ -564,6 +564,7 @@ public sealed partial class NetNode : IDisposable
     private List<BossTestTeleportEvent> _pendingBossTestTeleports = new();
     private List<BossTestLevelTeleportEvent> _pendingBossTestLevelTeleports = new();
     private List<BossDebugWeaponSpawnEvent> _pendingBossDebugWeaponSpawns = new();
+    private List<BossDebugStatAdjustEvent> _pendingBossDebugStatAdjusts = new();
     private List<InterDoorEvent> _pendingInterDoorEvents = new();
     private List<InterElevatorEvent> _pendingInterElevatorEvents = new();
     private List<InterPressurePlateEvent> _pendingInterPressurePlateEvents = new();

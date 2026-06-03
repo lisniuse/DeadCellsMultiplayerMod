@@ -932,6 +932,26 @@ public sealed partial class NetNode
             return true;
         }
 
+        if (line.StartsWith("BOSSDEBUGSTAT|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["BOSSDEBUGSTAT|".Length..];
+            if (TryParseBossDebugStatAdjustPayload(payload, senderId, forceSenderId, out var ev))
+            {
+                lock (_sync)
+                {
+                    _pendingBossDebugStatAdjusts.Add(ev);
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                {
+                    forwardLine =
+                        $"BOSSDEBUGSTAT|{ev.UserId.ToString(CultureInfo.InvariantCulture)}|{ev.TargetUserId.ToString(CultureInfo.InvariantCulture)}|{ev.LifeDelta.ToString(CultureInfo.InvariantCulture)}\n";
+                }
+            }
+            return true;
+        }
+
         if (line.StartsWith("INTERBREAK|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["INTERBREAK|".Length..];
