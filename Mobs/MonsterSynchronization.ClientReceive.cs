@@ -690,6 +690,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             }
 
+            if (!ShouldReplayClientBossContactFallback(mob, intent.TargetUserId))
+            {
+                LogClientBossContactFallback("client-contact-fallback-skip", mob, intent, beforeLife, GetEntityLifeOrFallback(target, -1), $"cooldown target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                return;
+            }
+
             var afterContactLife = GetEntityLifeOrFallback(target, -1);
             if (beforeLife >= 0 && afterContactLife >= 0 && afterContactLife < beforeLife)
             {
@@ -708,7 +714,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     _ = createFromMobAndHit(mob, damage, null, target);
                     var afterMobAndHitLife = GetEntityLifeOrFallback(target, -1);
                     LogClientBossContactFallback("client-contact-fallback-mobAndHit", mob, intent, beforeLife, afterMobAndHitLife, $"damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
-                    if (beforeLife < 0 || afterMobAndHitLife < beforeLife)
+                    if (beforeLife < 0 || afterMobAndHitLife < beforeLife || afterMobAndHitLife <= 1 || ModEntry.IsEntityDownedForCombat(target))
                         return;
                 }
 
@@ -722,7 +728,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         hit(attack, target);
                         var afterHitLife = GetEntityLifeOrFallback(target, -1);
                         LogClientBossContactFallback("client-contact-fallback-mobHit", mob, intent, beforeLife, afterHitLife, $"damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
-                        if (beforeLife < 0 || afterHitLife < beforeLife)
+                        if (beforeLife < 0 || afterHitLife < beforeLife || afterHitLife <= 1 || ModEntry.IsEntityDownedForCombat(target))
                             return;
 
                         try
@@ -730,7 +736,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                             target.onDamage(attack);
                             var afterOnDamageLife = GetEntityLifeOrFallback(target, -1);
                             LogClientBossContactFallback("client-contact-fallback-onDamage", mob, intent, beforeLife, afterOnDamageLife, $"damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
-                            if (beforeLife < 0 || afterOnDamageLife < beforeLife)
+                            if (beforeLife < 0 || afterOnDamageLife < beforeLife || afterOnDamageLife <= 1 || ModEntry.IsEntityDownedForCombat(target))
                                 return;
                         }
                         catch (Exception onDamageEx)
@@ -753,6 +759,28 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 Log.Warning(ex, "[MobsSync] Client boss contact fallback failed");
                 LogClientBossContactFallback("client-contact-fallback-error", mob, intent, beforeLife, GetEntityLifeOrFallback(target, -1), ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static bool ShouldReplayClientBossContactFallback(Mob mob, int targetUserId)
+        {
+            if (mob == null)
+                return false;
+
+            lock (Sync)
+            {
+                var now = Stopwatch.GetTimestamp();
+                if (clientLastReplayedBossContactTargetUserIdByMob.TryGetValue(mob, out var lastTargetUserId) &&
+                    lastTargetUserId == targetUserId &&
+                    clientLastReplayedBossContactTickByMob.TryGetValue(mob, out var lastTick) &&
+                    Stopwatch.GetElapsedTime(lastTick, now).TotalSeconds < HostContactPacketCooldownSeconds)
+                {
+                    return false;
+                }
+
+                clientLastReplayedBossContactTargetUserIdByMob[mob] = targetUserId;
+                clientLastReplayedBossContactTickByMob[mob] = now;
+                return true;
             }
         }
 

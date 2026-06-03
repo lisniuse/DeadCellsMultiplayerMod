@@ -505,6 +505,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             clientCachedAttackTargetByMob.Clear();
             clientQueuedOldSkillMarkers.Clear();
             hostLastSentContactTargetUserIdByMob.Clear();
+            hostLastSentContactTickByMob.Clear();
+            clientLastReplayedBossContactTargetUserIdByMob.Clear();
+            clientLastReplayedBossContactTickByMob.Clear();
             hostDashLungeWindowUntilTick.Clear();
             clientLastReportedMobLife.Clear();
             clientLastSentAffectPayloadBySyncId.Clear();
@@ -602,6 +605,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             clientCachedAttackTargetByMob.Remove(mob);
             clientQueuedOldSkillMarkers.Remove(mob);
             hostLastSentContactTargetUserIdByMob.Remove(mob);
+            hostLastSentContactTickByMob.Remove(mob);
+            clientLastReplayedBossContactTargetUserIdByMob.Remove(mob);
+            clientLastReplayedBossContactTickByMob.Remove(mob);
             clientLastReportedMobLife.Remove(mob);
             clientLastAppliedAnimPayloadByMob.Remove(mob);
             clientLastAnimationApplyFrameByMob.Remove(mob);
