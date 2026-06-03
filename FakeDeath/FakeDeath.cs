@@ -741,6 +741,7 @@ namespace DeadCellsMultiplayerMod
 
         private void EnterLocalFakeDeath(Hero hero, NetNode net)
         {
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-start");
             if (hero == null)
                 return;
 
@@ -803,14 +804,19 @@ namespace DeadCellsMultiplayerMod
             try { hero.cancelVelocities(); } catch { }
             try { hero.lockControlsS(10.0); } catch { }
             try { hero.cancelSkillControlLock(); } catch { }
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-snap");
             SnapHeroToDownedPosition(hero, _localDownedX, _localDownedY, clampToGround: false);
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-start-cine");
             StartLocalDeadCine(hero);
 
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-send");
             SendLocalDownedState(net, isDowned: true, force: true);
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-done");
         }
 
         private void MaintainLocalFakeDeath(NetNode net)
         {
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("MaintainLocalFakeDeath-start");
             if (!_localFakeDead || me == null)
                 return;
 
@@ -828,6 +834,7 @@ namespace DeadCellsMultiplayerMod
 
             if (!HasAliveRemoteTeammate(net))
             {
+                DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("MaintainLocalFakeDeath-all-downed");
                 var now = Stopwatch.GetTimestamp();
                 var graceTicks = (long)(Stopwatch.Frequency * 1.25);
                 if (_localFakeDeadStartedTicks != 0 &&
@@ -848,6 +855,7 @@ namespace DeadCellsMultiplayerMod
             try { me.cancelSkillControlLock(); } catch { }
             try { me._targetable = false; } catch { }
 
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("MaintainLocalFakeDeath-clear-cine");
             // 主机假死、但仍有存活客机时：清空属于死亡演出的 game.curCine。
             // 否则游戏认为"过场中"，会全局压制怪物攻击 AI（怪会移动/朝向但不攻击）。
             // 参考 RemoteDownedCorpse 对远程倒地演出的同样处理。
@@ -856,11 +864,15 @@ namespace DeadCellsMultiplayerMod
             var cine = _localDeadCine;
             if (cine != null && cine.TryGetCorpsePixelPosition(out var corpseX, out var corpseY))
             {
+                DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("MaintainLocalFakeDeath-update-corpse-pos");
                 TryUpdateDownedPositionFromCorpse(corpseX, corpseY);
             }
 
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("MaintainLocalFakeDeath-snap");
             SnapHeroToDownedPosition(me, _localHeldX, _localHeldY, clampToGround: false);
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("MaintainLocalFakeDeath-send");
             SendLocalDownedState(net, isDowned: true, force: false);
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("MaintainLocalFakeDeath-done");
         }
 
         // 主机假死期间，若 game.curCine 仍指向我们的死亡演出，则清空它，让游戏退出"过场态"，
@@ -1331,6 +1343,7 @@ namespace DeadCellsMultiplayerMod
 
         private void StartLocalDeadCine(Hero hero)
         {
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("StartLocalDeadCine-start");
             if (hero == null)
                 return;
 
@@ -1345,6 +1358,7 @@ namespace DeadCellsMultiplayerMod
             {
                 _localDeadCine = null;
             }
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("StartLocalDeadCine-done");
         }
 
         private void StopLocalDeadCine()
@@ -1414,6 +1428,7 @@ namespace DeadCellsMultiplayerMod
 
         private void HandleAllPlayersDowned(NetNode net)
         {
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned-start");
             if (me == null || net == null)
                 return;
 
@@ -1457,6 +1472,7 @@ namespace DeadCellsMultiplayerMod
                 return;
 
             _allDownedRestartQueued = true;
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned-queue-restart");
             GameMenu.QueueHostRestartFromDeath("all_players_downed");
         }
 

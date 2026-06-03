@@ -34,11 +34,13 @@ namespace DeadCellsMultiplayerMod
             HideHero();
             CreateCorpse();
             SuppressCineEffects();
+            RestoreCineState();
             EnsureViewportTracksHero(immediate: true);
         }
 
         public override void update()
         {
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("DeadBase.update");
             base.update();
 
             if (_hero == null || _hero.destroyed)
@@ -48,7 +50,9 @@ namespace DeadCellsMultiplayerMod
             }
 
             SuppressCineEffects();
+            RestoreCineState();
 
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("DeadBase.update-controls");
             var hasLiveHomunculus = HasLiveHomunculus();
 
             try { _hero.cancelVelocities(); } catch { }
@@ -59,11 +63,13 @@ namespace DeadCellsMultiplayerMod
             try { _hero.cancelSkillControlLock(); } catch { }
 
             HideHero();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("DeadBase.update-corpse");
             EnsureCorpse();
             EnsureHomunculus();
             MaintainLocalHomunculusControl();
             EnsureCorpseFalling();
             EnsureViewportTracksHero(immediate: false);
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("DeadBase.update-done");
         }
 
         public override void onDispose()
@@ -514,6 +520,8 @@ namespace DeadCellsMultiplayerMod
 
         private void SuppressCineEffects()
         {
+            RestoreCineState();
+
             if (_cineSuppressed)
             {
                 TryKeepHudVisibleWhenAllowed();
