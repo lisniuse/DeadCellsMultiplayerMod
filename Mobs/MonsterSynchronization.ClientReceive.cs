@@ -701,18 +701,42 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             {
                 var damage = ComputeClientBossContactFallbackDamage(target);
                 var attackUtils = AttackUtils.Class;
-                var createFromHero = attackUtils?.createFromHero;
-                var hit = attackUtils?.hit;
-                if (createFromHero != null && hit != null)
+
+                var createFromMobAndHit = attackUtils?.createFromMobAndHit;
+                if (createFromMobAndHit != null)
                 {
-                    var attack = createFromHero(mob, damage, null);
+                    _ = createFromMobAndHit(mob, damage, null, target);
+                    var afterMobAndHitLife = GetEntityLifeOrFallback(target, -1);
+                    LogClientBossContactFallback("client-contact-fallback-mobAndHit", mob, intent, beforeLife, afterMobAndHitLife, $"damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                    if (beforeLife < 0 || afterMobAndHitLife < beforeLife)
+                        return;
+                }
+
+                var createFromMob = attackUtils?.createFromMob;
+                var hit = attackUtils?.hit;
+                if (createFromMob != null && hit != null)
+                {
+                    var attack = createFromMob(mob, damage, null);
                     if (attack != null)
                     {
                         hit(attack, target);
                         var afterHitLife = GetEntityLifeOrFallback(target, -1);
-                        LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"route=hit damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                        LogClientBossContactFallback("client-contact-fallback-mobHit", mob, intent, beforeLife, afterHitLife, $"damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
                         if (beforeLife < 0 || afterHitLife < beforeLife)
                             return;
+
+                        try
+                        {
+                            target.onDamage(attack);
+                            var afterOnDamageLife = GetEntityLifeOrFallback(target, -1);
+                            LogClientBossContactFallback("client-contact-fallback-onDamage", mob, intent, beforeLife, afterOnDamageLife, $"damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                            if (beforeLife < 0 || afterOnDamageLife < beforeLife)
+                                return;
+                        }
+                        catch (Exception onDamageEx)
+                        {
+                            LogClientBossContactFallback("client-contact-fallback-onDamage-error", mob, intent, beforeLife, GetEntityLifeOrFallback(target, -1), onDamageEx.GetType().Name + ":" + onDamageEx.Message);
+                        }
                     }
                 }
 
@@ -721,7 +745,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 {
                     _ = createFromHeroAndHit(mob, damage, null, target);
                     var afterHitLife = GetEntityLifeOrFallback(target, -1);
-                    LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"route=createAndHit damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                    LogClientBossContactFallback("client-contact-fallback-heroAndHit", mob, intent, beforeLife, afterHitLife, $"damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
                     return;
                 }
             }
