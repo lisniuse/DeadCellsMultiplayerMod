@@ -32,6 +32,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             // Life/death must sync even when the mob is far/off-screen (visual interpolation stays gated below).
             ApplyAuthoritativeLifeState(self, target.Life, target.MaxLife);
+            EnsureClientBossPresentation(self);
 
             if (!ShouldProcessClientVisualState(self))
             {
@@ -173,6 +174,47 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             return false;
+        }
+
+        private static void EnsureClientBossPresentation(Mob mob)
+        {
+            if (mob == null || !BossSyncHelpers.IsBossMob(mob))
+                return;
+
+            var boss = mob as dc.en.mob.Boss;
+            if (boss == null)
+                return;
+
+            try
+            {
+                var level = boss._level;
+                if (level != null && !ReferenceEquals(level.boss, boss))
+                    level.boss = boss;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var hud = dc.ui.HUD.Class.ME ?? boss._level?.game?.hud;
+                if (hud == null)
+                    return;
+
+                var currentBoss = hud.currentBoss;
+                if (!ReferenceEquals(currentBoss, boss))
+                {
+                    var additional = hud.additionnalBoss ?? new dc.hl.types.ArrayObj();
+                    hud.initBossBar(boss, additional);
+                    hud.currentBoss = boss;
+                }
+
+                if (!hud.hasBossBar())
+                    hud.showBossBar();
+            }
+            catch
+            {
+            }
         }
 
         private static void ApplyAuthoritativeLifeState(Mob mob, int targetLife, int targetMaxLife)

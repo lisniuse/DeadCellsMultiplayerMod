@@ -1501,21 +1501,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             RefreshHostContactAttackState(mob);
-            var clearedInvalidTargets = TryClearHostMobInvalidPlayerTargets(mob);
+            var keepNativeBossTargetForDownedHost = ModEntry.IsLocalPlayerDowned() && BossSyncHelpers.IsBossMob(mob);
+            var clearedInvalidTargets = keepNativeBossTargetForDownedHost ? false : TryClearHostMobInvalidPlayerTargets(mob);
             var hasLivingTarget = HasValidLivingPlayerCombatTarget(mob);
 
             // 仅当全员倒地时才清空目标并停止重定向；否则主机倒地后怪物应改为追击仍存活的客机。
             if (!IsAnyNonDownedPlayerPresent())
             {
                 TryClearHostMobLivingPlayerTargets(mob);
-                return;
-            }
-
-            if (ModEntry.IsLocalPlayerDowned() &&
-                BossSyncHelpers.IsBossMob(mob) &&
-                TryResolvePreferredAliveRemoteCombatTarget(mob, out var forcedRemoteTarget))
-            {
-                TrySetMobAttackTargetsExact(mob, forcedRemoteTarget);
                 return;
             }
 
