@@ -1942,15 +1942,21 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
         private static Entity? ResolveMobAttackTargetEntity(Mob mob, Entity? explicitTarget)
         {
+            if (BossSyncHelpers.IsBossMob(mob))
+            {
+                var currentBossTarget = ResolveCurrentHostPlayerCombatTarget(mob);
+                if (currentBossTarget != null)
+                    return currentBossTarget;
+
+                if (ModEntry.IsLocalPlayerDowned() &&
+                    TryResolvePreferredAliveRemoteCombatTarget(mob, out var forcedRemoteTarget))
+                {
+                    return forcedRemoteTarget;
+                }
+            }
+
             if (explicitTarget != null && IsPlayerCombatTargetEntity(explicitTarget))
                 return explicitTarget;
-
-            if (ModEntry.IsLocalPlayerDowned() &&
-                BossSyncHelpers.IsBossMob(mob) &&
-                TryResolvePreferredAliveRemoteCombatTarget(mob, out var forcedRemoteTarget))
-            {
-                return forcedRemoteTarget;
-            }
 
             try
             {
