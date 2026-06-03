@@ -634,8 +634,8 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (mob == null)
                 return;
 
-            if (BossAuthoritySync.IsDeathContactSkill(intent.SkillId) &&
-                BossAuthoritySync.IsManagedDeathBoss(mob))
+            if (BossAuthoritySync.IsContactSkill(intent.SkillId) &&
+                BossAuthoritySync.IsManagedBoss(mob))
             {
                 ProcessClientBossAuthorityContactAttack(mob, intent);
                 return;

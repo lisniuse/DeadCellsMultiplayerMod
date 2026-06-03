@@ -426,7 +426,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (ShouldSendHostContactPacket(self, pow))
             {
                 var skillId = BossAuthoritySync.IsManagedBoss(self)
-                    ? BossAuthoritySync.DeathContactSkillId
+                    ? BossAuthoritySync.BossContactSkillId
                     : ContactAttackPacketSkillId;
                 TrySendHostMobAttack(self, skillId, false, null, pow);
             }
@@ -457,7 +457,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (ShouldSendHostContactPacket(self, atk))
             {
                 var skillId = BossAuthoritySync.IsManagedBoss(self)
-                    ? BossAuthoritySync.DeathContactSkillId
+                    ? BossAuthoritySync.BossContactSkillId
                     : ContactAttackPacketSkillId;
                 TrySendHostMobAttack(self, skillId, false, null, atk);
             }
@@ -825,9 +825,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             LogHostBossAttackHook(
                 "host-hook-death-sickle-proxy-contact",
                 mob,
-                BossAuthoritySync.DeathContactSkillId,
+                BossAuthoritySync.BossContactSkillId,
                 $"proxyTarget={DescribeCombatEntity(target)} touched={DescribeCombatEntity(touched)}");
-            TrySendHostMobAttack(mob, BossAuthoritySync.DeathContactSkillId, false, null, target);
+            TrySendHostMobAttack(mob, BossAuthoritySync.BossContactSkillId, false, null, target);
             return true;
         }
 
