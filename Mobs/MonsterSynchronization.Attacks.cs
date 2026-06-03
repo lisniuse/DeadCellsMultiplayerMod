@@ -1511,6 +1511,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             }
 
+            if (ModEntry.IsLocalPlayerDowned() &&
+                BossSyncHelpers.IsBossMob(mob) &&
+                TryResolvePreferredAliveRemoteCombatTarget(mob, out var forcedRemoteTarget))
+            {
+                TrySetMobAttackTargetsExact(mob, forcedRemoteTarget);
+                return;
+            }
+
             if (!clearedInvalidTargets && ShouldSuppressHostRetarget(mob))
                 return;
             if (!clearedInvalidTargets && hasLivingTarget)
@@ -1884,6 +1892,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (explicitTarget != null && IsPlayerCombatTargetEntity(explicitTarget))
                 return explicitTarget;
 
+            if (ModEntry.IsLocalPlayerDowned() &&
+                BossSyncHelpers.IsBossMob(mob) &&
+                TryResolvePreferredAliveRemoteCombatTarget(mob, out var forcedRemoteTarget))
+            {
+                return forcedRemoteTarget;
+            }
+
             try
             {
                 if (mob.aTarget != null && IsPlayerCombatTargetEntity(mob.aTarget))
@@ -1906,6 +1921,58 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return detectedTarget;
 
             return null;
+        }
+
+        private static bool TryResolvePreferredAliveRemoteCombatTarget(Mob mob, out Entity selected)
+        {
+            selected = null!;
+            if (mob == null || ModEntry.clients == null)
+                return false;
+
+            var mobLevel = mob._level;
+            var mx = GetWorldX(mob);
+            var my = GetWorldY(mob);
+            var bestDistSq = double.MaxValue;
+
+            for (int i = 0; i < ModEntry.clients.Length; i++)
+            {
+                var client = ModEntry.clients[i];
+                if (client == null || ModEntry.clientIds[i] <= 0)
+                    continue;
+                if (ModEntry.IsEntityDownedForCombat(client))
+                    continue;
+
+                try
+                {
+                    if (client.destroyed || client.life <= 0)
+                        continue;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (mobLevel != null && client._level != null && !ReferenceEquals(mobLevel, client._level))
+                        continue;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var dx = GetWorldX(client) - mx;
+                var dy = GetWorldY(client) - my;
+                var distSq = dx * dx + dy * dy;
+                if (distSq < bestDistSq)
+                {
+                    bestDistSq = distSq;
+                    selected = client;
+                }
+            }
+
+            return selected != null;
         }
 
         private static bool IsPlayerCombatTargetEntity(Entity entity)
