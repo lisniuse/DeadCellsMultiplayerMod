@@ -20,6 +20,7 @@ internal static class SavePathRedirect
     internal static void Install(ILogger? log)
     {
         s_log = log;
+        EnsureGoldbergSaveConfig();
         EnsureLocalSaveRoot();
         ForceLocalSavePath("install");
 
@@ -49,10 +50,45 @@ internal static class SavePathRedirect
         if (!string.IsNullOrWhiteSpace(s_localSaveRoot))
             return s_localSaveRoot;
 
-        var root = IOPath.GetFullPath(IOPath.Combine(FolderInfo.GameRoot.FullPath, LocalGseSaveFolderName));
+        var root = IOPath.GetFullPath(IOPath.Combine(FolderInfo.GameRoot.FullPath, LocalGseSaveFolderName, "588650", "remote"));
         IODirectory.CreateDirectory(root);
         s_localSaveRoot = root;
         return root;
+    }
+
+    private static string EnsureGoldbergSaveRoot()
+    {
+        var root = IOPath.GetFullPath(IOPath.Combine(FolderInfo.GameRoot.FullPath, LocalGseSaveFolderName));
+        IODirectory.CreateDirectory(root);
+        return root;
+    }
+
+    private static void EnsureGoldbergSaveConfig()
+    {
+        try
+        {
+            var saveRoot = EnsureGoldbergSaveRoot();
+            Environment.SetEnvironmentVariable("GseSavePath", saveRoot);
+            Environment.SetEnvironmentVariable("GSE_SAVE_PATH", saveRoot);
+
+            WriteGoldbergUserConfig(IOPath.Combine(FolderInfo.GameRoot.FullPath, "steam_settings", "configs.user.ini"), saveRoot);
+            WriteGoldbergUserConfig(IOPath.Combine(FolderInfo.CurrentNativeRoot.FullPath, "goldberg", "steam_settings", "configs.user.ini"), saveRoot);
+        }
+        catch (Exception ex)
+        {
+            s_log?.Warning(ex, "[NetMod] Failed to write Goldberg save config");
+        }
+    }
+
+    private static void WriteGoldbergUserConfig(string configPath, string saveRoot)
+    {
+        var configDir = IOPath.GetDirectoryName(configPath);
+        if (!string.IsNullOrWhiteSpace(configDir))
+            IODirectory.CreateDirectory(configDir);
+
+        var normalizedSaveRoot = saveRoot.Replace('\\', '/');
+        var content = $"[user::saves]{Environment.NewLine}local_save_path={normalizedSaveRoot}{Environment.NewLine}";
+        File.WriteAllText(configPath, content);
     }
 
     private static void ForceLocalSavePath(string reason)
