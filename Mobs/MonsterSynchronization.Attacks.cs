@@ -1116,6 +1116,64 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             return uniqueMob != null;
         }
 
+        private static bool TryResolveSingleUnboundTrackedMobForHostSpawnLocked(
+            NetNode.MobSpawnSnapshot spawn,
+            out Mob? uniqueMob,
+            out int candidateCount)
+        {
+            uniqueMob = null;
+            candidateCount = 0;
+            if (trackedMobs.Count == 0)
+                return false;
+            if (string.IsNullOrWhiteSpace(spawn.Type))
+                return false;
+            if (!TryGetCurrentLevelIdentityTokenLocked(out _))
+                return false;
+
+            QuantizeWorldPositionToPixelsInt32(spawn.X, spawn.Y, out var qRefX, out var qRefY);
+            var bestDistanceSq = double.MaxValue;
+
+            for (int i = 0; i < trackedMobs.Count; i++)
+            {
+                var mob = trackedMobs[i];
+                if (mob == null)
+                    continue;
+                if (!IsStateRebindCandidateLocked(mob))
+                    continue;
+                if (SyncMobIdRegistry.TryGetExistingSyncId(mob, out _))
+                    continue;
+                if (!DoesMobMatchStateType(mob, spawn.Type))
+                    continue;
+
+                QuantizeWorldPositionToPixelsInt32(GetWorldX(mob), GetWorldY(mob), out var qMobX, out var qMobY);
+                var dx = qMobX - qRefX;
+                var dy = qMobY - qRefY;
+                var distanceSq = (double)dx * dx + (double)dy * dy;
+                if (distanceSq > MobStateTypeOrphanRebindSearchRadiusSq)
+                    continue;
+                if (distanceSq > bestDistanceSq + MobFallbackMinimumScoreGap)
+                    continue;
+
+                if (distanceSq + MobFallbackMinimumScoreGap < bestDistanceSq)
+                {
+                    uniqueMob = null;
+                    candidateCount = 0;
+                    bestDistanceSq = distanceSq;
+                }
+
+                candidateCount++;
+                uniqueMob = mob;
+            }
+
+            if (candidateCount != 1)
+            {
+                uniqueMob = null;
+                return false;
+            }
+
+            return uniqueMob != null;
+        }
+
         /// <summary>Rounds world coordinates to int32 pixels so host/client hit routing agrees despite float drift.</summary>
         private static void QuantizeWorldPositionToPixelsInt32(double x, double y, out int qx, out int qy)
         {

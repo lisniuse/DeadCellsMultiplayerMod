@@ -40,6 +40,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             ApplyIncomingHostMobMoves(moves);
         }
 
+        private static void ConsumeIncomingHostMobSpawns(NetNode net)
+        {
+            if (!net.TryConsumeMobSpawns(out var spawns))
+                return;
+
+            ApplyIncomingHostMobSpawns(spawns);
+        }
+
         private static void ConsumeIncomingClientMobStates(NetNode net)
         {
             if (!net.TryConsumeMobStates(out var states))
@@ -186,6 +194,76 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             s_hostStateAppliesScratch.Clear();
+        }
+
+        private static void ApplyIncomingHostMobSpawns(IReadOnlyList<NetNode.MobSpawnSnapshot> spawns)
+        {
+            if (spawns == null || spawns.Count == 0)
+                return;
+
+            var rejectedGeneration = 0;
+            var rejectedCount = 0;
+            lock (Sync)
+            {
+                PruneInvalidTrackedMobsLocked();
+
+                for (int i = 0; i < spawns.Count; i++)
+                {
+                    var spawn = spawns[i];
+                    if (!ShouldAcceptPacketGenerationLocked(spawn.Generation, ref rejectedCount, ref rejectedGeneration))
+                        continue;
+
+                    if (!string.IsNullOrWhiteSpace(spawn.Type))
+                        hostMobTypeBySyncId[spawn.Index] = spawn.Type;
+
+                    var mappedMob = ResolveTrackedMobBySyncIdLocked(spawn.Index);
+                    if (mappedMob != null && DoesMobMatchStateType(mappedMob, spawn.Type))
+                    {
+                        clientAuthoritativeStateSeenSyncIds.Add(spawn.Index);
+                        continue;
+                    }
+
+                    if (mappedMob != null)
+                    {
+                        InvalidateTrackedSyncCacheLocked(spawn.Index, "spawn_type_mismatch");
+                        MobSyncTrace.LogIncomingMappingMismatch(
+                            "spawn",
+                            spawn.Index,
+                            spawn.Type ?? string.Empty,
+                            BuildMobStateTypeSignature(mappedMob),
+                            "type_mismatch");
+                    }
+
+                    if (TryResolveSingleUnboundTrackedMobForHostSpawnLocked(spawn, out var unboundMob, out var candidateCount) &&
+                        unboundMob != null)
+                    {
+                        TryRebindTrackedMobSyncIdLocked(unboundMob, spawn.Index);
+                        clientAuthoritativeStateSeenSyncIds.Add(spawn.Index);
+                        clientLastReportedMobLife[unboundMob] = spawn.Life;
+                        clientMobTargets[unboundMob] = new ClientMobState(
+                            spawn.X,
+                            spawn.Y,
+                            NormalizeDir(spawn.Dir),
+                            spawn.Life,
+                            spawn.MaxLife,
+                            string.Empty,
+                            string.Empty);
+                        MobSyncTrace.LogBindSyncId("host_spawn", spawn.Index, spawn.Type ?? string.Empty, spawn.X, spawn.Y);
+                    }
+                    else if (MobSyncTrace.Enabled)
+                    {
+                        Log.Warning(
+                            "[MobSync] host spawn unresolved syncId={SyncId} type={MobType} x={X} y={Y} candidates={CandidateCount}",
+                            spawn.Index,
+                            spawn.Type ?? string.Empty,
+                            spawn.X,
+                            spawn.Y,
+                            candidateCount);
+                    }
+                }
+            }
+
+            LogRejectedPacketGeneration("hostSpawnOnClient", rejectedCount, rejectedGeneration);
         }
 
         private static void ApplyIncomingHostMobMoves(IReadOnlyList<NetNode.MobMoveSnapshot> moves)

@@ -608,6 +608,24 @@ public sealed partial class NetNode
             return true;
         }
 
+        if (line.StartsWith("MOBSPAWN|", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_role != NetRole.Host)
+            {
+                var payload = line["MOBSPAWN|".Length..];
+                var parsedSpawns = ParseMobSpawnsPayload(payload);
+                lock (_sync)
+                {
+                    if (parsedSpawns.Count > 0)
+                    {
+                        _pendingMobSpawns.AddRange(parsedSpawns);
+                        _hasRemote = true;
+                    }
+                }
+            }
+            return true;
+        }
+
         if (line.StartsWith("MOBCHARGE|", StringComparison.OrdinalIgnoreCase))
         {
             if (_role != NetRole.Host)

@@ -125,6 +125,7 @@ public sealed partial class NetNode
         {
             _pendingMobStates.Clear();
             _pendingMobMoves.Clear();
+            _pendingMobSpawns.Clear();
             _pendingMobCharges.Clear();
             _pendingMobHits.Clear();
             _pendingMobDies.Clear();
@@ -146,6 +147,14 @@ public sealed partial class NetNode
         lock (_sync)
         {
             return TryConsumePendingListLocked(ref _pendingMobMoves, out moves);
+        }
+    }
+
+    public bool TryConsumeMobSpawns(out List<MobSpawnSnapshot> spawns)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingMobSpawns, out spawns);
         }
     }
 

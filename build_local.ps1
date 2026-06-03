@@ -27,11 +27,11 @@ param(
     [string]$CoreRepo = "$PSScriptRoot\..\core",
     [string]$Config   = "Debug",
     [string]$StartScript = "D:\dgames\Start-DeadCells-P1P2.ps1",
-    [switch]$StartAfterBuild
+    [switch]$StartAfterBuild,
+    [switch]$SkipKillGameProcesses
 )
 $ErrorActionPreference = "Stop"
 
-Write-Host "扫描并结束正在运行的游戏进程..." -ForegroundColor Yellow
 $resolvedInstallRoots = @()
 foreach ($root in $InstallGameRoots) {
     if ([string]::IsNullOrWhiteSpace($root)) { continue }
@@ -42,7 +42,10 @@ foreach ($root in $InstallGameRoots) {
     }
 }
 
-if ($resolvedInstallRoots.Count -gt 0) {
+if ($SkipKillGameProcesses) {
+    Write-Host "跳过结束游戏进程(-SkipKillGameProcesses)。如果 DLL 被占用，安装步骤可能失败。" -ForegroundColor Yellow
+} elseif ($resolvedInstallRoots.Count -gt 0) {
+    Write-Host "扫描并结束正在运行的游戏进程..." -ForegroundColor Yellow
     $gameProcesses = Get-Process -Name "DeadCellsModding" -ErrorAction SilentlyContinue
 
     foreach ($proc in $gameProcesses) {
@@ -131,6 +134,7 @@ if ($LASTEXITCODE -eq 0) {
 
             $target = Join-Path $root "coremod\mods\DeadCellsMultiplayerMod"
             $targetDll = Join-Path $target "DeadCellsMultiplayerMod.dll"
+            $targetLocked = $false
             if (Test-Path -LiteralPath $targetDll) {
                 for ($i = 0; $i -lt 20; $i++) {
                     try {
@@ -138,11 +142,19 @@ if ($LASTEXITCODE -eq 0) {
                         $stream.Dispose()
                         break
                     } catch {
-                        if ($i -eq 19) { throw }
+                        if ($i -eq 19) {
+                            if ($SkipKillGameProcesses) {
+                                $targetLocked = $true
+                                Write-Host "目标 DLL 被占用，跳过安装: $targetDll" -ForegroundColor Yellow
+                                break
+                            }
+                            throw
+                        }
                         Start-Sleep -Milliseconds 250
                     }
                 }
             }
+            if ($targetLocked) { continue }
             New-Item -ItemType Directory -Force -Path $target | Out-Null
             Copy-Item -Path (Join-Path $outMod "*") -Destination $target -Recurse -Force
             Write-Host "已安装到: $target" -ForegroundColor Cyan

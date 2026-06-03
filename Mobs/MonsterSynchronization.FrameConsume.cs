@@ -22,6 +22,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (!IsIncomingMobIdentityReady())
                 return;
 
+            ConsumeIncomingHostMobSpawns(net);
             ConsumeIncomingHostMobStates(net);
             ConsumeIncomingHostMobMoves(net);
             ConsumeIncomingHostMobAttacks(net);

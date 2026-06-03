@@ -77,6 +77,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly HashSet<Mob> s_usedTrackedMobsScratch = new(ReferenceEqualityComparer.Instance);
         private static int suppressMobDieSendDepth;
         private static int suppressMobHitSendDepth;
+        private static bool s_entitiesPostCreateActive;
 
         private static Level? currentLevel;
         private static bool s_levelIdentityReady;
@@ -579,7 +580,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 currentIdentityToken,
                 lastResetReason);
 
-            orig(self);
+            s_entitiesPostCreateActive = true;
+            try
+            {
+                orig(self);
+            }
+            finally
+            {
+                s_entitiesPostCreateActive = false;
+            }
             var rebuildAccepted = RebuildMobArray(self);
             // Drop pending mob packets only when a rebuild was actually accepted and the live sync-id map changed.
             if (rebuildAccepted)
@@ -604,6 +613,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var registerLocalIndex = -1;
             var shouldQueueInitialSync = false;
             var registerDeferred = false;
+            var shouldSendDynamicSpawn = false;
 
             lock (Sync)
             {
@@ -617,8 +627,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                         return;
 
                     if (!TryGetMobSyncId(mob, out registerSyncId))
-                        return;
+                    {
+                        if (GameMenu.NetRef?.IsHost == true)
+                            return;
 
+                        registerSyncId = -1;
+                    }
+
+                    shouldSendDynamicSpawn = GameMenu.NetRef?.IsHost == true && !s_entitiesPostCreateActive && trackedMobs.Count > 0;
                     registerLocalIndex = AddTrackedMobLocked(mob);
                     shouldQueueInitialSync = registerLocalIndex >= 0;
                 }
@@ -640,6 +656,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             if (shouldQueueInitialSync)
                 QueueInitialMobSync(mob);
+
+            if (shouldSendDynamicSpawn)
+                TrySendHostMobSpawn(mob, registerSyncId);
         }
 
         private static void Hook_Level_unregisterEntity(Hook_Level.orig_unregisterEntity orig, Level self, Entity clid)

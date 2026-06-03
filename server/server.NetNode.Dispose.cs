@@ -78,6 +78,7 @@ public sealed partial class NetNode
             _pendingAttacks.Clear();
             _pendingMobStates.Clear();
             _pendingMobMoves.Clear();
+            _pendingMobSpawns.Clear();
             _pendingMobCharges.Clear();
             _pendingMobHits.Clear();
             _pendingMobDies.Clear();

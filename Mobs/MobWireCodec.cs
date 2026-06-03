@@ -56,6 +56,40 @@ internal static class MobWireCodec
         return sb.ToString();
     }
 
+    public static string BuildMobSpawnsLine(IReadOnlyList<NetNode.MobSpawnSnapshot> spawns)
+    {
+        var sb = MobLineBuilder.Value!;
+        sb.Clear();
+        sb.Append("MOBSPAWN|");
+        if (spawns != null)
+        {
+            for (int i = 0; i < spawns.Count; i++)
+            {
+                if (i > 0)
+                    sb.Append(EntrySep);
+
+                var s = spawns[i];
+                sb.Append(s.Index.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(s.X.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(s.Y.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(s.Dir.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(s.Life.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(s.MaxLife.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(s.Generation.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.Append(System.Uri.EscapeDataString(s.Type ?? string.Empty));
+            }
+        }
+        sb.Append('\n');
+        return sb.ToString();
+    }
+
     public static string BuildMobChargesLine(IReadOnlyList<NetNode.MobChargeSnapshot> charges)
     {
         var sb = MobLineBuilder.Value!;

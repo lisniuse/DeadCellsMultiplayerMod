@@ -301,6 +301,30 @@ public sealed partial class NetNode : IDisposable
         }
     }
 
+    public readonly struct MobSpawnSnapshot
+    {
+        public readonly int Index;
+        public readonly int Generation;
+        public readonly double X;
+        public readonly double Y;
+        public readonly int Dir;
+        public readonly int Life;
+        public readonly int MaxLife;
+        public readonly string Type;
+
+        public MobSpawnSnapshot(int index, double x, double y, int dir, int life, int maxLife, string type, int generation = 0)
+        {
+            Index = index;
+            Generation = generation;
+            X = x;
+            Y = y;
+            Dir = dir;
+            Life = life;
+            MaxLife = maxLife;
+            Type = type ?? string.Empty;
+        }
+    }
+
     public readonly struct MobChargeSnapshot
     {
         public readonly int Index;
@@ -551,6 +575,7 @@ public sealed partial class NetNode : IDisposable
     private List<RemoteChatMessage> _pendingChatMessages = new();
     private List<MobStateSnapshot> _pendingMobStates = new();
     private List<MobMoveSnapshot> _pendingMobMoves = new();
+    private List<MobSpawnSnapshot> _pendingMobSpawns = new();
     private List<MobChargeSnapshot> _pendingMobCharges = new();
     private List<MobHit> _pendingMobHits = new();
     private List<MobDie> _pendingMobDies = new();

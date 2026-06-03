@@ -297,6 +297,44 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
+        private static void TrySendHostMobSpawn(Mob mob, int syncId)
+        {
+            var net = GameMenu.NetRef;
+            if (!IsHost(net) || mob == null || syncId < 0)
+                return;
+            if (!TryGetCurrentLevelIdentityToken(out var identityToken))
+                return;
+
+            try
+            {
+                var spawn = new NetNode.MobSpawnSnapshot(
+                    syncId,
+                    GetWorldX(mob),
+                    GetWorldY(mob),
+                    NormalizeDir(mob.dir),
+                    mob.life,
+                    mob.maxLife,
+                    BuildMobStateTypeSignature(mob),
+                    identityToken);
+                net?.SendMobSpawns(new[] { spawn });
+
+                if (MobSyncTrace.Enabled)
+                {
+                    Log.Information(
+                        "[MobSync] -> SEND spawn host syncId={SyncId} type={MobType} x={X} y={Y} gen={Generation}",
+                        spawn.Index,
+                        spawn.Type,
+                        spawn.X,
+                        spawn.Y,
+                        spawn.Generation);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[MobsSync] Host mob spawn send failed syncId={SyncId}", syncId);
+            }
+        }
+
         private static HostMobSyncPriority GetHostMobSyncPriority(Mob? mob)
         {
             if (mob == null)

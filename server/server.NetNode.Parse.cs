@@ -296,6 +296,49 @@ public sealed partial class NetNode
         return moves;
     }
 
+    private static List<MobSpawnSnapshot> ParseMobSpawnsPayload(string payload)
+    {
+        var spawns = new List<MobSpawnSnapshot>();
+        if (string.IsNullOrWhiteSpace(payload))
+            return spawns;
+
+        var entries = payload.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var entry in entries)
+        {
+            var parts = entry.Split(',');
+            if (parts.Length < 8)
+                continue;
+
+            if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var index))
+                continue;
+            if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+                continue;
+            if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+                continue;
+            if (!int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dir))
+                continue;
+            if (!int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var life))
+                continue;
+            if (!int.TryParse(parts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxLife))
+                continue;
+            if (!int.TryParse(parts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out var generation))
+                continue;
+
+            var type = parts[7];
+            try
+            {
+                type = System.Uri.UnescapeDataString(type);
+            }
+            catch
+            {
+            }
+
+            spawns.Add(new MobSpawnSnapshot(index, x, y, dir, life, maxLife, type, generation));
+        }
+
+        return spawns;
+    }
+
     private static List<MobChargeSnapshot> ParseMobChargesPayload(string payload)
     {
         var charges = new List<MobChargeSnapshot>();

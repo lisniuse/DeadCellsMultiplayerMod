@@ -511,6 +511,19 @@ public sealed partial class NetNode
         _ = SendLineSafe(line);
     }
 
+    public void SendMobSpawns(IReadOnlyList<MobSpawnSnapshot> spawns)
+    {
+        if (_role != NetRole.Host)
+            return;
+        if (!HasAnyConnection())
+            return;
+        if (spawns == null || spawns.Count == 0)
+            return;
+
+        var line = MobWireCodec.BuildMobSpawnsLine(spawns);
+        _ = SendLineSafe(line);
+    }
+
     public void SendMobCharges(IReadOnlyList<MobChargeSnapshot> charges)
     {
         if (_role != NetRole.Host)
