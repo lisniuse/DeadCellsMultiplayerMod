@@ -424,7 +424,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             if (ShouldSendHostContactPacket(self, pow))
-                TrySendHostMobAttack(self, ContactAttackPacketSkillId, false, null, pow);
+            {
+                var skillId = BossAuthoritySync.IsManagedBoss(self)
+                    ? BossAuthoritySync.DeathContactSkillId
+                    : ContactAttackPacketSkillId;
+                TrySendHostMobAttack(self, skillId, false, null, pow);
+            }
         }
 
         private void Hook_Mob_onTouch(Hook_Mob.orig_onTouch orig, Mob self, Entity atk)
@@ -450,7 +455,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             EnsureMobTracked(self);
             if (ShouldSendHostContactPacket(self, atk))
-                TrySendHostMobAttack(self, ContactAttackPacketSkillId, false, null, atk);
+            {
+                var skillId = BossAuthoritySync.IsManagedBoss(self)
+                    ? BossAuthoritySync.DeathContactSkillId
+                    : ContactAttackPacketSkillId;
+                TrySendHostMobAttack(self, skillId, false, null, atk);
+            }
         }
 
         private void Hook_OldMobSkill_execute(Hook_OldMobSkill.orig_execute orig, OldMobSkill self, double? a)
@@ -776,9 +786,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             LogHostBossAttackHook(
                 "host-hook-death-sickle-proxy-contact",
                 mob,
-                ContactAttackPacketSkillId,
+                BossAuthoritySync.DeathContactSkillId,
                 $"proxyTarget={DescribeCombatEntity(target)} touched={DescribeCombatEntity(touched)}");
-            TrySendHostMobAttack(mob, ContactAttackPacketSkillId, false, null, target);
+            TrySendHostMobAttack(mob, BossAuthoritySync.DeathContactSkillId, false, null, target);
             return true;
         }
 

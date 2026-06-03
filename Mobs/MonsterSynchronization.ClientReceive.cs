@@ -590,6 +590,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 intent.AttackDir,
                 traceRoute);
 
+            if (BossAuthoritySync.IsBossAuthoritySkill(skillId))
+            {
+                ProcessClientBossAuthorityAttack(mob, intent);
+                return;
+            }
+
             if (string.Equals(skillId, ContactAttackPacketSkillId, StringComparison.Ordinal))
             {
                 ProcessClientContactAttack(mob, intent);
@@ -623,8 +629,50 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             ProcessClientOldSkillQueue(mob, intent);
         }
 
+        private static void ProcessClientBossAuthorityAttack(Mob mob, ClientMobAttackIntent intent)
+        {
+            if (mob == null)
+                return;
+
+            if (BossAuthoritySync.IsDeathContactSkill(intent.SkillId) &&
+                BossAuthoritySync.IsManagedDeathBoss(mob))
+            {
+                ProcessClientBossAuthorityContactAttack(mob, intent);
+                return;
+            }
+
+            _ = TryGetMobSyncId(mob, out var syncId);
+            MobSyncTrace.LogBossSyncDiag(
+                "client-boss-authority-unsupported",
+                syncId,
+                BuildMobStateTypeSignature(mob),
+                $"skill={intent.SkillId} targetUserId={intent.TargetUserId} attackDir={intent.AttackDir}",
+                0.25);
+        }
+
+        private static void ProcessClientBossAuthorityContactAttack(Mob mob, ClientMobAttackIntent intent)
+        {
+            TrySetClientMobAttackTarget(mob, intent.TargetUserId, intent.AttackDir, forceRetarget: true);
+            TryWakeMobForForcedSimulation(mob);
+
+            var target = ResolveClientAttackTargetEntity(mob, intent.TargetUserId) ??
+                         ResolveClientAttackTargetEntity(mob, 0);
+            if (target == null)
+            {
+                MobSyncTrace.LogAttackDiag("client-boss-authority-contact-no-target", -1, BuildMobStateTypeSignature(mob), intent.SkillId, intent.TargetUserId, intent.AttackDir);
+                return;
+            }
+
+            RegisterClientNetworkAttackExecuted(mob);
+            var beforeLife = GetEntityLifeOrFallback(target, -1);
+            TryReplayClientBossContactFallback(mob, target, intent, beforeLife);
+        }
+
         private static string ResolveClientAttackRouteForTrace(string skillId)
         {
+            if (BossAuthoritySync.IsBossAuthoritySkill(skillId))
+                return "bossAuthority";
+
             if (string.Equals(skillId, ContactAttackPacketSkillId, StringComparison.Ordinal))
                 return "contact";
 
