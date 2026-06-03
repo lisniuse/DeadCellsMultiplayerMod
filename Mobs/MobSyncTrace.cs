@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using DeadCellsMultiplayerMod;
 using Serilog;
 
@@ -630,6 +631,27 @@ internal static class MobSyncTrace
             syncId,
             mobType ?? string.Empty,
             detail ?? string.Empty);
+        WriteBossSyncDiagDirect(stage, syncId, mobType, detail);
+    }
+
+    private static void WriteBossSyncDiagDirect(string? stage, int syncId, string? mobType, string? detail)
+    {
+        try
+        {
+            string dir;
+            try { dir = Path.Combine(ModCore.Storage.FolderInfo.CoreRoot.FullPath, "logs"); }
+            catch { dir = AppContext.BaseDirectory; }
+
+            Directory.CreateDirectory(dir);
+            var line =
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [BossSyncDiag] " +
+                $"stage={stage ?? string.Empty} syncId={syncId} type={mobType ?? string.Empty} detail={detail ?? string.Empty}" +
+                Environment.NewLine;
+            File.AppendAllText(Path.Combine(dir, "mp_boss_sync.log"), line);
+        }
+        catch
+        {
+        }
     }
 
     public static void LogInterpolationSample(
