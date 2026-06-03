@@ -1270,9 +1270,9 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (mob == null || !BossSyncHelpers.IsBossMob(mob))
                 return false;
 
-            if (requestedTarget is Hero heroTarget)
+            if (requestedTarget != null && IsPlayerCombatTargetEntity(requestedTarget))
             {
-                safeTarget = heroTarget;
+                safeTarget = requestedTarget;
                 return true;
             }
 
@@ -1511,7 +1511,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             }
 
-            if (ShouldSuppressHostRetarget(mob))
+            if (!clearedInvalidTargets && ShouldSuppressHostRetarget(mob))
                 return;
             if (!clearedInvalidTargets && hasLivingTarget)
                 return;
