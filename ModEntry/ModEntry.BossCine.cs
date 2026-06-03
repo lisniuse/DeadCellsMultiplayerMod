@@ -650,6 +650,9 @@ namespace DeadCellsMultiplayerMod
             }
 
             var typeName = cine.GetType().Name ?? string.Empty;
+            if (typeName.IndexOf("Homunculus", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
             if (BossDeathCineTypeNames.Contains(typeName) || BossIntroCineTypeNames.Contains(typeName))
                 return true;
 
