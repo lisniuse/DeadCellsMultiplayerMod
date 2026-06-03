@@ -10,6 +10,7 @@ public static class BossAuthoritySync
 {
     public const string SkillPrefix = "@boss:";
     public const string DeathContactSkillId = "@boss:death:contact:v1";
+    public const string DeathSickleSpawnSkillId = "@boss:death:sickle:v1";
 
     public static bool IsManagedBoss(Mob? mob)
     {
@@ -43,5 +44,10 @@ public static class BossAuthoritySync
     public static bool IsDeathContactSkill(string? skillId)
     {
         return string.Equals(skillId, DeathContactSkillId, StringComparison.Ordinal);
+    }
+
+    public static bool IsDeathSickleSpawnSkill(string? skillId)
+    {
+        return string.Equals(skillId, DeathSickleSpawnSkillId, StringComparison.Ordinal);
     }
 }

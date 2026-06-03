@@ -748,6 +748,45 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 TrySendHostMobAttack(ownerMob, NewSkillExecutePacketPrefix + skillId, false, null);
         }
 
+        private void Hook__DeathSickle__constructor__(
+            dc.en.mob.boss.death.Hook__DeathSickle.orig___constructor__ orig,
+            dc.en.mob.boss.death.DeathSickle self,
+            Level lvl,
+            double x,
+            double y,
+            Mob parent,
+            Entity target)
+        {
+            orig(self, lvl, x, y, parent, target);
+
+            try
+            {
+                if (!IsHost(GameMenu.NetRef))
+                    return;
+                if (!BossAuthoritySync.IsManagedDeathBoss(parent))
+                    return;
+
+                var resolvedTarget = ResolveMobAttackTargetEntity(parent, target);
+                TrySendHostBossAuthorityEvent(
+                    parent,
+                    BossAuthoritySync.DeathSickleSpawnSkillId,
+                    x,
+                    y,
+                    NormalizeDir(parent.dir),
+                    resolvedTarget);
+
+                LogHostBossAttackHook(
+                    "host-hook-death-sickle-spawn",
+                    parent,
+                    BossAuthoritySync.DeathSickleSpawnSkillId,
+                    $"spawn=({x.ToString(CultureInfo.InvariantCulture)},{y.ToString(CultureInfo.InvariantCulture)}) target={DescribeCombatEntity(resolvedTarget)} rawTarget={DescribeCombatEntity(target)}");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[MobsSync] DeathSickle authority spawn send failed");
+            }
+        }
+
         private static void LogHostBossAttackHook(string stage, Mob? mob, string? skillId, string detail)
         {
             try
@@ -790,6 +829,31 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 $"proxyTarget={DescribeCombatEntity(target)} touched={DescribeCombatEntity(touched)}");
             TrySendHostMobAttack(mob, BossAuthoritySync.DeathContactSkillId, false, null, target);
             return true;
+        }
+
+        private static void TrySendHostBossAuthorityEvent(Mob mob, string skillId, double x, double y, int dir, Entity? explicitTarget)
+        {
+            if (mob == null || string.IsNullOrWhiteSpace(skillId))
+                return;
+
+            var net = GameMenu.NetRef;
+            if (!IsHost(net))
+                return;
+            if (!IsSyncMob(mob))
+                return;
+            if (!TryGetMobSyncId(mob, out var mobSyncId))
+                return;
+            if (!TryGetCurrentLevelIdentityToken(out var identityToken))
+                return;
+
+            var targetEntity = ResolveMobAttackTargetEntity(mob, explicitTarget);
+            var targetUserId = ResolveHostTargetUserId(targetEntity, net!.id);
+            var encodedSkill = Uri.EscapeDataString(skillId);
+            var attackEvent = $"attack|{encodedSkill}|0|0|0|0|{targetUserId}|{dir}";
+            var mobType = BuildMobStateTypeSignature(mob);
+            var update = new NetNode.MobEventUpdate(mobSyncId, x, y, dir, SingleEvent(attackEvent), mobType, identityToken);
+            MobSyncTrace.LogSendMobEvents(MobSyncNetRoleForTrace(net), SingleUpdate(update));
+            net.SendMobEvents(SingleUpdate(update));
         }
 
         private static bool IsDeathSickleEntity(Entity? entity)

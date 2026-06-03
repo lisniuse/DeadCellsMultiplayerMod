@@ -138,14 +138,18 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             public readonly int? Data;
             public readonly int TargetUserId;
             public readonly int AttackDir;
+            public readonly double X;
+            public readonly double Y;
 
-            public ClientMobAttackIntent(string skillId, bool requiresTargetInArea, int? data, int targetUserId, int attackDir)
+            public ClientMobAttackIntent(string skillId, bool requiresTargetInArea, int? data, int targetUserId, int attackDir, double x = 0, double y = 0)
             {
                 SkillId = skillId ?? string.Empty;
                 RequiresTargetInArea = requiresTargetInArea;
                 Data = data;
                 TargetUserId = targetUserId;
                 AttackDir = attackDir;
+                X = x;
+                Y = y;
             }
         }
 
@@ -332,6 +336,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             Hook_OldMobSkill.prepareOnOwnerTarget += Hook_OldMobSkill_prepareOnOwnerTarget;
             Hook_OldMobSkill.execute += Hook_OldMobSkill_execute;
             Hook_MobSkill.execute += Hook_MobSkill_execute;
+            dc.en.mob.boss.death.Hook__DeathSickle.__constructor__ += Hook__DeathSickle__constructor__;
             Hook_Entity.setAffectS += Hook_Entity_setAffectS_MobSync;
             Hook_Entity.addTimeToAffect += Hook_Entity_addTimeToAffect_MobSync;
             Hook_Entity.removeAffects += Hook_Entity_removeAffects_MobSync;

@@ -484,7 +484,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 }
 
                 acceptedCount++;
-                TryQueueClientMobAttack(mob, attack.SkillId, attack.RequiresTargetInArea, attack.Data, attack.TargetUserId, attack.Dir);
+                TryQueueClientMobAttack(mob, attack.SkillId, attack.RequiresTargetInArea, attack.Data, attack.TargetUserId, attack.Dir, attack.X, attack.Y);
             }
 
             MobSyncTrace.LogAttackSummary("client-recv", attacks.Count, acceptedCount, missingMobCount, rejectedCount);
@@ -547,12 +547,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
         }
 
-        private static void TryQueueClientMobAttack(Mob mob, string skillId, bool requiresTargetInArea, int? data, int targetUserId, int attackDir)
+        private static void TryQueueClientMobAttack(Mob mob, string skillId, bool requiresTargetInArea, int? data, int targetUserId, int attackDir, double x, double y)
         {
             if (mob == null || string.IsNullOrWhiteSpace(skillId))
                 return;
 
-            var intent = new ClientMobAttackIntent(skillId, requiresTargetInArea, data, targetUserId, attackDir);
+            var intent = new ClientMobAttackIntent(skillId, requiresTargetInArea, data, targetUserId, attackDir, x, y);
             ProcessClientMobAttackIntent(mob, intent);
         }
 
@@ -641,6 +641,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             }
 
+            if (BossAuthoritySync.IsDeathSickleSpawnSkill(intent.SkillId) &&
+                BossAuthoritySync.IsManagedDeathBoss(mob))
+            {
+                ProcessClientBossAuthorityDeathSickleSpawn(mob, intent);
+                return;
+            }
+
             _ = TryGetMobSyncId(mob, out var syncId);
             MobSyncTrace.LogBossSyncDiag(
                 "client-boss-authority-unsupported",
@@ -666,6 +673,55 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             RegisterClientNetworkAttackExecuted(mob);
             var beforeLife = GetEntityLifeOrFallback(target, -1);
             TryReplayClientBossContactFallback(mob, target, intent, beforeLife);
+        }
+
+        private static void ProcessClientBossAuthorityDeathSickleSpawn(Mob mob, ClientMobAttackIntent intent)
+        {
+            if (mob == null)
+                return;
+
+            var target = ResolveClientAttackTargetEntity(mob, intent.TargetUserId) ??
+                         ResolveClientAttackTargetEntity(mob, 0);
+            if (target == null)
+            {
+                MobSyncTrace.LogAttackDiag("client-boss-authority-sickle-no-target", -1, BuildMobStateTypeSignature(mob), intent.SkillId, intent.TargetUserId, intent.AttackDir);
+                return;
+            }
+
+            var level = mob._level ?? currentLevel;
+            if (level == null)
+                return;
+
+            try
+            {
+                var x = intent.X;
+                var y = intent.Y;
+                if (double.IsNaN(x) || double.IsInfinity(x) || double.IsNaN(y) || double.IsInfinity(y))
+                {
+                    x = GetWorldX(mob);
+                    y = GetWorldY(mob);
+                }
+
+                _ = new dc.en.mob.boss.death.DeathSickle(level, x, y, mob, target);
+
+                _ = TryGetMobSyncId(mob, out var syncId);
+                MobSyncTrace.LogBossSyncDiag(
+                    "client-boss-authority-sickle-spawn",
+                    syncId,
+                    BuildMobStateTypeSignature(mob),
+                    $"targetUserId={intent.TargetUserId} attackDir={intent.AttackDir} x={x.ToString(CultureInfo.InvariantCulture)} y={y.ToString(CultureInfo.InvariantCulture)} target={DescribeCombatEntity(target)}",
+                    0.25);
+            }
+            catch (Exception ex)
+            {
+                _ = TryGetMobSyncId(mob, out var syncId);
+                MobSyncTrace.LogBossSyncDiag(
+                    "client-boss-authority-sickle-error",
+                    syncId,
+                    BuildMobStateTypeSignature(mob),
+                    ex.GetType().Name + ":" + ex.Message,
+                    0.25);
+            }
         }
 
         private static string ResolveClientAttackRouteForTrace(string skillId)
