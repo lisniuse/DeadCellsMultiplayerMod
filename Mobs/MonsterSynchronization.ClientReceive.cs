@@ -659,6 +659,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             RegisterClientNetworkAttackExecuted(mob);
 
+            var beforeLife = GetEntityLifeOrFallback(target, -1);
             try
             {
                 mob.contactAttack(target);
@@ -666,6 +667,100 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             catch (Exception ex)
             {
                 Log.Warning(ex, "[MobsSync] Client contactAttack failed for mob");
+            }
+
+            TryReplayClientBossContactFallback(mob, target, intent, beforeLife);
+        }
+
+        private static void TryReplayClientBossContactFallback(Mob mob, Entity target, ClientMobAttackIntent intent, int beforeLife)
+        {
+            if (mob == null || target == null || !BossSyncHelpers.IsBossMob(mob))
+                return;
+
+            var localHero = ModEntry.me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            if (localHero == null || !ReferenceEquals(target, localHero))
+                return;
+            if (ModEntry.IsEntityDownedForCombat(localHero))
+                return;
+
+            var afterContactLife = GetEntityLifeOrFallback(localHero, -1);
+            if (beforeLife >= 0 && afterContactLife >= 0 && afterContactLife < beforeLife)
+            {
+                LogClientBossContactFallback("client-contact-native-damaged", mob, intent, beforeLife, afterContactLife, "native");
+                return;
+            }
+
+            try
+            {
+                var damage = ComputeClientBossContactFallbackDamage(localHero);
+                var attackUtils = AttackUtils.Class;
+                var createFromHeroAndHit = attackUtils?.createFromHeroAndHit;
+                if (createFromHeroAndHit != null)
+                {
+                    _ = createFromHeroAndHit(null, damage, null, localHero);
+                    var afterHitLife = GetEntityLifeOrFallback(localHero, -1);
+                    LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"damage={damage}");
+                    return;
+                }
+
+                var createFromHero = attackUtils?.createFromHero;
+                var hit = attackUtils?.hit;
+                if (createFromHero != null && hit != null)
+                {
+                    var attack = createFromHero(null, damage, null);
+                    if (attack != null)
+                    {
+                        hit(attack, localHero);
+                        var afterHitLife = GetEntityLifeOrFallback(localHero, -1);
+                        LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"damage={damage}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[MobsSync] Client boss contact fallback failed");
+                LogClientBossContactFallback("client-contact-fallback-error", mob, intent, beforeLife, GetEntityLifeOrFallback(localHero, -1), ex.GetType().Name + ":" + ex.Message);
+            }
+        }
+
+        private static double ComputeClientBossContactFallbackDamage(Entity hero)
+        {
+            try
+            {
+                var maxLife = hero.maxLife;
+                if (maxLife > 0)
+                    return System.Math.Max(1.0, maxLife * 0.12);
+            }
+            catch
+            {
+            }
+
+            return 12.0;
+        }
+
+        private static int GetEntityLifeOrFallback(Entity? entity, int fallback)
+        {
+            if (entity == null)
+                return fallback;
+
+            try { return entity.life; }
+            catch { return fallback; }
+        }
+
+        private static void LogClientBossContactFallback(string stage, Mob mob, ClientMobAttackIntent intent, int beforeLife, int afterLife, string detail)
+        {
+            try
+            {
+                _ = TryGetMobSyncId(mob, out var syncId);
+                MobSyncTrace.LogBossSyncDiag(
+                    stage,
+                    syncId,
+                    BuildMobStateTypeSignature(mob),
+                    $"targetUserId={intent.TargetUserId} attackDir={intent.AttackDir} beforeLife={beforeLife} afterLife={afterLife} {detail}",
+                    0.25);
+            }
+            catch
+            {
             }
         }
 
