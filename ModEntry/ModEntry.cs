@@ -1146,16 +1146,28 @@ namespace DeadCellsMultiplayerMod
             if (_netRole == NetRole.None || _net == null)
                 return;
             TrySendCurrentDiveSkillInfoSnapshot();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.SendCurrentRoomTarget");
             SendCurrentRoomTarget(force: false);
             if (!_localFakeDead)
+            {
+                DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.SendHeroCoords");
                 SendHeroCoords();
+            }
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.ReceiveGhostCoords");
             ReceiveGhostCoords();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.UpdateFakeDeathFlow");
             UpdateFakeDeathFlow(dt);
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.MaintainPostRevivePositionLock");
             MaintainPostRevivePositionLock();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.ReceiveGhostWeapons");
             ReceiveGhostWeapons();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.ReceiveGhostAttacks");
             ReceiveGhostAttacks();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.UpdateGhostWeapons");
             UpdateGhostWeapons();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.UpdateGhostHeads");
             UpdateGhostHeads();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("HeroUpdate.done");
         }
 
 

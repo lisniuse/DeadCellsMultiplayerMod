@@ -754,6 +754,7 @@ namespace DeadCellsMultiplayerMod
             catch { }
 
             ResetAllDownedGameOverState();
+            Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath.ResetAllDownedGameOverState.done");
             _localFakeDead = true;
             _localExitPenaltyApplied = false;
             _localFakeDeadStartedTicks = Stopwatch.GetTimestamp();
@@ -791,6 +792,7 @@ namespace DeadCellsMultiplayerMod
             _nextDownedStateSendTicks = 0;
             _nextReviveAttemptTicks = 0;
             _postReviveLockUntilTicks = 0;
+            Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath.state-set.done");
 
             try
             {
@@ -798,15 +800,20 @@ namespace DeadCellsMultiplayerMod
                     hero.life = 1;
             }
             catch { }
+            Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath.life-guard.done");
 
             try { hero._targetable = false; } catch { }
             try { hero.cancelVelocities(); } catch { }
-            try { hero.lockControlsS(10.0); } catch { }
+            try { hero.lockControlsS(0.25); } catch { }
             try { hero.cancelSkillControlLock(); } catch { }
+            Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath.hero-lock.done");
             SnapHeroToDownedPosition(hero, _localDownedX, _localDownedY, clampToGround: false);
+            Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath.snap.done");
             StartLocalDeadCine(hero);
+            Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath.dead-cine.done");
 
             SendLocalDownedState(net, isDowned: true, force: true);
+            Mobs.Bosses.BossDiag.Log("EnterLocalFakeDeath.done");
         }
 
         private void MaintainLocalFakeDeath(NetNode net)
@@ -1414,6 +1421,7 @@ namespace DeadCellsMultiplayerMod
 
         private void HandleAllPlayersDowned(NetNode net)
         {
+            Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.enter");
             if (me == null || net == null)
                 return;
 
@@ -1425,14 +1433,18 @@ namespace DeadCellsMultiplayerMod
             catch
             {
             }
+            Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.life-guard.done");
 
             if (_localDeadCine == null)
                 StartLocalDeadCine(me);
+            Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.dead-cine.done");
 
             var now = Stopwatch.GetTimestamp();
             if (!_allDownedGameOverShown)
             {
+                Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.show-gameover.before");
                 ShowAllDownedGameOverLogo();
+                Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.show-gameover.done");
                 _allDownedGameOverShown = true;
                 _allDownedRestartAtTicks = now + (long)(Stopwatch.Frequency * AllDownedGameOverDelaySeconds);
             }
@@ -1441,14 +1453,18 @@ namespace DeadCellsMultiplayerMod
             try { me.lockControlsS(0.25); } catch { }
             try { me.cancelSkillControlLock(); } catch { }
             try { me._targetable = false; } catch { }
+            Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.hero-lock.done");
 
             var cine = _localDeadCine;
             if (cine != null && cine.TryGetCorpsePixelPosition(out var corpseX, out var corpseY))
             {
                 TryUpdateDownedPositionFromCorpse(corpseX, corpseY);
             }
+            Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.corpse-position.done");
             SnapHeroToDownedPosition(me, _localHeldX, _localHeldY, clampToGround: false);
+            Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.snap.done");
             SendLocalDownedState(net, isDowned: true, force: false);
+            Mobs.Bosses.BossDiag.Phase("HandleAllPlayersDowned.send-down-state.done");
 
             if (_allDownedRestartQueued || _netRole != NetRole.Host)
                 return;
@@ -1457,7 +1473,9 @@ namespace DeadCellsMultiplayerMod
                 return;
 
             _allDownedRestartQueued = true;
+            Mobs.Bosses.BossDiag.Log("HandleAllPlayersDowned.queue-host-restart");
             GameMenu.QueueHostRestartFromDeath("all_players_downed");
+            Mobs.Bosses.BossDiag.Log("HandleAllPlayersDowned.done");
         }
 
         private void ShowAllDownedGameOverLogo()
