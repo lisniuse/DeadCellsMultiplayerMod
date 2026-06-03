@@ -8,6 +8,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private const double HostDashLungeWindowSeconds = 2.2;
         private const double HostDashLungeContactRangeX = 96.0;
         private const double HostDashLungeContactRangeY = 72.0;
+        private const double HostContactPacketCooldownSeconds = 0.75;
         private const double ClientNetworkAttackActiveSeconds = 2.5;
         /// <summary>Coalesce rapid client hit MOBEVENT spam; keep small so multi-hit weapons still report.</summary>
         private const double ClientAnimSpeedEpsilon = 0.05;

@@ -1757,11 +1757,17 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             lock (Sync)
             {
+                var now = Stopwatch.GetTimestamp();
                 if (hostLastSentContactTargetUserIdByMob.TryGetValue(mob, out var lastTargetUserId) &&
-                    lastTargetUserId == userId)
+                    lastTargetUserId == userId &&
+                    hostLastSentContactTickByMob.TryGetValue(mob, out var lastTick) &&
+                    Stopwatch.GetElapsedTime(lastTick, now).TotalSeconds < HostContactPacketCooldownSeconds)
+                {
                     return false;
+                }
 
                 hostLastSentContactTargetUserIdByMob[mob] = userId;
+                hostLastSentContactTickByMob[mob] = now;
                 return true;
             }
         }

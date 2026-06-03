@@ -438,8 +438,15 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             orig(self, atk);
             LogHostBossAttackHook("host-hook-onTouch-after", self, ContactAttackPacketSkillId, $"target={DescribeCombatEntity(atk)} isHost={IsHost(net)} isSync={IsSyncMob(self)} isPlayer={IsPlayerCombatTargetEntity(atk)}");
 
-            if (!IsHost(net) || !IsSyncMob(self) || !IsPlayerCombatTargetEntity(atk))
+            if (!IsHost(net) || !IsSyncMob(self))
                 return;
+
+            if (!IsPlayerCombatTargetEntity(atk))
+            {
+                if (TrySendHostBossProxyContactAttack(self, atk))
+                    return;
+                return;
+            }
 
             EnsureMobTracked(self);
             if (ShouldSendHostContactPacket(self, atk))
@@ -749,6 +756,48 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             catch
             {
             }
+        }
+
+        private static bool TrySendHostBossProxyContactAttack(Mob mob, Entity? touched)
+        {
+            if (mob == null || touched == null || !BossSyncHelpers.IsBossMob(mob))
+                return false;
+            if (!IsDeathSickleEntity(touched))
+                return false;
+
+            var target = ResolveCurrentHostPlayerCombatTarget(mob);
+            if (target == null)
+                return false;
+
+            EnsureMobTracked(mob);
+            if (!ShouldSendHostContactPacket(mob, target))
+                return false;
+
+            LogHostBossAttackHook(
+                "host-hook-death-sickle-proxy-contact",
+                mob,
+                ContactAttackPacketSkillId,
+                $"proxyTarget={DescribeCombatEntity(target)} touched={DescribeCombatEntity(touched)}");
+            TrySendHostMobAttack(mob, ContactAttackPacketSkillId, false, null, target);
+            return true;
+        }
+
+        private static bool IsDeathSickleEntity(Entity? entity)
+        {
+            if (entity == null)
+                return false;
+
+            try
+            {
+                var name = entity.GetType().Name;
+                if (name.IndexOf("DeathSickle", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            catch
+            {
+            }
+
+            return false;
         }
 
     }

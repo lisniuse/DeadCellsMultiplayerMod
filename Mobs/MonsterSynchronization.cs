@@ -45,6 +45,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private static readonly Dictionary<Mob, ClientMobState> clientMobTargets = new(ReferenceEqualityComparer.Instance);
         private static readonly Dictionary<Mob, Entity?> clientCachedAttackTargetByMob = new(ReferenceEqualityComparer.Instance);
         private static readonly Dictionary<Mob, int> hostLastSentContactTargetUserIdByMob = new(ReferenceEqualityComparer.Instance);
+        private static readonly Dictionary<Mob, long> hostLastSentContactTickByMob = new(ReferenceEqualityComparer.Instance);
         // Host-side shield dash-lunge contact window. GhostKing is not a vanilla Hero, so native contact often misses it.
         private static readonly Dictionary<int, long> hostDashLungeWindowUntilTick = new();
         private static readonly Dictionary<Mob, string> clientQueuedOldSkillMarkers = new(ReferenceEqualityComparer.Instance);
