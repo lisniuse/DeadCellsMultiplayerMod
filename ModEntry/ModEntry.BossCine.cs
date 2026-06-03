@@ -571,6 +571,91 @@ namespace DeadCellsMultiplayerMod
             }
         }
 
+        private void ClearStaleNonBossCinematicIfNeeded()
+        {
+            if (_netRole == NetRole.None || _net == null || !_net.IsAlive)
+            {
+                ResetObservedNonBossCinematic();
+                return;
+            }
+
+            var currentLevelId = GetCurrentLevelId();
+            if (string.IsNullOrWhiteSpace(currentLevelId) || IsBossLevel(currentLevelId) || _localFakeDead)
+            {
+                ResetObservedNonBossCinematic();
+                return;
+            }
+
+            try
+            {
+                var game = dc.pr.Game.Class.ME;
+                var cine = game?.curCine;
+                if (game == null || cine == null || cine.destroyed)
+                {
+                    ResetObservedNonBossCinematic();
+                    return;
+                }
+
+                if (IsProtectedCinematicForStaleCleanup(cine))
+                {
+                    ResetObservedNonBossCinematic();
+                    return;
+                }
+
+                var now = Stopwatch.GetTimestamp();
+                if (!ReferenceEquals(cine, _lastObservedNonBossCinematic))
+                {
+                    _lastObservedNonBossCinematic = cine;
+                    _lastObservedNonBossCinematicTicks = now;
+                    return;
+                }
+
+                if (_lastObservedNonBossCinematicTicks == 0 ||
+                    Stopwatch.GetElapsedTime(_lastObservedNonBossCinematicTicks, now).TotalSeconds < StaleNonBossCinematicClearSeconds)
+                {
+                    return;
+                }
+
+                var typeName = cine.GetType().FullName ?? cine.GetType().Name ?? string.Empty;
+                Mobs.Bosses.BossDiag.Log($"Clear stale non-boss cinematic level={currentLevelId} type={typeName}");
+                if (ReferenceEquals(game.curCine, cine))
+                    game.curCine = null;
+                try { cine.destroy(); } catch { }
+                try { cine.disposeImmediately(); } catch { }
+                try { me?.cancelSkillControlLock(); } catch { }
+                try { me?.unlockControls(); } catch { }
+                ResetObservedNonBossCinematic();
+            }
+            catch
+            {
+                ResetObservedNonBossCinematic();
+            }
+        }
+
+        private void ResetObservedNonBossCinematic()
+        {
+            _lastObservedNonBossCinematic = null;
+            _lastObservedNonBossCinematicTicks = 0;
+        }
+
+        private static bool IsProtectedCinematicForStaleCleanup(dc.GameCinematic cine)
+        {
+            if (cine is DeadBase || cine is RemoteDownedCorpse)
+                return true;
+
+            if (cine is HeroDeath || cine is HeroDeathBase || cine is HeroDeathContinue ||
+                cine is HeroDeathRespawn || cine is HeroDeathDLCP)
+            {
+                return true;
+            }
+
+            var typeName = cine.GetType().Name ?? string.Empty;
+            if (BossDeathCineTypeNames.Contains(typeName) || BossIntroCineTypeNames.Contains(typeName))
+                return true;
+
+            return typeName.IndexOf("HeroDeath", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private void TrySnapHeroToBossCinePosition(Hero hero, double? snapX, double? snapY, int? snapDir)
         {
             if (hero == null || !snapX.HasValue || !snapY.HasValue)

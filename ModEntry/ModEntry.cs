@@ -153,6 +153,9 @@ namespace DeadCellsMultiplayerMod
         private int _lastDoorMarkerToken = int.MinValue;
         private string _localLastDoorMarkerLevelId = string.Empty;
         private int _localLastDoorMarkerToken = int.MinValue;
+        private dc.GameCinematic? _lastObservedNonBossCinematic;
+        private long _lastObservedNonBossCinematicTicks;
+        private const double StaleNonBossCinematicClearSeconds = 3.0;
 
         private sealed class RemoteDownedState
         {
@@ -1145,6 +1148,8 @@ namespace DeadCellsMultiplayerMod
             ApplyReceivedBossCine();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("SuppressRemoteBossDeathCineIfNeeded");
             SuppressRemoteBossDeathCineIfNeeded();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("ClearStaleNonBossCinematicIfNeeded");
+            ClearStaleNonBossCinematicIfNeeded();
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("OnFrameUpdate-done");
         }
         void IOnHeroUpdate.OnHeroUpdate(double dt)
