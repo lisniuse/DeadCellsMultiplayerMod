@@ -511,7 +511,7 @@ namespace DeadCellsMultiplayerMod
                 if (req.TargetId != localId)
                     continue;
 
-                if (_localDeadCine == null || !_localDeadCine.IsHomunculusNearCorpse(ReviveHomunculusBodyMaxDistancePx))
+                if (_localDeadCine != null && !_localDeadCine.IsHomunculusNearCorpse(ReviveHomunculusBodyMaxDistancePx))
                     continue;
 
                 ReviveLocalPlayer(net);
@@ -754,10 +754,12 @@ namespace DeadCellsMultiplayerMod
             }
             catch { }
 
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-reset");
             ResetAllDownedGameOverState();
             _localFakeDead = true;
             _localExitPenaltyApplied = false;
             _localFakeDeadStartedTicks = Stopwatch.GetTimestamp();
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-capture-pos");
             double sprX, sprY;
             if (hero.spr != null)
             {
@@ -793,6 +795,7 @@ namespace DeadCellsMultiplayerMod
             _nextReviveAttemptTicks = 0;
             _postReviveLockUntilTicks = 0;
 
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-life");
             try
             {
                 if (hero.life <= 0)
@@ -800,14 +803,21 @@ namespace DeadCellsMultiplayerMod
             }
             catch { }
 
+            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-freeze");
             try { hero._targetable = false; } catch { }
             try { hero.cancelVelocities(); } catch { }
-            try { hero.lockControlsS(10.0); } catch { }
             try { hero.cancelSkillControlLock(); } catch { }
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-snap");
             SnapHeroToDownedPosition(hero, _localDownedX, _localDownedY, clampToGround: false);
-            DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-start-cine");
-            StartLocalDeadCine(hero);
+            if (ShouldStartLocalDeadCineForFakeDeath(hero))
+            {
+                DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-start-cine");
+                StartLocalDeadCine(hero);
+            }
+            else
+            {
+                DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-skip-cine");
+            }
 
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("EnterLocalFakeDeath-send");
             SendLocalDownedState(net, isDowned: true, force: true);
@@ -829,7 +839,7 @@ namespace DeadCellsMultiplayerMod
             {
             }
 
-            if (_localDeadCine == null)
+            if (_localDeadCine == null && ShouldStartLocalDeadCineForFakeDeath(me))
                 StartLocalDeadCine(me);
 
             if (!HasAliveRemoteTeammate(net))
@@ -1359,6 +1369,24 @@ namespace DeadCellsMultiplayerMod
                 _localDeadCine = null;
             }
             DeadCellsMultiplayerMod.Mobs.Bosses.BossDiag.Phase("StartLocalDeadCine-done");
+        }
+
+        private bool ShouldStartLocalDeadCineForFakeDeath(Hero? hero)
+        {
+            if (hero == null)
+                return false;
+
+            try
+            {
+                var lvl = hero._level?.map?.id?.ToString();
+                if (!string.IsNullOrWhiteSpace(lvl))
+                    return IsBossLevel(lvl);
+            }
+            catch
+            {
+            }
+
+            return IsBossLevel(GetCurrentLevelId());
         }
 
         private void StopLocalDeadCine()
