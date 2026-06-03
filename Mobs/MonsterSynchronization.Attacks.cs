@@ -48,6 +48,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var targetEntity = ResolveMobAttackTargetEntity(mob, explicitTarget);
 
             var targetUserId = ResolveHostTargetUserId(targetEntity, net!.id);
+            var isBoss = BossSyncHelpers.IsBossMob(mob);
+            if (isBoss)
+            {
+                MobSyncTrace.LogBossSyncDiag(
+                    "host-send-attack",
+                    mobSyncId,
+                    BuildMobStateTypeSignature(mob),
+                    $"skill={skillId} targetUserId={targetUserId} localDowned={ModEntry.IsLocalPlayerDowned()} explicit={DescribeCombatEntity(explicitTarget)} resolved={DescribeCombatEntity(targetEntity)} aTarget={DescribeCombatEntity(SafeGetAttackTarget(mob))} nemesis={DescribeCombatEntity(SafeGetNemesisTarget(mob))}",
+                    0.25);
+            }
 
             // 仅当全员倒地时才停止发送攻击；否则即便主机倒地，也应继续把攻击发给仍存活的客机。
             if (!IsAnyNonDownedPlayerPresent())
@@ -1750,6 +1760,56 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             return null;
+        }
+
+        private static Entity? SafeGetAttackTarget(Mob mob)
+        {
+            try { return mob?.aTarget; }
+            catch { return null; }
+        }
+
+        private static Entity? SafeGetNemesisTarget(Mob mob)
+        {
+            try { return mob?.nemesisTarget; }
+            catch { return null; }
+        }
+
+        private static string DescribeCombatEntity(Entity? entity)
+        {
+            if (entity == null)
+                return "null";
+
+            var role = "entity";
+            try
+            {
+                var localHero = ModEntry.me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+                if (localHero != null && ReferenceEquals(entity, localHero))
+                    role = "localHero";
+                else
+                {
+                    for (int i = 0; i < ModEntry.clients.Length; i++)
+                    {
+                        var client = ModEntry.clients[i];
+                        if (client != null && ReferenceEquals(entity, client))
+                        {
+                            role = "client:" + ModEntry.clientIds[i].ToString(CultureInfo.InvariantCulture);
+                            break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return $"{role}/{entity.GetType().Name}/life={entity.life}/downed={ModEntry.IsEntityDownedForCombat(entity)}";
+            }
+            catch
+            {
+                return $"{role}/{entity.GetType().Name}";
+            }
         }
 
         private static bool IsMobHostileToPlayers(Mob? mob)

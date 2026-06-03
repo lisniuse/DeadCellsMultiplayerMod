@@ -613,6 +613,25 @@ internal static class MobSyncTrace
             detail ?? string.Empty);
     }
 
+    public static void LogBossSyncDiag(
+        string stage,
+        int syncId,
+        string mobType,
+        string detail = "",
+        double intervalSeconds = 1.0)
+    {
+        var key = $"boss:{stage}:{syncId}";
+        if (!ShouldLogMovementDiag(key, intervalSeconds))
+            return;
+
+        Log.Information(
+            "[BossSyncDiag] stage={Stage} syncId={SyncId} type={MobType} detail={Detail}",
+            stage ?? string.Empty,
+            syncId,
+            mobType ?? string.Empty,
+            detail ?? string.Empty);
+    }
+
     public static void LogInterpolationSample(
         int syncId,
         string mobType,

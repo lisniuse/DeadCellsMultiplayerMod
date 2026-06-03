@@ -571,11 +571,20 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var skillId = intent.SkillId;
             var traceRoute = ResolveClientAttackRouteForTrace(skillId);
             _ = TryGetMobSyncId(mob, out var traceSyncId);
+            var traceMobType = BuildMobStateTypeSignature(mob);
+            if (BossSyncHelpers.IsBossMob(mob))
+            {
+                MobSyncTrace.LogBossSyncDiag(
+                    "client-attack-recv",
+                    traceSyncId,
+                    traceMobType,
+                    $"route={traceRoute} skill={skillId} targetUserId={intent.TargetUserId} attackDir={intent.AttackDir} localDowned={ModEntry.IsLocalPlayerDowned()}");
+            }
             MobSyncTrace.LogClientAttackRoute(traceRoute, traceSyncId, skillId);
             MobSyncTrace.LogAttackDiag(
                 "client-route",
                 traceSyncId,
-                BuildMobStateTypeSignature(mob),
+                traceMobType,
                 skillId,
                 intent.TargetUserId,
                 intent.AttackDir,
@@ -1112,7 +1121,19 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 if (target == null && IsMobHostileToPlayers(mob))
                     target = ResolveDetectedClientTargetEntity(mob);
                 if (target == null)
+                {
+                    if (BossSyncHelpers.IsBossMob(mob))
+                    {
+                        _ = TryGetMobSyncId(mob, out var noTargetSyncId);
+                        MobSyncTrace.LogBossSyncDiag(
+                            "client-set-target-missing",
+                            noTargetSyncId,
+                            BuildMobStateTypeSignature(mob),
+                            $"targetUserId={targetUserId} attackDir={attackDir} forceRetarget={forceRetarget} aTarget={DescribeCombatEntity(SafeGetAttackTarget(mob))} nemesis={DescribeCombatEntity(SafeGetNemesisTarget(mob))}",
+                            0.25);
+                    }
                     return;
+                }
 
                 lock (Sync)
                 {
@@ -1157,6 +1178,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             }
 
             TrySetMobAttackTargetsExact(mob, target, attackDir, forceAttackDir: true);
+            if (BossSyncHelpers.IsBossMob(mob))
+            {
+                _ = TryGetMobSyncId(mob, out var setTargetSyncId);
+                MobSyncTrace.LogBossSyncDiag(
+                    "client-set-target",
+                    setTargetSyncId,
+                    BuildMobStateTypeSignature(mob),
+                    $"targetUserId={targetUserId} attackDir={attackDir} forceRetarget={forceRetarget} target={DescribeCombatEntity(target)} aTarget={DescribeCombatEntity(SafeGetAttackTarget(mob))} nemesis={DescribeCombatEntity(SafeGetNemesisTarget(mob))}",
+                    0.25);
+            }
         }
 
         private static void TrySetClientMobAttackFacingOnly(Mob mob, int targetUserId, int attackDir)

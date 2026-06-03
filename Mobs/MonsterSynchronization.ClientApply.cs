@@ -181,9 +181,14 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             if (mob == null || !BossSyncHelpers.IsBossMob(mob))
                 return;
 
+            _ = TryGetMobSyncId(mob, out var syncId);
+            var mobType = BuildMobStateTypeSignature(mob);
             var boss = mob as dc.en.mob.Boss;
             if (boss == null)
+            {
+                MobSyncTrace.LogBossSyncDiag("client-boss-presentation-not-boss-cast", syncId, mobType, $"runtime={mob.GetType().FullName}");
                 return;
+            }
 
             try
             {
@@ -211,9 +216,16 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
                 if (!hud.hasBossBar())
                     hud.showBossBar();
+
+                MobSyncTrace.LogBossSyncDiag(
+                    "client-boss-presentation",
+                    syncId,
+                    mobType,
+                    $"levelBoss={ReferenceEquals(boss._level?.boss, boss)} hudCurrent={ReferenceEquals(hud.currentBoss, boss)} hasBossBar={hud.hasBossBar()} life={boss.life}/{boss.maxLife}");
             }
-            catch
+            catch (Exception ex)
             {
+                MobSyncTrace.LogBossSyncDiag("client-boss-presentation-error", syncId, mobType, ex.GetType().Name + ":" + ex.Message, 0.25);
             }
         }
 
