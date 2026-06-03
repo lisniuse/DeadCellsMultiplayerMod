@@ -580,7 +580,10 @@ namespace DeadCellsMultiplayerMod
             }
 
             var currentLevelId = GetCurrentLevelId();
-            if (string.IsNullOrWhiteSpace(currentLevelId) || IsBossLevel(currentLevelId) || _localFakeDead)
+            if (string.IsNullOrWhiteSpace(currentLevelId) ||
+                IsBossLevel(currentLevelId) ||
+                GameDataSync.IsDlcLevelGraphSyncDisabled(currentLevelId) ||
+                _localFakeDead)
             {
                 ResetObservedNonBossCinematic();
                 return;

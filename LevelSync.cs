@@ -38,6 +38,19 @@ namespace DeadCellsMultiplayerMod
         private static bool _hasPendingBossRuneReload;
         private const int LevelGraphReloadThrottleMs = 3000;
         private const int BossRuneReloadThrottleMs = 3000;
+
+        private static bool ShouldSkipLevelGraphSync(string? levelId)
+        {
+            if (string.IsNullOrWhiteSpace(levelId))
+                return false;
+
+            var id = levelId.Trim();
+            return id.IndexOf("Castle", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   id.IndexOf("Dooku", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   id.IndexOf("Richter", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static bool IsDlcLevelGraphSyncDisabled(string? levelId) => ShouldSkipLevelGraphSync(levelId);
         private const int PendingBossRuneReloadTtlMs = 15000;
 
         private sealed class LevelGraphSync
@@ -112,6 +125,11 @@ namespace DeadCellsMultiplayerMod
                 var graph = JsonSerializer.Deserialize<LevelGraphSync>(payload);
                 if (graph == null || string.IsNullOrWhiteSpace(graph.LevelId))
                     return;
+                if (ShouldSkipLevelGraphSync(graph.LevelId))
+                {
+                    _log?.Information("[NetMod] Ignored level graph for {LevelId}: DLC graph sync disabled", graph.LevelId);
+                    return;
+                }
 
                 lock (_levelGraphLock)
                 {
@@ -498,6 +516,12 @@ namespace DeadCellsMultiplayerMod
                 return;
             }
 
+            if (ShouldSkipLevelGraphSync(levelId))
+            {
+                _log?.Information("[NetMod] Skip level graph send for {LevelId}: DLC graph sync disabled", levelId);
+                return;
+            }
+
             if (graph == null || string.IsNullOrWhiteSpace(levelId))
             {
                 _log?.Warning("[NetMod] Skip level graph send: invalid graph/levelId (level={LevelId})", levelId);
@@ -553,6 +577,12 @@ namespace DeadCellsMultiplayerMod
         {
             reason = string.Empty;
             appliedRoot = null;
+            if (ShouldSkipLevelGraphSync(levelId))
+            {
+                reason = "DLC graph sync disabled";
+                return false;
+            }
+
             if (graph == null || string.IsNullOrWhiteSpace(levelId))
             {
                 reason = "invalid arguments";
