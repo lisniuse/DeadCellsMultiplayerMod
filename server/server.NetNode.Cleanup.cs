@@ -25,6 +25,7 @@ public sealed partial class NetNode
             _pendingBossHeroTeleports.Clear();
             _pendingBossTestTeleports.Clear();
             _pendingBossTestLevelTeleports.Clear();
+            _pendingBossDebugWeaponSpawns.Clear();
             _pendingPlayerDownStates.Clear();
             _pendingPlayerReviveRequests.Clear();
             _pendingInterDoorEvents.Clear();

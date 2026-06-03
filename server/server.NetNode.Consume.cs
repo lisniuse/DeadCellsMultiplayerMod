@@ -242,6 +242,14 @@ public sealed partial class NetNode
         }
     }
 
+    public bool TryConsumeBossDebugWeaponSpawnEvents(out List<BossDebugWeaponSpawnEvent> events)
+    {
+        lock (_sync)
+        {
+            return TryConsumePendingListLocked(ref _pendingBossDebugWeaponSpawns, out events);
+        }
+    }
+
     public bool TryConsumePlayerDownStates(out List<PlayerDownState> states)
     {
         lock (_sync)

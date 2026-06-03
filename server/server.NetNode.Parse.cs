@@ -962,6 +962,47 @@ public sealed partial class NetNode
         return true;
     }
 
+    private static bool TryParseBossDebugWeaponSpawnPayload(string payload, int? senderId, bool forceSenderId, out BossDebugWeaponSpawnEvent ev)
+    {
+        ev = default;
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var parts = payload.Split('|', 4);
+        if (parts.Length < 4)
+            return false;
+
+        int userId;
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out userId))
+            userId = senderId ?? 0;
+        if (forceSenderId && senderId.HasValue)
+            userId = senderId.Value;
+        if (userId <= 0)
+            return false;
+
+        if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
+            return false;
+        if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+            return false;
+
+        string itemId;
+        try
+        {
+            itemId = Uri.UnescapeDataString(parts[3]);
+        }
+        catch
+        {
+            itemId = parts[3];
+        }
+
+        itemId = itemId.Replace("|", string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        if (itemId.Length == 0)
+            return false;
+
+        ev = new BossDebugWeaponSpawnEvent(userId, x, y, itemId);
+        return true;
+    }
+
     private static bool TryParseInterBreakableGroundPayload(string payload, out InterBreakableGroundEvent ev)
     {
         ev = default;

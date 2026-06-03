@@ -603,6 +603,16 @@ namespace DeadCellsMultiplayerMod
                 try
                 {
                     SpawnBossDebugWeaponDrop(hero, level, itemId);
+                    try
+                    {
+                        var net = _net;
+                        if (_netRole == NetRole.Host && net != null && net.IsAlive)
+                            net.SendBossDebugWeaponSpawn(itemId, GetEntityWorldX(hero), GetEntityWorldY(hero));
+                    }
+                    catch
+                    {
+                    }
+
                     MultiplayerUI.PushSystemMessage($"Weapon: {itemId}", 2.0, 0.5);
                     return;
                 }
@@ -613,6 +623,41 @@ namespace DeadCellsMultiplayerMod
             }
 
             MultiplayerUI.PushSystemMessage($"Weapon failed: {choice.Label}", 2.0, 0.5);
+        }
+
+        private void ApplyReceivedBossDebugWeaponSpawns()
+        {
+            var net = _net;
+            if (net == null || !net.IsAlive)
+                return;
+
+            var hero = me ?? ModCore.Modules.Game.Instance?.HeroInstance;
+            var level = hero?._level ?? game?.curLevel;
+            if (level == null)
+                return;
+
+            if (!net.TryConsumeBossDebugWeaponSpawnEvents(out var spawns) || spawns.Count == 0)
+                return;
+
+            var localId = net.id;
+            for (int i = 0; i < spawns.Count; i++)
+            {
+                var spawn = spawns[i];
+                if (spawn.UserId > 0 && spawn.UserId == localId)
+                    continue;
+                if (string.IsNullOrWhiteSpace(spawn.ItemId))
+                    continue;
+
+                try
+                {
+                    SpawnBossDebugWeaponDropAtWorld(level, spawn.ItemId, spawn.X, spawn.Y);
+                    MultiplayerUI.PushSystemMessage($"Weapon: {spawn.ItemId}", 2.0, 0.5);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex, "[BossDebugNpc] Failed received weapon spawn {WeaponId}", spawn.ItemId);
+                }
+            }
         }
 
         private static List<string> BuildShuffledBossDebugWeaponCandidates(string[] candidateIds)
@@ -636,14 +681,29 @@ namespace DeadCellsMultiplayerMod
 
         private static void SpawnBossDebugWeaponDrop(Hero hero, Level level, string itemId)
         {
+            SpawnBossDebugWeaponDropAtCase(level, itemId, hero.cx, hero.cy, hero.dx);
+        }
+
+        private static void SpawnBossDebugWeaponDropAtWorld(Level level, string itemId, double x, double y)
+        {
+            if (double.IsNaN(x) || double.IsInfinity(x) || double.IsNaN(y) || double.IsInfinity(y))
+                return;
+
+            var cx = (int)System.Math.Floor(x / 24.0);
+            var cy = (int)System.Math.Floor(y / 24.0);
+            SpawnBossDebugWeaponDropAtCase(level, itemId, cx, cy, 0.0);
+        }
+
+        private static void SpawnBossDebugWeaponDropAtCase(Level level, string itemId, int cx, int cy, double dx)
+        {
             var item = new InventItem(new InventItemKind.Weapon(itemId.AsHaxeString()));
             try { item.refillAmmo(); } catch { }
 
             var inChest = false;
-            var drop = new ItemDrop(level, hero.cx, hero.cy, item, true, new Ref<bool>(ref inChest));
+            var drop = new ItemDrop(level, cx, cy, item, true, new Ref<bool>(ref inChest));
             drop.init();
             drop.onDropAsLoot();
-            drop.dx = hero.dx;
+            drop.dx = dx;
         }
 
         private void TryGotoBossDebugLevel(string levelId)

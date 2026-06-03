@@ -122,6 +122,22 @@ public readonly struct BossTestLevelTeleportEvent
     }
 }
 
+public readonly struct BossDebugWeaponSpawnEvent
+{
+    public readonly int UserId;
+    public readonly double X;
+    public readonly double Y;
+    public readonly string ItemId;
+
+    public BossDebugWeaponSpawnEvent(int userId, double x, double y, string itemId)
+    {
+        UserId = userId;
+        X = x;
+        Y = y;
+        ItemId = itemId ?? string.Empty;
+    }
+}
+
 public readonly struct InterBreakableGroundEvent
 {
     public readonly double X;

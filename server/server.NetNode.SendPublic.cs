@@ -676,6 +676,23 @@ public sealed partial class NetNode
         SendRaw($"BOSSTESTLEVEL|{ID.ToString(CultureInfo.InvariantCulture)}|{safe}");
     }
 
+    public void SendBossDebugWeaponSpawn(string itemId, double x, double y)
+    {
+        if (!HasAnyConnection())
+            return;
+        if (ID <= 0)
+            return;
+        if (string.IsNullOrWhiteSpace(itemId))
+            return;
+
+        var safe = Uri.EscapeDataString(itemId.Replace("|", string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+        if (safe.Length == 0)
+            return;
+
+        SendRaw(
+            $"BOSSDEBUGWEAPON|{ID.ToString(CultureInfo.InvariantCulture)}|{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}|{safe}");
+    }
+
     public void SendInterDoor(int userId, double x, double y, string action, bool broken)
     {
         if (!HasAnyConnection())

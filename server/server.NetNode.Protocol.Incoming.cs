@@ -911,6 +911,27 @@ public sealed partial class NetNode
             return true;
         }
 
+        if (line.StartsWith("BOSSDEBUGWEAPON|", StringComparison.OrdinalIgnoreCase))
+        {
+            var payload = line["BOSSDEBUGWEAPON|".Length..];
+            if (TryParseBossDebugWeaponSpawnPayload(payload, senderId, forceSenderId, out var ev))
+            {
+                lock (_sync)
+                {
+                    _pendingBossDebugWeaponSpawns.Add(ev);
+                    _hasRemote = true;
+                }
+
+                if (_role == NetRole.Host && senderId.HasValue)
+                {
+                    var safeItem = Uri.EscapeDataString(ev.ItemId.Replace("|", string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty).Trim());
+                    forwardLine =
+                        $"BOSSDEBUGWEAPON|{ev.UserId.ToString(CultureInfo.InvariantCulture)}|{ev.X.ToString(CultureInfo.InvariantCulture)}|{ev.Y.ToString(CultureInfo.InvariantCulture)}|{safeItem}\n";
+                }
+            }
+            return true;
+        }
+
         if (line.StartsWith("INTERBREAK|", StringComparison.OrdinalIgnoreCase))
         {
             var payload = line["INTERBREAK|".Length..];
