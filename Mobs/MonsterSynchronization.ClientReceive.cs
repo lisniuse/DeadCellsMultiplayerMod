@@ -678,12 +678,19 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
 
             var localHero = ModEntry.me ?? ModCore.Modules.Game.Instance?.HeroInstance;
-            if (localHero == null || !ReferenceEquals(target, localHero))
+            if (!IsPlayerCombatTargetEntity(target))
+            {
+                LogClientBossContactFallback("client-contact-fallback-skip", mob, intent, beforeLife, GetEntityLifeOrFallback(target, -1), $"nonPlayerTarget={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
                 return;
-            if (ModEntry.IsEntityDownedForCombat(localHero))
-                return;
+            }
 
-            var afterContactLife = GetEntityLifeOrFallback(localHero, -1);
+            if (ModEntry.IsEntityDownedForCombat(target))
+            {
+                LogClientBossContactFallback("client-contact-fallback-skip", mob, intent, beforeLife, GetEntityLifeOrFallback(target, -1), $"downedTarget={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                return;
+            }
+
+            var afterContactLife = GetEntityLifeOrFallback(target, -1);
             if (beforeLife >= 0 && afterContactLife >= 0 && afterContactLife < beforeLife)
             {
                 LogClientBossContactFallback("client-contact-native-damaged", mob, intent, beforeLife, afterContactLife, "native");
@@ -692,34 +699,36 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             try
             {
-                var damage = ComputeClientBossContactFallbackDamage(localHero);
+                var damage = ComputeClientBossContactFallbackDamage(target);
                 var attackUtils = AttackUtils.Class;
-                var createFromHeroAndHit = attackUtils?.createFromHeroAndHit;
-                if (createFromHeroAndHit != null)
-                {
-                    _ = createFromHeroAndHit(null, damage, null, localHero);
-                    var afterHitLife = GetEntityLifeOrFallback(localHero, -1);
-                    LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"damage={damage}");
-                    return;
-                }
-
                 var createFromHero = attackUtils?.createFromHero;
                 var hit = attackUtils?.hit;
                 if (createFromHero != null && hit != null)
                 {
-                    var attack = createFromHero(null, damage, null);
+                    var attack = createFromHero(mob, damage, null);
                     if (attack != null)
                     {
-                        hit(attack, localHero);
-                        var afterHitLife = GetEntityLifeOrFallback(localHero, -1);
-                        LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"damage={damage}");
+                        hit(attack, target);
+                        var afterHitLife = GetEntityLifeOrFallback(target, -1);
+                        LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"route=hit damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                        if (beforeLife < 0 || afterHitLife < beforeLife)
+                            return;
                     }
+                }
+
+                var createFromHeroAndHit = attackUtils?.createFromHeroAndHit;
+                if (createFromHeroAndHit != null)
+                {
+                    _ = createFromHeroAndHit(mob, damage, null, target);
+                    var afterHitLife = GetEntityLifeOrFallback(target, -1);
+                    LogClientBossContactFallback("client-contact-fallback-hit", mob, intent, beforeLife, afterHitLife, $"route=createAndHit damage={damage} target={DescribeCombatEntity(target)} localHero={DescribeCombatEntity(localHero)}");
+                    return;
                 }
             }
             catch (Exception ex)
             {
                 Log.Warning(ex, "[MobsSync] Client boss contact fallback failed");
-                LogClientBossContactFallback("client-contact-fallback-error", mob, intent, beforeLife, GetEntityLifeOrFallback(localHero, -1), ex.GetType().Name + ":" + ex.Message);
+                LogClientBossContactFallback("client-contact-fallback-error", mob, intent, beforeLife, GetEntityLifeOrFallback(target, -1), ex.GetType().Name + ":" + ex.Message);
             }
         }
 
