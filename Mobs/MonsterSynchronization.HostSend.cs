@@ -412,11 +412,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private void Hook_Mob_contactAttack(Hook_Mob.orig_contactAttack orig, Mob self, Entity pow)
         {
             var net = GameMenu.NetRef;
+            LogHostBossAttackHook("host-hook-contactAttack-enter", self, ContactAttackPacketSkillId, $"target={DescribeCombatEntity(pow)}");
             // 仅当全员倒地时才抑制接触攻击；主机倒地但客机存活时，怪物仍应能接触攻击存活玩家。
             if (IsHost(net) && !IsAnyNonDownedPlayerPresent() && IsPlayerCombatTargetEntity(pow))
                 return;
 
             orig(self, pow);
+            LogHostBossAttackHook("host-hook-contactAttack-after", self, ContactAttackPacketSkillId, $"target={DescribeCombatEntity(pow)} isHost={IsHost(net)} isPlayer={IsPlayerCombatTargetEntity(pow)}");
 
             if (!IsHost(net) || !IsPlayerCombatTargetEntity(pow))
                 return;
@@ -428,11 +430,13 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private void Hook_Mob_onTouch(Hook_Mob.orig_onTouch orig, Mob self, Entity atk)
         {
             var net = GameMenu.NetRef;
+            LogHostBossAttackHook("host-hook-onTouch-enter", self, ContactAttackPacketSkillId, $"target={DescribeCombatEntity(atk)}");
             // 仅当全员倒地时才抑制接触攻击；主机倒地但客机存活时，怪物仍应能接触攻击存活玩家。
             if (IsHost(net) && !IsAnyNonDownedPlayerPresent() && IsPlayerCombatTargetEntity(atk))
                 return;
 
             orig(self, atk);
+            LogHostBossAttackHook("host-hook-onTouch-after", self, ContactAttackPacketSkillId, $"target={DescribeCombatEntity(atk)} isHost={IsHost(net)} isSync={IsSyncMob(self)} isPlayer={IsPlayerCombatTargetEntity(atk)}");
 
             if (!IsHost(net) || !IsSyncMob(self) || !IsPlayerCombatTargetEntity(atk))
                 return;
@@ -449,6 +453,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var net = GameMenu.NetRef;
             var ownerMob = self?.owner as Mob;
             var skillId = self?.id?.ToString() ?? string.Empty;
+            LogHostBossAttackHook("host-hook-oldMobSkill-execute", ownerMob, skillId, $"ratio={a}");
 
             if (ownerMob == null || string.IsNullOrWhiteSpace(skillId))
                 return;
@@ -589,6 +594,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var ownerMob = self?.owner as Mob;
             var skillId = self?.id?.ToString() ?? string.Empty;
+            LogHostBossAttackHook("host-hook-oldSkill-prepare", ownerMob, skillId, $"prepared={prepared} data={data}");
             if (ownerMob == null || string.IsNullOrWhiteSpace(skillId))
                 return true;
 
@@ -608,6 +614,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
             var net = GameMenu.NetRef;
             var ownerMob = self?.owner as Mob;
             var skillId = self?.id?.ToString() ?? string.Empty;
+            LogHostBossAttackHook("host-hook-oldSkill-execute", ownerMob, skillId, $"ratio={ratio}");
 
             if (ownerMob == null || string.IsNullOrWhiteSpace(skillId))
                 return;
@@ -645,6 +652,7 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var ownerMob = self?.owner as Mob;
             var skillId = self?.id?.ToString() ?? string.Empty;
+            LogHostBossAttackHook("host-hook-oldMobSkill-prepareOnOwnerTarget", ownerMob, skillId, $"prepared={prepared} data={data} e={e}");
             if (ownerMob == null || string.IsNullOrWhiteSpace(skillId))
                 return true;
 
@@ -657,10 +665,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
         private void Hook_Mob_queueAttack(Hook_Mob.orig_queueAttack orig, Mob self, OldMobSkill a, bool requiresTargetInArea, int? data)
         {
             var net = GameMenu.NetRef;
+            LogHostBossAttackHook("host-hook-queueAttack-enter", self, a?.id?.ToString() ?? string.Empty, $"requiresTarget={requiresTargetInArea} data={data}");
             if (IsClient(net) && IsSyncMob(self) && !IsClientNetworkQueuedAttackAllowed(self))
                 return;
 
             orig(self, a, requiresTargetInArea, data);
+            LogHostBossAttackHook("host-hook-queueAttack-after", self, a?.id?.ToString() ?? string.Empty, $"requiresTarget={requiresTargetInArea} data={data} isHost={IsHost(net)}");
 
             if (self == null || a == null)
                 return;
@@ -715,9 +725,30 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
 
             var ownerMob = self?.owner as Mob;
             var skillId = self?.id?.ToString() ?? string.Empty;
-            
+            LogHostBossAttackHook("host-hook-mobSkill-execute", ownerMob, skillId, $"ratio={ratio}");
+             
             if (ownerMob != null && !string.IsNullOrWhiteSpace(skillId))
                 TrySendHostMobAttack(ownerMob, NewSkillExecutePacketPrefix + skillId, false, null);
+        }
+
+        private static void LogHostBossAttackHook(string stage, Mob? mob, string? skillId, string detail)
+        {
+            try
+            {
+                if (mob == null || !BossSyncHelpers.IsBossMob(mob))
+                    return;
+
+                _ = TryGetMobSyncId(mob, out var syncId);
+                MobSyncTrace.LogBossSyncDiag(
+                    stage,
+                    syncId,
+                    BuildMobStateTypeSignature(mob),
+                    $"skill={skillId ?? string.Empty} role={MobSyncNetRoleForTrace(GameMenu.NetRef)} localDowned={ModEntry.IsLocalPlayerDowned()} aTarget={DescribeCombatEntity(SafeGetAttackTarget(mob))} nemesis={DescribeCombatEntity(SafeGetNemesisTarget(mob))} {detail}",
+                    0.25);
+            }
+            catch
+            {
+            }
         }
 
     }
