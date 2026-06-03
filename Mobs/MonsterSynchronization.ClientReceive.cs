@@ -688,10 +688,6 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                 return;
             }
 
-            var level = mob._level ?? currentLevel;
-            if (level == null)
-                return;
-
             try
             {
                 var x = intent.X;
@@ -702,14 +698,12 @@ namespace DeadCellsMultiplayerMod.Mobs.MobsSynchronization
                     y = GetWorldY(mob);
                 }
 
-                _ = new dc.en.mob.boss.death.DeathSickle(level, x, y, mob, target);
-
                 _ = TryGetMobSyncId(mob, out var syncId);
                 MobSyncTrace.LogBossSyncDiag(
-                    "client-boss-authority-sickle-spawn",
+                    "client-boss-authority-sickle-spawn-suppressed",
                     syncId,
                     BuildMobStateTypeSignature(mob),
-                    $"targetUserId={intent.TargetUserId} attackDir={intent.AttackDir} x={x.ToString(CultureInfo.InvariantCulture)} y={y.ToString(CultureInfo.InvariantCulture)} target={DescribeCombatEntity(target)}",
+                    $"targetUserId={intent.TargetUserId} attackDir={intent.AttackDir} x={x.ToString(CultureInfo.InvariantCulture)} y={y.ToString(CultureInfo.InvariantCulture)} target={DescribeCombatEntity(target)} reason=raw-constructor-crash-risk",
                     0.25);
             }
             catch (Exception ex)
