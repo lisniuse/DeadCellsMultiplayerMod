@@ -10,7 +10,7 @@ English • [Русский](README_ru.md)
 The mod adds **co-op / multiplayer gameplay** via a **local or virtual network**:  
 one player hosts a server, another connects — and both players can **play through levels together in real time**.
 
-> ⚠️ The project is currently in development. Many core multiplayer systems are implemented, but full synchronization is still a work in progress.
+> ## ⚠️ The project is currently frozen!
 
 ---
 
